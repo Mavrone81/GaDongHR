@@ -1,4 +1,8 @@
 {
   "files": [],
-  "references": [{ "path": "./packages/kernel" }, { "path": "./services/svc-crypto" }]
+  "references": [
+    { "path": "./packages/kernel" },
+    { "path": "./services/svc-crypto" },
+    { "path": "./services/svc-config" }
+  ]
 }

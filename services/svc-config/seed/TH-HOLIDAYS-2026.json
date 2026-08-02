@@ -1,0 +1,104 @@
+{
+  "pack_id": "TH-HOLIDAYS-2026",
+  "version": 1,
+  "signature": "DoWnBoNL/vRKJGLQzWaXTmh0g9vHNo4HOHPOKRYi4Qo=",
+  "records": [
+    {
+      "rule_key": "holidays.public.2026",
+      "value": [
+        {
+          "date": "2026-01-01",
+          "name": "New Year's Day",
+          "verify": false
+        },
+        {
+          "date": "2026-03-03",
+          "name": "Makha Bucha Day",
+          "verify": true
+        },
+        {
+          "date": "2026-04-06",
+          "name": "Chakri Memorial Day",
+          "verify": false
+        },
+        {
+          "date": "2026-04-13",
+          "name": "Songkran Festival",
+          "verify": false
+        },
+        {
+          "date": "2026-04-14",
+          "name": "Songkran Festival",
+          "verify": false
+        },
+        {
+          "date": "2026-04-15",
+          "name": "Songkran Festival",
+          "verify": false
+        },
+        {
+          "date": "2026-05-01",
+          "name": "National Labour Day (mandatory — LPA s.29)",
+          "verify": false
+        },
+        {
+          "date": "2026-05-04",
+          "name": "Coronation Day",
+          "verify": false
+        },
+        {
+          "date": "2026-06-01",
+          "name": "Visakha Bucha Day",
+          "verify": true
+        },
+        {
+          "date": "2026-07-28",
+          "name": "H.M. King's Birthday",
+          "verify": false
+        },
+        {
+          "date": "2026-07-29",
+          "name": "Asarnha Bucha Day",
+          "verify": true
+        },
+        {
+          "date": "2026-08-12",
+          "name": "H.M. Queen Mother's Birthday / Mother's Day",
+          "verify": false
+        },
+        {
+          "date": "2026-10-13",
+          "name": "King Bhumibol Memorial Day",
+          "verify": false
+        },
+        {
+          "date": "2026-10-23",
+          "name": "Chulalongkorn Day",
+          "verify": false
+        },
+        {
+          "date": "2026-12-05",
+          "name": "King Bhumibol's Birthday / Father's Day (substitute Monday 2026-12-07)",
+          "verify": false
+        },
+        {
+          "date": "2026-12-10",
+          "name": "Constitution Day",
+          "verify": false
+        },
+        {
+          "date": "2026-12-31",
+          "name": "New Year's Eve",
+          "verify": false
+        }
+      ],
+      "unit": "list",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "SEED-DATA-SPEC.md §2. >=13 must remain selected (floor; see holidays.public.min_per_year in TH-STATUTORY-v1). Buddhist lunar dates (marked verify) and any special cabinet holidays must be reconciled with the official 2026 announcement before seeding production",
+      "effective_from": "2026-01-01",
+      "effective_to": "2026-12-31",
+      "governance_class": "COMPANY_POLICY"
+    }
+  ]
+}

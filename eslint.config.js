@@ -37,4 +37,23 @@ module.exports = [
       '@typescript-eslint/no-floating-promises': 'off',
     },
   },
+  {
+    // node-pg-migrate migration files are plain CommonJS `.js` (its own
+    // runner loads them with `require`, matching each service's
+    // package.json having no `"type": "module"`), so — like the root
+    // `*.config.js` block above — they need CommonJS globals rather than
+    // the flat-config ESM defaults. Scoped by path so it applies to every
+    // service's `migrations/` directory (Task 7 onward), not just svc-config.
+    files: ['services/*/migrations/**/*.js'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: {
+        module: 'writable',
+        require: 'readonly',
+        process: 'readonly',
+        __dirname: 'readonly',
+        exports: 'writable',
+      },
+    },
+  },
 ]

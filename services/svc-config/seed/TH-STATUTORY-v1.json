@@ -1,0 +1,570 @@
+{
+  "pack_id": "TH-STATUTORY-v1",
+  "version": 1,
+  "signature": "4a32Z0rxkz7WENNXyf1XdQiXlDZPzOwODH0urD4zfpA=",
+  "records": [
+    {
+      "rule_key": "leave.annual.min_days",
+      "value": 6,
+      "unit": "days",
+      "statutory_floor": 6,
+      "statutory_ceiling": null,
+      "citation": "LPA s.30",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "leave.sick.paid_days",
+      "value": 30,
+      "unit": "days",
+      "statutory_floor": 30,
+      "statutory_ceiling": null,
+      "citation": "LPA s.32, s.57. Medical certificate demandable at >=3 consecutive days (configurable trigger, floor = may not demand for <3)",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "leave.business.paid_days",
+      "value": 3,
+      "unit": "days",
+      "statutory_floor": 3,
+      "statutory_ceiling": null,
+      "citation": "LPA s.34 (necessary personal business)",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "leave.maternity.days",
+      "value": 98,
+      "unit": "days",
+      "statutory_floor": 98,
+      "statutory_ceiling": null,
+      "citation": "LPA (pre-amendment regime): 98 days / 45 employer-paid. Superseded by LPA No. 9 B.E. 2568 from 7 Dec 2025 (see V1, Verification Log)",
+      "effective_from": "1998-08-19",
+      "effective_to": "2025-12-06",
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "leave.maternity.days",
+      "value": 120,
+      "unit": "days",
+      "statutory_floor": 120,
+      "statutory_ceiling": null,
+      "citation": "LPA No. 9 B.E. 2568, from 7 Dec 2025. Employer-paid portion + SSO benefit; configure split per LPA No. 9 rules. Verify pay-split detail (V1, Verification Log)",
+      "effective_from": "2025-12-07",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "leave.paternity.days",
+      "value": 15,
+      "unit": "days",
+      "statutory_floor": 15,
+      "statutory_ceiling": null,
+      "citation": "LPA No. 9 B.E. 2568, from 7 Dec 2025 (spousal childbirth support), full pay",
+      "effective_from": "2025-12-07",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "leave.infant_care.days",
+      "value": 15,
+      "unit": "days",
+      "statutory_floor": 15,
+      "statutory_ceiling": null,
+      "citation": "LPA No. 9 B.E. 2568, from 7 Dec 2025, paid at 50%",
+      "effective_from": "2025-12-07",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "leave.military.days",
+      "value": 60,
+      "unit": "days",
+      "statutory_floor": null,
+      "statutory_ceiling": 60,
+      "citation": "LPA s.35, s.58. Per call-up, paid up to 60 days/yr, 100% up to cap",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "leave.ordination",
+      "value": 15,
+      "unit": "days",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Not LPA-mandated for private sector — COMPANY_POLICY class. Common company policy default: 15 days unpaid, editable",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "COMPANY_POLICY"
+    },
+    {
+      "rule_key": "holidays.public.min_per_year",
+      "value": 13,
+      "unit": "days",
+      "statutory_floor": 13,
+      "statutory_ceiling": null,
+      "citation": "LPA s.29 (incl. National Labour Day 1 May). Annual list is company-selected from official announcements; substitute holiday auto-generated when a holiday falls on the weekly rest day",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "rest.weekly.min_days",
+      "value": 1,
+      "unit": "days",
+      "statutory_floor": 1,
+      "statutory_ceiling": null,
+      "citation": "LPA s.28. 1 day/week, gap <=6 working days",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "hours.regular.max_per_day",
+      "value": 8,
+      "unit": "hours",
+      "statutory_floor": null,
+      "statutory_ceiling": 8,
+      "citation": "LPA s.23",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "hours.regular.max_per_week",
+      "value": {
+        "general": 48,
+        "hazardous": 42
+      },
+      "unit": "hours",
+      "statutory_floor": null,
+      "statutory_ceiling": {
+        "general": 48,
+        "hazardous": 42
+      },
+      "citation": "LPA s.23. 48 (42 hazardous)",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "hours.ot.max_per_week",
+      "value": 36,
+      "unit": "hours",
+      "statutory_floor": null,
+      "statutory_ceiling": 36,
+      "citation": "LPA s.26 + Ministerial Reg.",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "hours.break.min_after",
+      "value": {
+        "break_hours": 1,
+        "after_hours": 5
+      },
+      "unit": "hours",
+      "statutory_floor": {
+        "break_hours": 1,
+        "after_hours": 5
+      },
+      "statutory_ceiling": null,
+      "citation": "LPA s.27. >=1 h break after <=5 h work",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "ot.workday.multiplier",
+      "value": 1.5,
+      "unit": "multiplier",
+      "statutory_floor": 1.5,
+      "statutory_ceiling": null,
+      "citation": "LPA s.61",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "ot.holiday_work.multiplier",
+      "value": {
+        "paid_holiday_employee_addl": 1,
+        "daily_rate_without_holiday_pay": 2
+      },
+      "unit": "multiplier",
+      "statutory_floor": {
+        "paid_holiday_employee_addl": 1,
+        "daily_rate_without_holiday_pay": 2
+      },
+      "statutory_ceiling": null,
+      "citation": "LPA s.62. +1x for employees entitled to paid holidays (-> 2x total); 2x for daily-rate without holiday pay",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "ot.holiday_ot.multiplier",
+      "value": 3,
+      "unit": "multiplier",
+      "statutory_floor": 3,
+      "statutory_ceiling": null,
+      "citation": "LPA s.63",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "ot.hourly_base.formula",
+      "value": {
+        "divisor_days": 30,
+        "divisor_hours": 8
+      },
+      "unit": "formula",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Market convention; configurable divisor (30/26/actual) — engine blocks configs producing sub-statutory OT pay",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "COMPANY_POLICY"
+    },
+    {
+      "rule_key": "ot.consent",
+      "value": true,
+      "unit": "flag",
+      "statutory_floor": true,
+      "statutory_ceiling": null,
+      "citation": "LPA s.24. OT requires employee consent per instance except emergency work",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "sso.rate.employee",
+      "value": 0.05,
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "SSA; rate occasionally reduced by temporary relief notifications — apply via effective-dated rule-pack",
+      "effective_from": "1990-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "sso.rate.employer",
+      "value": 0.05,
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "SSA",
+      "effective_from": "1990-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "sso.wage.floor",
+      "value": 1650,
+      "unit": "THB",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "SSA",
+      "effective_from": "1990-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "sso.wage.ceiling",
+      "value": 15000,
+      "unit": "THB",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "SSA. Superseded by the 17,500 ceiling effective 1 Jan 2026 per the staged-increase plan (17,500 -> 20,000 in 2029 -> 23,000 in 2032)",
+      "effective_from": "1990-01-01",
+      "effective_to": "2025-12-31",
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "sso.wage.ceiling",
+      "value": 17500,
+      "unit": "THB",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Ceiling increase effective 1 Jan 2026 per staged-increase plan (17,500 -> 20,000 in 2029 -> 23,000 in 2032). Verify exact gazetted figure (V2, Verification Log)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "sso.registration.deadline_days",
+      "value": 30,
+      "unit": "days",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "SSA s.34 — drives M1 onboarding task",
+      "effective_from": "1990-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "sso.report.monthly",
+      "value": {
+        "due_day_of_month": 15
+      },
+      "unit": "day_of_month",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "SSO practice; contribution report + payment by the 15th of the following month (สปส.1-10 layout); e-filing supported by SSO e-Service",
+      "effective_from": "1990-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "ewf.rate.employee",
+      "value": 0.0025,
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Cabinet-approved deferral from 1 Oct 2025. Shipped as two effective-dated records",
+      "effective_from": "2026-10-01",
+      "effective_to": "2031-09-30",
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "ewf.rate.employee",
+      "value": 0.005,
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Cabinet-approved deferral from 1 Oct 2025. Shipped as two effective-dated records",
+      "effective_from": "2031-10-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "ewf.rate.employer",
+      "value": 0.0025,
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Same as employee",
+      "effective_from": "2026-10-01",
+      "effective_to": "2031-09-30",
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "ewf.rate.employer",
+      "value": 0.005,
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Same as employee",
+      "effective_from": "2031-10-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "ewf.exemption",
+      "value": {
+        "condition": "registered_provident_fund_or_other_exempt_class"
+      },
+      "unit": "condition",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Employers with a registered provident fund (and other exempt classes). Engine: if tenant has PF flag = registered, EWF lines suppressed. Verify exemption scope (V3, Verification Log)",
+      "effective_from": "2026-10-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "severance.tier.120d_1y",
+      "value": 30,
+      "unit": "days",
+      "statutory_floor": 30,
+      "statutory_ceiling": null,
+      "citation": "LPA s.17, s.118. >=120 days and <1 year of service",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "severance.tier.1_3y",
+      "value": 90,
+      "unit": "days",
+      "statutory_floor": 90,
+      "statutory_ceiling": null,
+      "citation": "LPA s.17, s.118. >=1 and <3 years of service",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "severance.tier.3_6y",
+      "value": 180,
+      "unit": "days",
+      "statutory_floor": 180,
+      "statutory_ceiling": null,
+      "citation": "LPA s.17, s.118. >=3 and <6 years of service",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "severance.tier.6_10y",
+      "value": 240,
+      "unit": "days",
+      "statutory_floor": 240,
+      "statutory_ceiling": null,
+      "citation": "LPA s.17, s.118. >=6 and <10 years of service",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "severance.tier.10_20y",
+      "value": 300,
+      "unit": "days",
+      "statutory_floor": 300,
+      "statutory_ceiling": null,
+      "citation": "LPA s.17, s.118. >=10 and <20 years of service",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "severance.tier.20y_plus",
+      "value": 400,
+      "unit": "days",
+      "statutory_floor": 400,
+      "statutory_ceiling": null,
+      "citation": "LPA s.17, s.118. >=20 years of service",
+      "effective_from": "1998-08-19",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FLOOR"
+    },
+    {
+      "rule_key": "pit.bracket.01",
+      "value": {
+        "min": 0,
+        "max": 150000,
+        "rate": 0
+      },
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code. Progressive brackets (net annual income, THB) — default pack effective 1 Jan 2026 (verify annually, V5)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "pit.bracket.02",
+      "value": {
+        "min": 150001,
+        "max": 300000,
+        "rate": 0.05
+      },
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code. Progressive brackets (net annual income, THB) — default pack effective 1 Jan 2026 (verify annually, V5)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "pit.bracket.03",
+      "value": {
+        "min": 300001,
+        "max": 500000,
+        "rate": 0.1
+      },
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code. Progressive brackets (net annual income, THB) — default pack effective 1 Jan 2026 (verify annually, V5)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "pit.bracket.04",
+      "value": {
+        "min": 500001,
+        "max": 750000,
+        "rate": 0.15
+      },
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code. Progressive brackets (net annual income, THB) — default pack effective 1 Jan 2026 (verify annually, V5)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "pit.bracket.05",
+      "value": {
+        "min": 750001,
+        "max": 1000000,
+        "rate": 0.2
+      },
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code. Progressive brackets (net annual income, THB) — default pack effective 1 Jan 2026 (verify annually, V5)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "pit.bracket.06",
+      "value": {
+        "min": 1000001,
+        "max": 2000000,
+        "rate": 0.25
+      },
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code. Progressive brackets (net annual income, THB) — default pack effective 1 Jan 2026 (verify annually, V5)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "pit.bracket.07",
+      "value": {
+        "min": 2000001,
+        "max": 5000000,
+        "rate": 0.3
+      },
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code. Progressive brackets (net annual income, THB) — default pack effective 1 Jan 2026 (verify annually, V5)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "pit.bracket.08",
+      "value": {
+        "min": 5000001,
+        "max": null,
+        "rate": 0.35
+      },
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code. Progressive brackets (net annual income, THB) — default pack effective 1 Jan 2026 (verify annually, V5)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    }
+  ]
+}
