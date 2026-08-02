@@ -1,0 +1,14 @@
+<div class="payslip" lang="zh-Hans">
+  <h1>工资条</h1>
+  <table class="meta">
+    <tr><td>雇主</td><td>{{companyName}}</td></tr>
+    <tr><td>员工</td><td>{{employeeName}}</td></tr>
+    <tr><td>发薪日</td><td>{{payDate}}</td></tr>
+  </table>
+  <table class="lines">
+    <tr><th>项目</th><th>金额</th></tr>
+    <tr><td>工资</td><td>{{grossPay}}</td></tr>
+    <tr><td>社会保险基金</td><td>-{{socialSecurityDeduction}}</td></tr>
+    <tr><td><strong>实发工资</strong></td><td><strong>{{netPay}}</strong></td></tr>
+  </table>
+</div>

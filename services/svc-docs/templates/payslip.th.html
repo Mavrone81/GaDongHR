@@ -1,0 +1,14 @@
+<div class="payslip" lang="th">
+  <h1>สลิปเงินเดือน</h1>
+  <table class="meta">
+    <tr><td>นายจ้าง</td><td>{{companyName}}</td></tr>
+    <tr><td>พนักงาน</td><td>{{employeeName}}</td></tr>
+    <tr><td>วันที่จ่ายเงิน</td><td>{{payDate}}</td></tr>
+  </table>
+  <table class="lines">
+    <tr><th>รายการ</th><th>จำนวนเงิน</th></tr>
+    <tr><td>ค่าจ้าง</td><td>{{grossPay}}</td></tr>
+    <tr><td>กองทุนประกันสังคม</td><td>-{{socialSecurityDeduction}}</td></tr>
+    <tr><td><strong>เงินได้สุทธิ</strong></td><td><strong>{{netPay}}</strong></td></tr>
+  </table>
+</div>
