@@ -1,0 +1,24 @@
+{
+  "name": "@gadong/svc-scheduler",
+  "version": "0.0.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/main.js",
+    "migrate": "node-pg-migrate -m migrations up"
+  },
+  "dependencies": {
+    "@gadong/kernel": "workspace:*",
+    "@nestjs/common": "^11.1.28",
+    "@nestjs/core": "^11.1.28",
+    "@nestjs/platform-express": "^11.1.28",
+    "node-pg-migrate": "^7.9.1",
+    "pg": "^8.13.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10"
+  }
+}

@@ -5,10 +5,19 @@
       "path": "./packages/kernel"
     },
     {
+      "path": "./services/retention-job"
+    },
+    {
+      "path": "./services/svc-attendance"
+    },
+    {
       "path": "./services/svc-audit"
     },
     {
       "path": "./services/svc-authz"
+    },
+    {
+      "path": "./services/svc-claims"
     },
     {
       "path": "./services/svc-config"
@@ -23,7 +32,22 @@
       "path": "./services/svc-i18n"
     },
     {
+      "path": "./services/svc-leave"
+    },
+    {
       "path": "./services/svc-notify"
+    },
+    {
+      "path": "./services/svc-onboarding"
+    },
+    {
+      "path": "./services/svc-payroll"
+    },
+    {
+      "path": "./services/svc-scheduler"
+    },
+    {
+      "path": "./services/svc-timesheet"
     }
   ]
 }

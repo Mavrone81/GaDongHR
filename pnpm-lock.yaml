@@ -55,6 +55,68 @@ importers:
         specifier: ^7.8.1
         version: 7.8.2
 
+  services/retention-job:
+    dependencies:
+      '@gadong/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@nestjs/common':
+        specifier: ^11.1.28
+        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.28)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/platform-express':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
+      node-pg-migrate:
+        specifier: ^7.9.1
+        version: 7.9.1(@types/pg@8.20.3)(pg@8.22.0)
+      pg:
+        specifier: ^8.13.0
+        version: 8.22.0
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: ^7.8.1
+        version: 7.8.2
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.3
+
+  services/svc-attendance:
+    dependencies:
+      '@gadong/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@nestjs/common':
+        specifier: ^11.1.28
+        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.28)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/platform-express':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
+      node-pg-migrate:
+        specifier: ^7.9.1
+        version: 7.9.1(@types/pg@8.20.3)(pg@8.22.0)
+      pg:
+        specifier: ^8.13.0
+        version: 8.22.0
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: ^7.8.1
+        version: 7.8.2
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.3
+
   services/svc-audit:
     dependencies:
       '@gadong/kernel':
@@ -87,6 +149,37 @@ importers:
         version: 8.20.3
 
   services/svc-authz:
+    dependencies:
+      '@gadong/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@nestjs/common':
+        specifier: ^11.1.28
+        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.28)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/platform-express':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
+      node-pg-migrate:
+        specifier: ^7.9.1
+        version: 7.9.1(@types/pg@8.20.3)(pg@8.22.0)
+      pg:
+        specifier: ^8.13.0
+        version: 8.22.0
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: ^7.8.1
+        version: 7.8.2
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.3
+
+  services/svc-claims:
     dependencies:
       '@gadong/kernel':
         specifier: workspace:*
@@ -227,6 +320,37 @@ importers:
         specifier: ^7.8.1
         version: 7.8.2
 
+  services/svc-leave:
+    dependencies:
+      '@gadong/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@nestjs/common':
+        specifier: ^11.1.28
+        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.28)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/platform-express':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
+      node-pg-migrate:
+        specifier: ^7.9.1
+        version: 7.9.1(@types/pg@8.20.3)(pg@8.22.0)
+      pg:
+        specifier: ^8.13.0
+        version: 8.22.0
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: ^7.8.1
+        version: 7.8.2
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.3
+
   services/svc-notify:
     dependencies:
       '@gadong/kernel':
@@ -260,6 +384,130 @@ importers:
       '@types/nodemailer':
         specifier: ^6.4.16
         version: 6.4.24
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.3
+
+  services/svc-onboarding:
+    dependencies:
+      '@gadong/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@nestjs/common':
+        specifier: ^11.1.28
+        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.28)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/platform-express':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
+      node-pg-migrate:
+        specifier: ^7.9.1
+        version: 7.9.1(@types/pg@8.20.3)(pg@8.22.0)
+      pg:
+        specifier: ^8.13.0
+        version: 8.22.0
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: ^7.8.1
+        version: 7.8.2
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.3
+
+  services/svc-payroll:
+    dependencies:
+      '@gadong/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@nestjs/common':
+        specifier: ^11.1.28
+        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.28)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/platform-express':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
+      node-pg-migrate:
+        specifier: ^7.9.1
+        version: 7.9.1(@types/pg@8.20.3)(pg@8.22.0)
+      pg:
+        specifier: ^8.13.0
+        version: 8.22.0
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: ^7.8.1
+        version: 7.8.2
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.3
+
+  services/svc-scheduler:
+    dependencies:
+      '@gadong/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@nestjs/common':
+        specifier: ^11.1.28
+        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.28)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/platform-express':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
+      node-pg-migrate:
+        specifier: ^7.9.1
+        version: 7.9.1(@types/pg@8.20.3)(pg@8.22.0)
+      pg:
+        specifier: ^8.13.0
+        version: 8.22.0
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: ^7.8.1
+        version: 7.8.2
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.3
+
+  services/svc-timesheet:
+    dependencies:
+      '@gadong/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@nestjs/common':
+        specifier: ^11.1.28
+        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.28)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/platform-express':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
+      node-pg-migrate:
+        specifier: ^7.9.1
+        version: 7.9.1(@types/pg@8.20.3)(pg@8.22.0)
+      pg:
+        specifier: ^8.13.0
+        version: 8.22.0
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: ^7.8.1
+        version: 7.8.2
+    devDependencies:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.3
