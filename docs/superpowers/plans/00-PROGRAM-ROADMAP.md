@@ -119,6 +119,22 @@ Encrypted columns are `bytea`. Ciphertext layout is `wrappedDEK ‖ nonce ‖ ct
 
 **Fail closed:** if Vault is sealed or unreachable, S2/S3 operations return 503. There is no plaintext fallback, ever.
 
+**⚠️ Blind indexes are ASCII-only until further notice.** `normalise` is NFKC + trim + lowercase.
+NFKC does **not** reorder Thai combining marks, because Thai vowel signs and tone marks carry
+canonical combining class 0. So `สี่` typed as ส+ี+่ and as ส+่+ี normalise to *different*
+strings and therefore to different HMACs — both orderings come off real Thai keyboards. A blind
+index over Thai text would silently return nothing on a lookup, which for a uniqueness check
+reads as "no duplicate found" rather than as an error.
+
+This is **not** a live defect: the only blind-indexed fields in this design are `national_id`
+(13 digits) and `email` (ASCII), neither of which can carry Thai marks. It is a standing
+constraint on future work.
+
+**Before adding a blind index over any field that can contain Thai script**, `normalise` must
+first gain a canonical Thai mark-ordering step, and it must be added to `svc-crypto` and
+`@gadong/kernel` in the same change — the two sides compute the same HMAC or lookups break
+across services. Found in the Task 3 review, 2026-08-02.
+
 ### Audit entry
 
 ```
