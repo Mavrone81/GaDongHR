@@ -86,6 +86,52 @@ describe('AuthzClient.decide', () => {
     expect(post).toHaveBeenCalledTimes(1) // still cached — mutation neither evicted nor corrupted it
   })
 
+  it('clones on every cache-hit read, not just on store: mutating one cache hit does not affect the next cache hit for the same key (fix round 2)', async () => {
+    // The test above ("does not let a caller mutate the cached decision by
+    // mutating a previously returned Decision") mutates the result of the
+    // MISS call that populates the cache. That cannot expose a missing
+    // clone-on-read: the miss path already returns `cloneDecision(response)`
+    // (a fresh object) and separately stores `cloneDecision(response)` into
+    // the cache (a second, independent fresh object) — so the miss-path
+    // return value is never the same object as `cached.decision` even with
+    // no clone-on-read at all. Verified empirically: with
+    // `client.ts`'s cache-hit branch changed from
+    // `return cloneDecision(cached.decision)` to `return cached.decision`,
+    // that test (and all 13 others that existed before this one) still
+    // passed. Only mutating the result of an actual CACHE HIT and then
+    // taking a second cache hit exercises the line that clones on read —
+    // this test does that: miss (populate) → hit #1 (mutate) → hit #2
+    // (assert unaffected).
+    const post = jest.fn().mockResolvedValue({ allowed: true, scopeOrgUnitIds: ['ou-1'] } satisfies Decision)
+    const client = new AuthzClient({ post })
+
+    await client.decide('user-1', 'employee.read') // miss — populates the cache
+    const hitA = await client.decide('user-1', 'employee.read') // cache hit #1
+    if (Array.isArray(hitA.scopeOrgUnitIds)) hitA.scopeOrgUnitIds.push('ou-mutated')
+    hitA.allowed = false
+
+    const hitB = await client.decide('user-1', 'employee.read') // cache hit #2
+
+    expect(post).toHaveBeenCalledTimes(1) // all three calls after the first were cache hits, not refetches
+    expect(hitB.allowed).toBe(true)
+    expect(Array.isArray(hitB.scopeOrgUnitIds) ? hitB.scopeOrgUnitIds.length : -1).toBe(1)
+  })
+
+  it('does not let a caller mutate the result of an uncached (miss-path) call and have it affect a later cache hit — the mirror of the hit-then-hit case above (fix round 2)', async () => {
+    const post = jest.fn().mockResolvedValue({ allowed: true, scopeOrgUnitIds: ['ou-1'] } satisfies Decision)
+    const client = new AuthzClient({ post })
+
+    const first = await client.decide('user-1', 'employee.read') // miss — populates the cache
+    if (Array.isArray(first.scopeOrgUnitIds)) first.scopeOrgUnitIds.push('ou-mutated')
+    first.allowed = false
+
+    const second = await client.decide('user-1', 'employee.read') // hit
+
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(second.allowed).toBe(true)
+    expect(Array.isArray(second.scopeOrgUnitIds) ? second.scopeOrgUnitIds.length : -1).toBe(1)
+  })
+
   it('does not let a caller mutate a shared fail-closed DENIED decision across unrelated calls (fix round 1, IMPORTANT 2)', async () => {
     const post = jest.fn().mockRejectedValue(new Error('ECONNREFUSED'))
     const client = new AuthzClient({ post })
