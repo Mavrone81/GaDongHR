@@ -275,8 +275,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # No `version:` here on purpose. action-setup v4 hard-errors with
+      # "Multiple versions of pnpm specified" when `version:` is given AND
+      # package.json has `packageManager`. package.json is the single source
+      # of truth for the pnpm version; the action reads it.
       - uses: pnpm/action-setup@v4
-        with: { version: 9 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
