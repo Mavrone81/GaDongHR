@@ -1,3 +1,4 @@
+import { assertValidSchemaName } from './outbox'
 import type { Queryable } from './outbox'
 
 export interface Publisher {
@@ -18,15 +19,19 @@ interface RawOutboxRow {
  * the publish call in between. `db/pool.ts` is responsible for handing the
  * relay a connection with that property; this class only issues SQL.
  *
- * `schema` is a trusted, per-service compile-time constant (never user
- * input), so it is safe to interpolate into the qualified table name.
+ * `schema` is expected to be a per-service compile-time constant (never
+ * user input); the constructor still validates it with
+ * `assertValidSchemaName` before it is interpolated into any SQL, since
+ * Postgres has no way to bind an identifier as a query parameter.
  */
 export class OutboxRelay {
   constructor(
     private readonly pool: Queryable,
     private readonly publisher: Publisher,
     private readonly schema: string,
-  ) {}
+  ) {
+    assertValidSchemaName(schema)
+  }
 
   async drainOnce(batchSize = 50): Promise<{ published: number; failed: number }> {
     let published = 0

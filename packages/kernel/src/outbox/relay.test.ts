@@ -1,17 +1,57 @@
 import { OutboxRelay } from './relay'
 import type { Publisher } from './relay'
 import { writeOutbox } from './outbox'
+import type { Queryable } from './outbox'
 import { FakeDb } from './testing/fake-db'
 
 async function seedOutboxRow(db: FakeDb, topic: string, payload: unknown): Promise<string> {
   const tx = db.connect()
   await tx.query('BEGIN')
-  const id = await writeOutbox(tx, topic, payload)
+  const id = await writeOutbox(tx, 'attendance', topic, payload)
   await tx.query('COMMIT')
   return id
 }
 
+describe('OutboxRelay construction', () => {
+  it('rejects a schema name that cannot safely be interpolated into SQL', () => {
+    const publisher: Publisher = { publish: jest.fn() }
+    expect(() => new OutboxRelay({ query: jest.fn() }, publisher, 'attendance; DROP TABLE outbox;--')).toThrow(
+      /invalid schema name/i,
+    )
+  })
+})
+
 describe('OutboxRelay.drainOnce', () => {
+  it('wraps the batch in an explicit transaction (BEGIN ... COMMIT) so the row lock survives the publish call', async () => {
+    // This is the mechanism the SKIP LOCKED test below depends on: against
+    // real Postgres, a SELECT ... FOR UPDATE issued without an enclosing
+    // transaction releases its lock the instant the SELECT returns, so two
+    // relay instances would double-publish. The fake enforces SKIP LOCKED
+    // regardless of BEGIN/COMMIT, so that test alone would not catch a
+    // regression here — this test asserts the transaction wrapping
+    // directly by recording the literal sequence of statements sent.
+    const db = new FakeDb()
+    await seedOutboxRow(db, 'employee.created', { n: 1 })
+
+    const conn = db.connect()
+    const calls: string[] = []
+    const recordingConn: Queryable = {
+      query: async (sql: string, params?: unknown[]) => {
+        calls.push(sql.trim().split(/\s+/)[0]?.toUpperCase() ?? '')
+        return conn.query(sql, params)
+      },
+    }
+    const publisher: Publisher = { publish: jest.fn(async () => {}) }
+    const relay = new OutboxRelay(recordingConn, publisher, 'attendance')
+
+    await relay.drainOnce(10)
+
+    expect(calls[0]).toBe('BEGIN')
+    expect(calls).toContain('SELECT')
+    expect(calls[calls.length - 1]).toBe('COMMIT')
+    expect(calls).not.toContain('ROLLBACK')
+  })
+
   it('selects unpublished rows in created_at order, publishes each, and stamps published_at after success', async () => {
     const db = new FakeDb()
     const id1 = await seedOutboxRow(db, 'employee.created', { n: 1 })

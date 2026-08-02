@@ -7,8 +7,16 @@ export { resolveEffective } from './effective-date'
 export type { FieldClass, EncryptRequest, CryptoTransport } from './crypto/types'
 export { CryptoClient } from './crypto/client'
 export type { OutboxRow, Queryable } from './outbox/outbox'
-export { writeOutbox } from './outbox/outbox'
+export { writeOutbox, assertValidSchemaName } from './outbox/outbox'
 export type { Publisher } from './outbox/relay'
 export { OutboxRelay } from './outbox/relay'
 export { idempotent } from './outbox/consumer'
-export { createPool, withTransaction, withConnection } from './db/pool'
+export {
+  createPool,
+  withTransaction,
+  withConnection,
+  STATEMENT_TIMEOUT_MS,
+  QUERY_TIMEOUT_MS,
+  CONNECTION_TIMEOUT_MS,
+  MAX_POOL_SIZE,
+} from './db/pool'

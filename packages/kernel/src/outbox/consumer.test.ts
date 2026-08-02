@@ -2,6 +2,18 @@ import { idempotent } from './consumer'
 import { FakeDb } from './testing/fake-db'
 
 describe('idempotent', () => {
+  it('rejects a schema name that cannot safely be interpolated into SQL', async () => {
+    const db = new FakeDb()
+    const tx = db.connect()
+    const handler = jest.fn()
+
+    await tx.query('BEGIN')
+    await expect(idempotent(tx, 'attendance; DROP TABLE processed_events;--', 'evt-1', handler)).rejects.toThrow(
+      /invalid schema name/i,
+    )
+    expect(handler).not.toHaveBeenCalled()
+  })
+
   it('inserts into processed_events and runs the handler on first delivery', async () => {
     const db = new FakeDb()
     const tx = db.connect()

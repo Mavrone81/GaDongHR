@@ -1,3 +1,4 @@
+import { assertValidSchemaName } from './outbox'
 import type { Queryable } from './outbox'
 
 /**
@@ -18,6 +19,16 @@ import type { Queryable } from './outbox'
  * (XC-EVENTS): the second and third calls see the row already committed by
  * the first, INSERT ... ON CONFLICT DO NOTHING returns no row, and the
  * handler never runs.
+ *
+ * **This function does not protect you from a caller that swallows the
+ * handler's error and commits anyway.** `idempotent` has no way to force a
+ * rollback — that is the caller's transaction, not this function's. A
+ * consumer that catches the error from `idempotent`, logs it, and then
+ * still issues COMMIT marks the event processed forever with no effect
+ * having happened: exactly the silent loss this mechanism exists to
+ * prevent. Drive `tx` with `withTransaction` from `db/pool.ts` (or an
+ * equivalent where a thrown error aborts the commit and runs ROLLBACK
+ * instead) so a handler failure genuinely rolls back.
  */
 export async function idempotent<T>(
   tx: Queryable,
@@ -25,6 +36,7 @@ export async function idempotent<T>(
   eventId: string,
   handler: () => Promise<T>,
 ): Promise<T | 'duplicate'> {
+  assertValidSchemaName(schema)
   const { rows } = await tx.query(
     `INSERT INTO ${schema}.processed_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING event_id`,
     [eventId],
