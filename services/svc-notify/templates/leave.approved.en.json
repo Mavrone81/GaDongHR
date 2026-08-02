@@ -1,0 +1,4 @@
+{
+  "subject": "Your leave request has been approved",
+  "body": "Your {{leaveTypeCode}} leave from {{startDate}} to {{endDate}} ({{days}} day(s), {{payMode}}) has been approved."
+}

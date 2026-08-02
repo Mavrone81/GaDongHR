@@ -1,0 +1,4 @@
+{
+  "subject": "Your payslip is ready",
+  "body": "Your payslip (reference {{payslipId}}) is now available. Please log in to view the details."
+}

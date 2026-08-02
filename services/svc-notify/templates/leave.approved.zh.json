@@ -1,0 +1,4 @@
+{
+  "subject": "您的请假申请已获批准",
+  "body": "您从 {{startDate}} 到 {{endDate}} 的 {{leaveTypeCode}} 请假（共 {{days}} 天，{{payMode}}）已获批准。"
+}
