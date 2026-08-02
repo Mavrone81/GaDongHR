@@ -171,6 +171,21 @@ Append-only: the `audit` role holds INSERT and SELECT, never UPDATE or DELETE. D
 
 Every service emits `audit.*` for: writes to employee/time/pay/config data, **all S3 reads**, authz denials, logins, exports and downloads, consent changes, and key operations.
 
+**⚠️ Audit payloads must carry hashes, not values (added 2026-08-02, Task 5 review).** The
+`audit.entry` table stores `before_hash` / `after_hash`, never the values themselves. The Task 5
+review found the emitter putting raw `before` / `after` objects into `outbox.payload` as plaintext
+`jsonb` — so an S3 value (salary, national ID, bank account) sits in cleartext in the producing
+service's outbox table until the relay reaps the row, and in the broker while in flight.
+
+That defeats encrypt-before-write through a side door: the value is encrypted in its own column
+and simultaneously present in plaintext one table over.
+
+**Contract:** `AuditEmitter.emit` hashes `before` and `after` **before** they reach the outbox.
+The audit event payload carries `before_hash` and `after_hash` only. A service that needs the
+values for a diff view fetches them through the owning service's audited API, exactly as event
+consumers do for any other S3 field. Owned by Task 9 (`svc-audit`), which must land the hashing in
+the kernel emitter and the chain in the service together.
+
 ### Error envelope
 
 ```json
