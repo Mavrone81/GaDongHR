@@ -829,6 +829,25 @@ All of M1–M7 exist in the repo with their real schema, migrations and health e
 
 ---
 
+## Task 15b: Keycloak realm and service-account provisioning
+
+Found during Task 13c. The OIDC middleware validates tokens; nothing issues them. Keycloak runs in
+compose with no realm, no clients and no users, so `seed.sh` has no token source and the first
+deploy can seed nothing. This blocks Task 16.
+
+- [ ] `deploy/keycloak/realm-gadonghr.json` — realm import: the `gadonghr` realm, a `web` public
+  client for the PWA (authorization code + PKCE), and a `seeder` confidential client with a service
+  account holding `config.pack.import` and `authz.role.grant`.
+- [ ] Realm settings: token lifetime <= 12 h with refresh rotation, brute-force detection on,
+  argon2id password hashing (Security doc S6).
+- [ ] `deploy/scripts/bootstrap-admin.sh` — creates the first HR/System Admin and forces MFA setup.
+- [ ] `seed.sh` obtains a service-account token via client credentials before importing packs.
+- [ ] Test: the realm JSON parses, declares the two clients, and the seeder's service account carries
+  exactly the two permissions it needs and no others.
+- [ ] Commit — `feat(deploy): Keycloak realm import and service-account provisioning`
+
+---
+
 ## Task 16: First deployment to gadonghr-prod
 
 **Host:** `157.230.38.96`. DNS cutover from 165 happens here.
