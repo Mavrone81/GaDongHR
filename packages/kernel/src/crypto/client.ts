@@ -3,6 +3,28 @@ import type { CryptoTransport, EncryptRequest, FieldClass } from './types'
 
 export type { CryptoTransport, EncryptRequest, FieldClass } from './types'
 
+/**
+ * Ciphertext layout is `wrappedDEK ‖ nonce ‖ ct ‖ tag` (AES-256-GCM), per the roadmap's
+ * data-classification contract. The GCM nonce is 12 bytes and the GCM tag is 16 bytes, so
+ * even a response with a zero-length wrappedDEK and an empty plaintext must decode to at
+ * least 28 bytes. Anything shorter — including an empty string — cannot be genuine
+ * ciphertext, so it must never be written to a `bytea` column believing it is.
+ */
+const MIN_CIPHERTEXT_BYTES = 28
+
+/**
+ * A blind index is `HMAC-SHA256(k_class, normalise(plaintext))`, which is invariantly
+ * 32 bytes. Anything shorter is not a real HMAC output — accepting it would let unrelated
+ * rows collide on a truncated/empty index and match each other on a lookup by value.
+ */
+const MIN_BIDX_BYTES = 32
+
+/**
+ * Zero-width characters that survive `String.prototype.trim()` (which only strips
+ * whitespace/line-terminator code points) but render as blank: ZWSP, ZWNJ, ZWJ, BOM.
+ */
+const ZERO_WIDTH_CHARS = /[\u200B-\u200D\uFEFF]/g
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null
 }
@@ -19,12 +41,18 @@ function isBidxResponse(v: unknown): v is { bidx: string } {
   return isRecord(v) && typeof v['bidx'] === 'string'
 }
 
+/** True when a purpose is empty once both ordinary whitespace and zero-width characters are stripped. */
+function isBlankPurpose(purpose: string): boolean {
+  return purpose.trim().replace(ZERO_WIDTH_CHARS, '').length === 0
+}
+
 /**
  * Client for svc-crypto (Task 6). Every S2/S3 field in every service passes through
- * this class, which is why every path below fails closed: a transport rejection,
- * a malformed response, or a response missing a requested field all surface as the
+ * this class, which is why every path below fails closed: a transport rejection, a
+ * malformed response, a response missing a requested field, or a response whose
+ * decoded payload is too short to be real ciphertext/HMAC output all surface as the
  * same `cryptoUnavailable()` (CRY-503) — never a raw network error, never a partial
- * result, and never plaintext written believing it was encrypted.
+ * or corrupt result, and never plaintext written believing it was encrypted.
  */
 export class CryptoClient {
   constructor(private readonly transport: CryptoTransport) {}
@@ -35,6 +63,22 @@ export class CryptoClient {
   }
 
   async encryptBatch(reqs: EncryptRequest[]): Promise<Map<string, Buffer>> {
+    // Nothing to ask svc-crypto — return without a pointless round-trip.
+    if (reqs.length === 0) return new Map()
+
+    // The response is keyed by field name (Map<field, Buffer>), so a batch that asks
+    // for the same field twice — e.g. two different entities' national_id — cannot be
+    // answered unambiguously: the second ciphertext would silently overwrite the
+    // first, and a caller could bind one employee's AAD-bound ciphertext to another's
+    // row. Reject the request rather than answer it wrongly.
+    const seenFields = new Set<string>()
+    for (const req of reqs) {
+      if (seenFields.has(req.field)) {
+        throw new Error(`encryptBatch: duplicate field "${req.field}" in one batch is not answerable — the result can only be keyed by field name`)
+      }
+      seenFields.add(req.field)
+    }
+
     let response: unknown
     try {
       response = await this.transport.post('/encrypt', { fields: reqs })
@@ -55,25 +99,34 @@ export class CryptoClient {
       // is exactly how a plaintext column would get written believing it was
       // encrypted.
       if (typeof encoded !== 'string') throw cryptoUnavailable()
-      out.set(req.field, Buffer.from(encoded, 'base64'))
+
+      const buf = Buffer.from(encoded, 'base64')
+      // A too-short decode (e.g. "" decoding to 0 bytes, or svc-crypto echoing
+      // plaintext back) cannot be genuine ciphertext per the fixed wire layout —
+      // treat it as a crypto failure, not a value to hand the caller.
+      if (buf.length < MIN_CIPHERTEXT_BYTES) throw cryptoUnavailable()
+
+      out.set(req.field, buf)
     }
     return out
   }
 
   async decrypt(entityId: string, field: string, ciphertext: Buffer, purpose: string): Promise<string> {
     // Validated before the transport is touched: purpose is what the audit trail
-    // records for this S3 read (Security doc §5), so an empty purpose must never
-    // fall through to a default.
-    if (!purpose.trim()) throw new Error('purpose is required')
+    // records for this S3 read (Security doc §5), so an empty — or blank-looking —
+    // purpose must never fall through to a default.
+    if (isBlankPurpose(purpose)) throw new Error('purpose is required')
+
+    const body = {
+      entityId,
+      field,
+      ciphertext: ciphertext.toString('base64'),
+      purpose: purpose.trim(),
+    }
 
     let response: unknown
     try {
-      response = await this.transport.post('/decrypt', {
-        entityId,
-        field,
-        ciphertext: ciphertext.toString('base64'),
-        purpose,
-      })
+      response = await this.transport.post('/decrypt', body)
     } catch {
       throw cryptoUnavailable()
     }
@@ -83,18 +136,22 @@ export class CryptoClient {
   }
 
   async blindIndex(fieldClass: FieldClass, field: string, value: string): Promise<Buffer> {
+    const body = { fieldClass, field, value: this.normalise(value) }
+
     let response: unknown
     try {
-      response = await this.transport.post('/bidx', {
-        fieldClass,
-        field,
-        value: this.normalise(value),
-      })
+      response = await this.transport.post('/bidx', body)
     } catch {
       throw cryptoUnavailable()
     }
 
     if (!isBidxResponse(response)) throw cryptoUnavailable()
-    return Buffer.from(response.bidx, 'base64')
+
+    const buf = Buffer.from(response.bidx, 'base64')
+    // A too-short decode cannot be a real HMAC-SHA256 output. Accepting it would let
+    // e.g. two employees with a 0-byte bidx collide and match each other on lookup.
+    if (buf.length < MIN_BIDX_BYTES) throw cryptoUnavailable()
+
+    return buf
   }
 }
