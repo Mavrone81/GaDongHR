@@ -35,13 +35,40 @@ Fifteen services plus the frontend. Every one is NestJS on Node 22, owns exactly
 | Phase | Plan | Contents | Exit criteria |
 |---|---|---|---|
 | **1** | `01-foundation-platform.md` | Monorepo, kernel, services 1–7, all 15 service skeletons, CI→GHCR, first deploy | `https://hr.bevorasg.com` live; a field encrypts through Vault and a DB dump shows no plaintext; RBAC denies by default; audit chain verifies |
-| **2** | `02-m1-onboarding.md` | M1 Onboarding + PWA shell (ESS/HR) | A new hire is onboarded with separate biometric consent, refusal path works, SSO D+30 task exists |
+| **1.5** | `015-pwa-shell.md` | React PWA shell: Keycloak login, role-driven nav, th/en/zh, ESS screens against real `svc-config`/`svc-authz`, payslip on fixtures | Someone can log in and click through a Thai-language product with live statutory citations — the first demoable milestone |
+| **2** | `02-m1-onboarding.md` | M1 Onboarding, wired into the existing shell | A new hire is onboarded with separate biometric consent, refusal path works, SSO D+30 task exists |
 | **3** | `03-time-capture.md` | M2 Scheduler, M4 Attendance, M3 Timesheet | Punch → timesheet with zero loss across a broker restart; OT classified into 1.5×/2×/3× |
 | **4** | `04-requests.md` | M5 Leave, M6 Claims | Statutory leave defaults pass floor validation; banded claim approval in three languages |
 | **5** | `05-payroll.md` | M7 Payroll, retention job, statutory exports | Golden-file payroll fixtures pass across all three rule-pack windows; SoD blocks self-approval |
 | **6** | `06-hardening.md` | Pen test, PDPA audit, k6 load, restore drill, RBAC matrix generation | Security doc §8 checklist complete |
 
 Each phase's plan is written just before it starts, against the code that then exists. Writing Phase 5's tasks today would guarantee they are wrong.
+
+## Phase 1.5 exists to be demoable early — and must not become rework
+
+Added 2026-08-02 at Samuel's request: a clickable prototype well before the sequential path would
+produce one. The standing risk with a shell built ahead of its modules is that it becomes a
+throwaway demo someone later has to rewrite. Three rules make it real code instead:
+
+1. **It talks to real services, not mocks.** Login goes through Keycloak. Leave balances and their
+   LPA citations come from `svc-config` over HTTP. Permissions come from `svc-authz`. Anything that
+   cannot be real yet — payslip figures, punch history — is a clearly-labelled fixture behind the
+   *same* API client the real service will use, so wiring M1 through is a URL change, not a rewrite.
+2. **No UI-side business logic, ever.** No statutory value, OT multiplier, tax bracket or accrual
+   rule is computed in the frontend. Buddhist Era rendering and THB formatting come from
+   `@gadong/kernel`'s `i18n/format`, not a second implementation in React.
+3. **i18n keys from day one.** Every string goes through `svc-i18n` bundles. A demo with hard-coded
+   Thai strings is precisely the thing that has to be rewritten, and it is the most common way this
+   kind of shell rots.
+
+## Parallel execution
+
+Services are independent; the monorepo around them is not. Four agents in one tree collide on the
+root `tsconfig.json` references array, `pnpm-lock.yaml`, `.tsbuildinfo` and the git index — not on
+each other's code. So the shared surface is removed **before** fanning out: the controller
+pre-scaffolds every service's `package.json`, `tsconfig.json`, root reference entry and
+dependencies in one commit, then each agent owns exactly `services/<name>/{src,migrations}` and
+touches nothing else. Agents run in isolated git worktrees so their commits cannot interleave.
 
 ---
 
