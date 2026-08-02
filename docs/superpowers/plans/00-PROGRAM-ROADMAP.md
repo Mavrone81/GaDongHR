@@ -117,26 +117,36 @@ biometric.template.read
 
 Encrypted columns are `bytea`. AES-256-GCM, **AAD = `entity_id + ':' + field_name`** so ciphertext cannot be swapped between rows or fields.
 
-**Ciphertext layout (revised 2026-08-02, Task 3 review):**
+**Ciphertext layout (revised 2026-08-02, Task 6 fix round 1):**
 
 ```
-u16be(len(wrappedDEK)) ‖ wrappedDEK ‖ nonce(12) ‖ ct ‖ tag(16)
+u8(version) ‖ u8(fieldClass) ‖ u16be(len(wrappedDEK)) ‖ wrappedDEK ‖ nonce(12) ‖ ct ‖ tag(16)
 ```
 
-The 2-byte big-endian length prefix was added because the original
+The 2-byte big-endian length prefix (added by the Task 3 review) exists because the original
 `wrappedDEK ‖ nonce ‖ ct ‖ tag` has no delimiter — a reader cannot find where the wrapped key
 ends, so **no consumer can validate anything beyond a total length**. Concretely, the Task 3
 review verified that a 45-character plaintext address echoed back by a compromised or buggy
 `svc-crypto` is accepted as valid ciphertext under a total-length check alone. The prefix makes
 the envelope self-describing and lets both the kernel client and `svc-crypto` reject a
-structurally impossible blob.
+structurally impossible blob. The 1-byte `fieldClass` (2 = S2, 3 = S3) and 1-byte `version`
+(currently always 1) were added by the Task 6 fix round 1 review: `decrypt`'s wire contract
+carries no `fieldClass`, so without it in the envelope `svc-crypto` could only learn which KEK
+(`kek-s2`/`kek-s3`) to unwrap under by trial-decrypting against every class in turn — which
+collapses "Vault is sealed" (operational, self-healing) and "no KEK can unwrap this ciphertext"
+(a data-integrity alarm) into one indistinguishable failure, and costs the hot S3 class an extra
+Vault round trip on every decrypt. Reading `fieldClass` from the header lets `decrypt` unwrap
+under exactly one KEK, always, and reject an unrecognised class or version outright rather than
+guessing.
 
-**Minimum valid length** = `2 + len(wrappedDEK) + 12 + 0 + 16`. With Vault Transit's wrapped
-datakey this is roughly 68–100 bytes; the exact floor is pinned in Task 6 once the wrap format is
-fixed, and `@gadong/kernel`'s `MIN_CIPHERTEXT_BYTES` must be raised from its present provisional
-value of 28 in the same change. **28 is a true lower bound** (a zero-length wrapped key and empty
-plaintext) so it can never reject legitimate ciphertext — it is simply far too permissive to
-catch an echoed plaintext.
+**Minimum valid length** = `1 + 1 + 2 + len(wrappedDEK) + 12 + 0 + 16`. With Vault Transit's
+`aes256-gcm96` wrapped datakey (`"vault:v1:" + base64(version(1) ‖ nonce(12) ‖ ct(32) ‖ tag(16))`
+= 93 ASCII bytes, pinned by `services/svc-crypto/src/vault.client.test.ts` rather than assumed)
+this floor is **125 bytes**, pinned in `@gadong/kernel`'s `MIN_CIPHERTEXT_BYTES` (Task 6) and kept
+in lock-step with `svc-crypto`'s own envelope format. The floor started at a provisional value of
+28 (a true lower bound — a zero-length wrapped key and empty plaintext — but far too permissive to
+catch an echoed plaintext), was raised to 123 when Task 6 fixed the wrap format, and to 125 when
+the fix round 1 review added the version/fieldClass bytes.
 
 ⚠️ Kernel and `svc-crypto` must adopt the layout and the floor **together**. A mismatch means one
 side writes envelopes the other rejects. Searchable S3 fields get a companion `<field>_bidx bytea` = `HMAC-SHA256(k_class, normalise(plaintext))`.

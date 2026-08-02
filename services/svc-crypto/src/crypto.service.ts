@@ -2,25 +2,11 @@ import 'reflect-metadata'
 import { Inject, Injectable } from '@nestjs/common'
 import { GadongError, cryptoUnavailable, isBlankPurpose } from '@gadong/kernel'
 import type { EncryptRequest, FieldClass } from '@gadong/kernel'
-import { seal, open, peekWrappedDek, buildAad } from './envelope'
+import { seal, open, parseHeader, buildAad } from './envelope'
 import { VAULT_PORT } from './vault.client'
 import type { VaultPort } from './vault.client'
 
 const BIDX_BYTES = 32
-
-/**
- * `decrypt`'s wire contract (fixed by the already-merged `CryptoClient`,
- * see `packages/kernel/src/crypto/client.ts`) is `{entityId, field,
- * ciphertext, purpose}` — it carries no `fieldClass`, so this service
- * cannot look up a single KEK name for an unwrap the way `encryptBatch`
- * can. The only two field classes that exist (`FieldClass` = `'S2'|'S3'`)
- * make trying each of `kek-s2`/`kek-s3` in turn a small, bounded, and safe
- * way to close that gap: Vault Transit's `decrypt` operation is scoped to
- * one named key and simply errors on a ciphertext it doesn't own, so
- * attempting the wrong key first leaks nothing and costs one extra round
- * trip in the worst case.
- */
-const FIELD_CLASSES: readonly FieldClass[] = ['S2', 'S3']
 
 function kekName(fieldClass: FieldClass): string {
   return `kek-${fieldClass.toLowerCase()}`
@@ -58,7 +44,13 @@ export class CryptoService {
         fields.map(async (f): Promise<[string, Buffer]> => {
           const { plaintextDek, wrappedDek } = await this.vault.generateDataKey(kekName(f.fieldClass))
           try {
-            const envelope = seal(plaintextDek, wrappedDek, buildAad(f.entityId, f.field), Buffer.from(f.value, 'utf8'))
+            const envelope = seal(
+              plaintextDek,
+              wrappedDek,
+              f.fieldClass,
+              buildAad(f.entityId, f.field),
+              Buffer.from(f.value, 'utf8'),
+            )
             return [f.field, envelope]
           } finally {
             // Best-effort scrub: this plaintext DEK must not linger in memory
@@ -80,22 +72,47 @@ export class CryptoService {
    * Purpose is validated — and rejected — before any Vault call, per the
    * brief: an empty audit `purpose` must never be masked by a Vault
    * round-trip that then fails for an unrelated reason.
+   *
+   * `decrypt`'s wire contract (fixed by the already-merged `CryptoClient`,
+   * see `packages/kernel/src/crypto/client.ts`) carries no `fieldClass` —
+   * this reads it from the envelope's own header instead (Task 6 fix round
+   * 1) and unwraps under exactly one KEK, always. This is the deliberate
+   * replacement for an earlier "try kek-s2 then kek-s3" approach: that
+   * collapsed two operationally opposite failures — a sealed Vault
+   * (self-healing once officers unseal) and a ciphertext no KEK can unwrap
+   * (a data-integrity alarm) — into one indistinguishable `CRY-503`, and
+   * cost the hot S3 class an extra round trip on every decrypt.
    */
   async decrypt(entityId: string, field: string, ciphertextBase64: string, purpose: string): Promise<string> {
     if (isBlankPurpose(purpose)) throw purposeRequired()
 
     let envelope: Buffer
-    let wrappedDek: Buffer
+    let header: ReturnType<typeof parseHeader>
     try {
       envelope = Buffer.from(ciphertextBase64, 'base64')
-      wrappedDek = peekWrappedDek(envelope)
-    } catch {
-      // Malformed/truncated ciphertext can never be genuine — fail closed
-      // the same as any other crypto failure, not a raw parse error.
+      header = parseHeader(envelope)
+    } catch (err) {
+      // Data-integrity alarm, not a routine outage: an unparseable header
+      // (wrong version, an unrecognised fieldClass byte, or truncation)
+      // means this was never produced by this service, or was corrupted or
+      // tampered with at rest. Logged distinguishably from the Vault-unwrap
+      // failure below — an operator must not mistake "wake someone up" for
+      // "wait for the officers to unseal." Never logs the ciphertext itself.
+      console.error('svc-crypto: envelope header invalid — data-integrity alarm, not a Vault outage', err)
       throw cryptoUnavailable()
     }
 
-    const dek = await this.unwrapUnderAnyClass(wrappedDek)
+    let dek: Buffer
+    try {
+      dek = await this.vault.unwrapDataKey(kekName(header.fieldClass), header.wrappedDek)
+    } catch (err) {
+      // Routine/operational: Vault sealed (the runbook pages on this after
+      // 5 minutes and it self-heals once officers unseal) or unreachable.
+      // Deliberately never falls back to trying another KEK — that would
+      // re-introduce the ambiguity this header fix removed.
+      console.error(`svc-crypto: Vault unwrap failed for ${kekName(header.fieldClass)} — sealed or unreachable`, err)
+      throw cryptoUnavailable()
+    }
 
     try {
       const plaintext = open(dek, buildAad(entityId, field), envelope)
@@ -108,18 +125,6 @@ export class CryptoService {
     } finally {
       dek.fill(0)
     }
-  }
-
-  private async unwrapUnderAnyClass(wrappedDek: Buffer): Promise<Buffer> {
-    for (const fieldClass of FIELD_CLASSES) {
-      try {
-        return await this.vault.unwrapDataKey(kekName(fieldClass), wrappedDek)
-      } catch {
-        // Try the next class — Vault Transit scopes `decrypt` to one named
-        // key and simply errors on a ciphertext it doesn't own.
-      }
-    }
-    throw cryptoUnavailable()
   }
 
   /**

@@ -21,7 +21,7 @@ describe('CryptoClient.normalise', () => {
 
 describe('CryptoClient.encryptBatch', () => {
   it('sends entityId and field so the service can bind them as AAD', async () => {
-    const ct1 = Buffer.alloc(123, 9) // valid ciphertext-floor-length fixture (u16be prefix + wrappedDEK(93) + nonce + tag)
+    const ct1 = Buffer.alloc(125, 9) // valid ciphertext-floor-length fixture (version + fieldClass + u16be prefix + wrappedDEK(93) + nonce + tag)
     const transport = okTransport({
       '/encrypt': { fields: { national_id: ct1.toString('base64') } },
     })
@@ -46,7 +46,7 @@ describe('CryptoClient.encryptBatch', () => {
   it('never returns a partial result when one field fails', async () => {
     // 'a' is a valid-length ciphertext fixture so the rejection below is specifically
     // because 'b' is missing from the response, not incidentally a short-ciphertext failure.
-    const transport = okTransport({ '/encrypt': { fields: { a: Buffer.alloc(123, 1).toString('base64') } } })
+    const transport = okTransport({ '/encrypt': { fields: { a: Buffer.alloc(125, 1).toString('base64') } } })
     const c = new CryptoClient(transport)
     await expect(
       c.encryptBatch([
@@ -66,7 +66,7 @@ describe('CryptoClient.encryptBatch', () => {
 
   it('rejects a duplicate field within one batch rather than silently collapsing it', async () => {
     const transport = okTransport({
-      '/encrypt': { fields: { national_id: Buffer.alloc(123, 1).toString('base64') } },
+      '/encrypt': { fields: { national_id: Buffer.alloc(125, 1).toString('base64') } },
     })
     const c = new CryptoClient(transport)
     await expect(
@@ -78,9 +78,9 @@ describe('CryptoClient.encryptBatch', () => {
     expect(transport.post).not.toHaveBeenCalled()
   })
 
-  it('fails closed with CRY-503 when a field decodes to less than the ciphertext floor (122 bytes)', async () => {
+  it('fails closed with CRY-503 when a field decodes to less than the ciphertext floor (124 bytes)', async () => {
     const transport = okTransport({
-      '/encrypt': { fields: { national_id: Buffer.alloc(122, 1).toString('base64') } },
+      '/encrypt': { fields: { national_id: Buffer.alloc(124, 1).toString('base64') } },
     })
     const c = new CryptoClient(transport)
     await expect(
@@ -97,7 +97,7 @@ describe('CryptoClient.encryptBatch', () => {
   })
 
   it('fails closed with CRY-503 when a field decodes to what looks like echoed plaintext', async () => {
-    // "1101700207364" base64-decodes to 9 bytes — well under the 123-byte ciphertext floor.
+    // "1101700207364" base64-decodes to 9 bytes — well under the 125-byte ciphertext floor.
     const transport = okTransport({ '/encrypt': { fields: { national_id: '1101700207364' } } })
     const c = new CryptoClient(transport)
     await expect(
@@ -131,7 +131,7 @@ describe('CryptoClient.decrypt', () => {
   })
 
   it('transmits the trimmed purpose so the audit entry does not record surrounding whitespace', async () => {
-    const ct = Buffer.alloc(123, 2) // valid ciphertext-floor-length fixture
+    const ct = Buffer.alloc(125, 2) // valid ciphertext-floor-length fixture
     const transport = okTransport({ '/decrypt': { value: '1101700207364' } })
     const c = new CryptoClient(transport)
     await c.decrypt('emp-1', 'national_id', ct, '  payroll_sso_filing  ')
@@ -144,7 +144,7 @@ describe('CryptoClient.decrypt', () => {
   })
 
   it('passes entityId and field so AAD is reconstructed on the service side', async () => {
-    const ct = Buffer.alloc(123, 2) // valid ciphertext-floor-length fixture
+    const ct = Buffer.alloc(125, 2) // valid ciphertext-floor-length fixture
     const transport = okTransport({ '/decrypt': { value: '1101700207364' } })
     const c = new CryptoClient(transport)
     const v = await c.decrypt('emp-1', 'national_id', ct, 'payroll_sso_filing')
@@ -162,7 +162,7 @@ describe('CryptoClient.decrypt', () => {
     // transport failure, not incidentally the ciphertext-floor check below.
     const transport: CryptoTransport = { post: jest.fn().mockRejectedValue(new Error('sealed')) }
     await expect(
-      new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(123, 3), 'p'),
+      new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(125, 3), 'p'),
     ).rejects.toMatchObject({ code: 'CRY-503' })
   })
 
@@ -171,7 +171,7 @@ describe('CryptoClient.decrypt', () => {
     // malformed-response branch, not incidentally the ciphertext-floor check below.
     const transport = okTransport({ '/decrypt': { value: 42 } })
     await expect(
-      new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(123, 3), 'p'),
+      new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(125, 3), 'p'),
     ).rejects.toMatchObject({ code: 'CRY-503' })
   })
 
@@ -183,22 +183,22 @@ describe('CryptoClient.decrypt', () => {
     expect(transport.post).not.toHaveBeenCalled()
   })
 
-  it('fails closed with CRY-503 when the ciphertext argument is below the 123-byte floor (122 bytes)', async () => {
+  it('fails closed with CRY-503 when the ciphertext argument is below the 125-byte floor (124 bytes)', async () => {
     const transport = okTransport({ '/decrypt': { value: 'irrelevant' } })
     await expect(
-      new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(122, 1), 'p'),
+      new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(124, 1), 'p'),
     ).rejects.toMatchObject({ code: 'CRY-503', httpStatus: 503 })
     expect(transport.post).not.toHaveBeenCalled()
   })
 
-  it('accepts a ciphertext argument exactly at the 123-byte floor', async () => {
+  it('accepts a ciphertext argument exactly at the 125-byte floor', async () => {
     const transport = okTransport({ '/decrypt': { value: '1101700207364' } })
-    const v = await new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(123, 1), 'p')
+    const v = await new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(125, 1), 'p')
     expect(v).toBe('1101700207364')
     expect(transport.post).toHaveBeenCalledWith('/decrypt', {
       entityId: 'e',
       field: 'f',
-      ciphertext: Buffer.alloc(123, 1).toString('base64'),
+      ciphertext: Buffer.alloc(125, 1).toString('base64'),
       purpose: 'p',
     })
   })

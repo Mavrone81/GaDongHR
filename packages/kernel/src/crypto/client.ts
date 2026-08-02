@@ -4,11 +4,20 @@ import type { CryptoTransport, EncryptRequest, FieldClass } from './types'
 export type { CryptoTransport, EncryptRequest, FieldClass } from './types'
 
 /**
- * Ciphertext layout is `u16be(len(wrappedDEK)) ‖ wrappedDEK ‖ nonce(12) ‖ ct ‖ tag(16)`
+ * Ciphertext layout is
+ * `u8(version) ‖ u8(fieldClass) ‖ u16be(len(wrappedDEK)) ‖ wrappedDEK ‖ nonce(12) ‖ ct ‖ tag(16)`
  * (AES-256-GCM), per the roadmap's data-classification contract (revised 2026-08-02,
- * Task 3 review — supersedes the earlier prefix-less `wrappedDEK ‖ nonce ‖ ct ‖ tag`,
- * which had no delimiter and so could only be checked on total length). The 2-byte
- * big-endian length prefix is what lets a reader find where `wrappedDEK` ends at all.
+ * Task 6 fix round 1 — supersedes the earlier `u16be(len(wrappedDEK)) ‖ wrappedDEK ‖ nonce ‖
+ * ct ‖ tag`, which had no delimiter for `wrappedDEK` and so could only be checked on total
+ * length before the Task 3 review added the length prefix). The 2-byte big-endian length
+ * prefix is what lets a reader find where `wrappedDEK` ends at all. The 1-byte `fieldClass`
+ * was added because `decrypt`'s wire contract (this file, below) carries no `fieldClass` —
+ * without it in the envelope, `svc-crypto` could only recover which KEK (`kek-s2`/`kek-s3`)
+ * to unwrap under by trial-decrypting against every class in turn, which collapses "Vault
+ * sealed" (operational) and "no KEK can unwrap this ciphertext" (a data-integrity alarm) into
+ * one indistinguishable failure and costs the hot S3 class an extra Vault round trip on every
+ * decrypt. The 1-byte `version` (currently always 1) was added alongside it because there is
+ * no deployed data anywhere yet — free today, a migration later.
  *
  * `svc-crypto` (Task 6) wraps each 32-byte DEK with Vault Transit's `datakey/plaintext`
  * operation, whose ciphertext is the string `vault:v1:` + base64(version(1) ‖ nonce(12)
@@ -17,14 +26,15 @@ export type { CryptoTransport, EncryptRequest, FieldClass } from './types'
  * ("pins the wrappedDek byte length from a realistic Vault response"), not by memory,
  * per Task 6 brief §4. So the true floor is:
  *
- *   2 (length prefix) + 93 (wrappedDEK) + 12 (nonce) + 0 (empty ct) + 16 (tag) = 123
+ *   1 (version) + 1 (fieldClass) + 2 (length prefix) + 93 (wrappedDEK) + 12 (nonce)
+ *     + 0 (empty ct) + 16 (tag) = 125
  *
  * Anything shorter — including an empty string — cannot be genuine ciphertext under
  * this wrap format, so it must never be written to a `bytea` column believing it is.
  * Kernel and `svc-crypto` must move this floor together: a mismatch means one side
  * writes envelopes the other rejects (roadmap "Contracts every phase depends on").
  */
-const MIN_CIPHERTEXT_BYTES = 123
+const MIN_CIPHERTEXT_BYTES = 125
 
 /**
  * A blind index is `HMAC-SHA256(k_class, normalise(plaintext))`, which is invariantly
