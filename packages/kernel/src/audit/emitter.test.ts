@@ -1,5 +1,6 @@
 import { AuditEmitter } from './emitter'
 import type { AuditEntry } from './emitter'
+import { hashValue } from './canonical-json'
 import { FakeDb } from '../outbox/testing/fake-db'
 
 const baseEntry: AuditEntry = {
@@ -117,5 +118,145 @@ describe('AuditEmitter', () => {
     const rows = db.debugOutboxRows()
     expect(rows).toHaveLength(1)
     expect(rows[0]?.topic).toBe('audit.employee.sensitive.read')
+  })
+
+  // --- Task 9b: "Audit payloads must carry hashes, not values" ---
+
+  it('never lets a raw sensitive value reach the outbox payload, in any form, anywhere in the serialised JSON', async () => {
+    const db = new FakeDb()
+    const tx = db.connect()
+    const emitter = new AuditEmitter()
+
+    await tx.query('BEGIN')
+    await emitter.emit(tx, 'onboarding', {
+      ...baseEntry,
+      before: { salary: 45000, nationalId: '1101700207364' },
+      after: { salary: 47000, nationalId: '1101700207364' },
+    })
+    await tx.query('COMMIT')
+
+    const row = db.debugOutboxRows()[0]
+    if (row === undefined) throw new Error('unreachable: row was just inserted')
+
+    // Search the WHOLE serialised payload, not just top-level keys — a
+    // value nested, stringified, or renamed would still be a leak.
+    const serialised = JSON.stringify(row.payload)
+    expect(serialised).not.toContain('45000')
+    expect(serialised).not.toContain('47000')
+    expect(serialised).not.toContain('1101700207364')
+
+    // And the payload has no `before`/`after` keys at all — hashes only.
+    expect(row.payload).not.toHaveProperty('before')
+    expect(row.payload).not.toHaveProperty('after')
+    expect(row.payload).toMatchObject({
+      beforeHash: hashValue({ salary: 45000, nationalId: '1101700207364' }),
+      afterHash: hashValue({ salary: 47000, nationalId: '1101700207364' }),
+    })
+  })
+
+  it('hashes the same input identically across two separate emit calls, and identically to the shared canonicaliser', async () => {
+    const db = new FakeDb()
+    const emitter = new AuditEmitter()
+    const before = { salary: 45000, nationalId: '1101700207364' }
+
+    const tx1 = db.connect()
+    await tx1.query('BEGIN')
+    await emitter.emit(tx1, 'onboarding', { ...baseEntry, entityId: 'emp-1', before, after: undefined })
+    await tx1.query('COMMIT')
+
+    const tx2 = db.connect()
+    await tx2.query('BEGIN')
+    await emitter.emit(tx2, 'onboarding', { ...baseEntry, entityId: 'emp-2', before, after: undefined })
+    await tx2.query('COMMIT')
+
+    const rows = db.debugOutboxRows()
+    const hash1 = (rows[0]?.payload as { beforeHash: string }).beforeHash
+    const hash2 = (rows[1]?.payload as { beforeHash: string }).beforeHash
+
+    expect(hash1).toBe(hash2)
+    // "identically to svc-audit's canonicaliser": `hashValue` here IS
+    // svc-audit's canonicaliser — `services/svc-audit/src/chain.ts` imports
+    // `canonicalJson`/`hashValue`/`sha256Hex` from this same kernel module
+    // (`./canonical-json`) rather than keeping its own copy, specifically so
+    // the two sides cannot silently diverge. See canonical-json.ts's doc
+    // comment and chain.ts's re-export for the full rationale.
+    expect(hash1).toBe(hashValue(before))
+  })
+
+  it('key insertion order does not change the hash', async () => {
+    const db = new FakeDb()
+    const emitter = new AuditEmitter()
+
+    const tx1 = db.connect()
+    await tx1.query('BEGIN')
+    await emitter.emit(tx1, 'onboarding', {
+      ...baseEntry,
+      entityId: 'emp-1',
+      before: { salary: 45000, nationalId: '1101700207364' },
+      after: undefined,
+    })
+    await tx1.query('COMMIT')
+
+    const tx2 = db.connect()
+    await tx2.query('BEGIN')
+    await emitter.emit(tx2, 'onboarding', {
+      ...baseEntry,
+      entityId: 'emp-2',
+      before: { nationalId: '1101700207364', salary: 45000 },
+      after: undefined,
+    })
+    await tx2.query('COMMIT')
+
+    const rows = db.debugOutboxRows()
+    const hash1 = (rows[0]?.payload as { beforeHash: string }).beforeHash
+    const hash2 = (rows[1]?.payload as { beforeHash: string }).beforeHash
+    expect(hash1).toBe(hash2)
+  })
+
+  it('a missing (undefined) before/after produces a null hash field, not a hash of "null"', async () => {
+    const db = new FakeDb()
+    const tx = db.connect()
+    const emitter = new AuditEmitter()
+
+    await tx.query('BEGIN')
+    await emitter.emit(tx, 'onboarding', { ...baseEntry, before: undefined, after: undefined })
+    await tx.query('COMMIT')
+
+    const row = db.debugOutboxRows()[0]
+    expect(row?.payload).toMatchObject({ beforeHash: null, afterHash: null })
+    expect((row?.payload as { beforeHash: unknown }).beforeHash).not.toBe(hashValue(null))
+  })
+
+  it('an explicit null before/after also produces a null hash field, not a hash of "null"', async () => {
+    const db = new FakeDb()
+    const tx = db.connect()
+    const emitter = new AuditEmitter()
+
+    await tx.query('BEGIN')
+    await emitter.emit(tx, 'onboarding', { ...baseEntry, before: null, after: null })
+    await tx.query('COMMIT')
+
+    const row = db.debugOutboxRows()[0]
+    expect(row?.payload).toMatchObject({ beforeHash: null, afterHash: null })
+    expect((row?.payload as { afterHash: unknown }).afterHash).not.toBe(hashValue(null))
+  })
+
+  it('a create (no before) and a delete (no after) each hash only the side that exists', async () => {
+    const db = new FakeDb()
+    const emitter = new AuditEmitter()
+
+    const created = db.connect()
+    await created.query('BEGIN')
+    await emitter.emit(created, 'onboarding', { ...baseEntry, entityId: 'emp-1', before: undefined, after: { status: 'active' } })
+    await created.query('COMMIT')
+
+    const deleted = db.connect()
+    await deleted.query('BEGIN')
+    await emitter.emit(deleted, 'onboarding', { ...baseEntry, entityId: 'emp-2', before: { status: 'active' }, after: undefined })
+    await deleted.query('COMMIT')
+
+    const rows = db.debugOutboxRows()
+    expect(rows[0]?.payload).toMatchObject({ beforeHash: null, afterHash: hashValue({ status: 'active' }) })
+    expect(rows[1]?.payload).toMatchObject({ beforeHash: hashValue({ status: 'active' }), afterHash: null })
   })
 })

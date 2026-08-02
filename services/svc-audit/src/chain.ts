@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { canonicalJson, hashValue, sha256Hex } from '@gadong/kernel'
 
 /**
  * Pure hash-chain core — no database, no NestJS, no I/O. Deliberately
@@ -16,7 +16,20 @@ import { createHash } from 'node:crypto'
  * (chicken-and-egg). Ordering/tamper-evidence does not need it — that is
  * what `prev_entry_hash` chaining already provides; `id` only orders the
  * `/verify` walk (`ORDER BY id ASC`), it plays no part in any hash.
+ *
+ * `canonicalJson`/`hashValue`/`sha256Hex` are imported from `@gadong/kernel`
+ * (Task 9b), not defined here, and re-exported below so every existing
+ * import of them from this module keeps working unchanged. They used to be
+ * defined in this file; they moved to the kernel because `AuditEmitter`
+ * (`packages/kernel/src/audit/emitter.ts`) now hashes `before`/`after`
+ * before they reach the outbox (closing the plaintext-in-outbox gap the
+ * roadmap's "Audit payloads must carry hashes, not values" describes), and
+ * that hash must be byte-for-byte identical to the one this chain
+ * recomputes later — importing the same function from one place makes that
+ * a compile-time guarantee instead of a "please keep two copies in sync"
+ * convention.
  */
+export { canonicalJson, hashValue, sha256Hex }
 
 /** SHA-256 of an empty predecessor — the well-known constant every genuine chain's first entry must declare as its `prev_entry_hash`. Same length (64 hex chars) as every other link in the chain, so a genesis row is not a structurally different case `/verify` has to special-case. */
 export const GENESIS_PREV_HASH = '0'.repeat(64)
@@ -39,46 +52,6 @@ export interface StoredEntry extends ChainContent {
   id: string
   prevEntryHash: string
   entryHash: string
-}
-
-export function sha256Hex(input: string): string {
-  return createHash('sha256').update(input, 'utf8').digest('hex')
-}
-
-/**
- * Recursively sorts every object's keys so two objects with the same keys
- * in a different insertion order canonicalise identically —
- * `JSON.stringify` alone preserves insertion order, which is exactly what
- * canonical JSON must NOT be sensitive to. Arrays keep their order (element
- * order is semantic content, not incidental like key insertion order).
- * `undefined` (from an omitted/optional field surviving into this call) is
- * folded to `null` so this function is total — `JSON.stringify(undefined)`
- * returns `undefined`, not a string, which would otherwise make
- * `canonicalJson` occasionally not return a `string` at all.
- */
-function sortKeysDeep(value: unknown): unknown {
-  if (value === undefined) return null
-  if (value === null) return null
-  if (Array.isArray(value)) return value.map(sortKeysDeep)
-  if (typeof value === 'object') {
-    const obj = value as Record<string, unknown>
-    const sorted: Record<string, unknown> = {}
-    for (const key of Object.keys(obj).sort()) {
-      sorted[key] = sortKeysDeep(obj[key])
-    }
-    return sorted
-  }
-  return value
-}
-
-/** Deterministic JSON: same logical content, same string, regardless of source key order. */
-export function canonicalJson(value: unknown): string {
-  return JSON.stringify(sortKeysDeep(value))
-}
-
-/** `SHA256(canonical_json(value))` — used for `before_hash`/`after_hash`: the audit trail records that a value changed and can prove which value later (by re-hashing a value fetched, with purpose, through the owning service's audited API), without ever holding the value itself (roadmap "Audit payloads must carry hashes, not values"). */
-export function hashValue(value: unknown): string {
-  return sha256Hex(canonicalJson(value))
 }
 
 /** `entry_hash = SHA256(prev_entry_hash ‖ canonical_json(entry_without_hash))` — the concatenation is of the raw `prev_entry_hash` string with the canonical JSON string, not a JSON structure containing both (so `prev_entry_hash` is never re-encoded through `canonicalJson`, keeping the formula exactly as specified). */
