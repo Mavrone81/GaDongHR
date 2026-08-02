@@ -1,1 +1,6 @@
 export { buildVersion } from './version'
+export { GadongError, cryptoUnavailable, permissionDenied, sodViolation } from './errors'
+export type { DependencyState, HealthPayload } from './health'
+export { buildHealth } from './health'
+export type { EffectiveRecord } from './effective-date'
+export { resolveEffective } from './effective-date'
