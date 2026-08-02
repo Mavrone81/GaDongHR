@@ -35,22 +35,22 @@ importers:
 
   packages/kernel:
     dependencies:
-      '@nestjs/common':
-        specifier: ^11.1.28
-        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
       pg:
         specifier: ^8.13.0
         version: 8.22.0
+    devDependencies:
+      '@nestjs/common':
+        specifier: ^11.1.28
+        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.3
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
       rxjs:
         specifier: ^7.8.1
         version: 7.8.2
-    devDependencies:
-      '@types/pg':
-        specifier: ^8.11.10
-        version: 8.20.3
 
 packages:
 

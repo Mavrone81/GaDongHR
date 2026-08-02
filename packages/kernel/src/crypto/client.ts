@@ -43,8 +43,13 @@ function isBidxResponse(v: unknown): v is { bidx: string } {
   return isRecord(v) && typeof v['bidx'] === 'string'
 }
 
-/** True when a purpose is empty once both ordinary whitespace and zero-width characters are stripped. */
-function isBlankPurpose(purpose: string): boolean {
+/**
+ * True when a purpose is empty once both ordinary whitespace and zero-width characters are
+ * stripped. Exported because it is the one definition of "blank purpose" for every mandatory-
+ * purpose check in the kernel (also used by `AuditEmitter.emit` for `.sensitive.read` actions) —
+ * a PDPA requirement must not have two divergent definitions of what counts as satisfying it.
+ */
+export function isBlankPurpose(purpose: string): boolean {
   return purpose.trim().replace(ZERO_WIDTH_CHARS, '').length === 0
 }
 

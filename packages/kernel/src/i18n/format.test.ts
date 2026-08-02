@@ -43,4 +43,13 @@ describe('formatTHB', () => {
     // implementation cannot represent exactly. bigint must carry it exactly.
     expect(formatTHB(900719925474099300n, 'th')).toBe('฿9,007,199,254,740,993.00')
   })
+
+  it('renders zero satang (fix round 1, MINOR)', () => {
+    expect(formatTHB(0n, 'th')).toBe('฿0.00')
+  })
+
+  it('renders negative satang with a leading sign, not a negative baht sub-amount (fix round 1, MINOR)', () => {
+    expect(formatTHB(-2298675n, 'th')).toBe('-฿22,986.75')
+    expect(formatTHB(-1n, 'en')).toBe('-฿0.01')
+  })
 })
