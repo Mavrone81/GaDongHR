@@ -14,10 +14,12 @@ const MIN_CIPHERTEXT_BYTES = 28
 
 /**
  * A blind index is `HMAC-SHA256(k_class, normalise(plaintext))`, which is invariantly
- * 32 bytes. Anything shorter is not a real HMAC output — accepting it would let unrelated
- * rows collide on a truncated/empty index and match each other on a lookup by value.
+ * exactly 32 bytes — not a minimum, a fixed length. Anything shorter is not a real HMAC
+ * output and would let unrelated rows collide on a truncated/empty index; anything longer
+ * is equally not a real HMAC output and would still be a knowingly-malformed value written
+ * into a `<field>_bidx` column, even though an over-long value can't collide with a real one.
  */
-const MIN_BIDX_BYTES = 32
+const BIDX_BYTES = 32
 
 /**
  * Zero-width characters that survive `String.prototype.trim()` (which only strips
@@ -117,6 +119,12 @@ export class CryptoClient {
     // purpose must never fall through to a default.
     if (isBlankPurpose(purpose)) throw new Error('purpose is required')
 
+    // The client refuses to *produce* sub-floor ciphertext (see encryptBatch), so a
+    // sub-floor ciphertext arriving here means the stored column is corrupt — that is
+    // a crypto failure, not a caller bug, so it fails closed the same as any other
+    // crypto failure rather than being sent to the service.
+    if (ciphertext.length < MIN_CIPHERTEXT_BYTES) throw cryptoUnavailable()
+
     const body = {
       entityId,
       field,
@@ -148,9 +156,11 @@ export class CryptoClient {
     if (!isBidxResponse(response)) throw cryptoUnavailable()
 
     const buf = Buffer.from(response.bidx, 'base64')
-    // A too-short decode cannot be a real HMAC-SHA256 output. Accepting it would let
-    // e.g. two employees with a 0-byte bidx collide and match each other on lookup.
-    if (buf.length < MIN_BIDX_BYTES) throw cryptoUnavailable()
+    // HMAC-SHA256 output is exactly 32 bytes, always — so this is an equality check,
+    // not a floor. Too short lets unrelated rows collide on a truncated/empty index;
+    // too long can't collide with a real bidx, but is still a malformed value we must
+    // not write to a `<field>_bidx` column.
+    if (buf.length !== BIDX_BYTES) throw cryptoUnavailable()
 
     return buf
   }

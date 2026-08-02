@@ -131,42 +131,76 @@ describe('CryptoClient.decrypt', () => {
   })
 
   it('transmits the trimmed purpose so the audit entry does not record surrounding whitespace', async () => {
+    const ct = Buffer.alloc(28, 2) // valid ciphertext-floor-length fixture
     const transport = okTransport({ '/decrypt': { value: '1101700207364' } })
     const c = new CryptoClient(transport)
-    await c.decrypt('emp-1', 'national_id', Buffer.from('ct'), '  payroll_sso_filing  ')
+    await c.decrypt('emp-1', 'national_id', ct, '  payroll_sso_filing  ')
     expect(transport.post).toHaveBeenCalledWith('/decrypt', {
       entityId: 'emp-1',
       field: 'national_id',
-      ciphertext: Buffer.from('ct').toString('base64'),
+      ciphertext: ct.toString('base64'),
       purpose: 'payroll_sso_filing',
     })
   })
 
   it('passes entityId and field so AAD is reconstructed on the service side', async () => {
+    const ct = Buffer.alloc(28, 2) // valid ciphertext-floor-length fixture
     const transport = okTransport({ '/decrypt': { value: '1101700207364' } })
     const c = new CryptoClient(transport)
-    const v = await c.decrypt('emp-1', 'national_id', Buffer.from('ct'), 'payroll_sso_filing')
+    const v = await c.decrypt('emp-1', 'national_id', ct, 'payroll_sso_filing')
     expect(v).toBe('1101700207364')
     expect(transport.post).toHaveBeenCalledWith('/decrypt', {
       entityId: 'emp-1',
       field: 'national_id',
-      ciphertext: Buffer.from('ct').toString('base64'),
+      ciphertext: ct.toString('base64'),
       purpose: 'payroll_sso_filing',
     })
   })
 
   it('fails closed on transport error', async () => {
+    // Valid-length ciphertext argument so this rejection is unambiguously the
+    // transport failure, not incidentally the ciphertext-floor check below.
     const transport: CryptoTransport = { post: jest.fn().mockRejectedValue(new Error('sealed')) }
     await expect(
-      new CryptoClient(transport).decrypt('e', 'f', Buffer.from('c'), 'p'),
+      new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(28, 3), 'p'),
     ).rejects.toMatchObject({ code: 'CRY-503' })
   })
 
   it('fails closed with CRY-503 when the response has no string value', async () => {
+    // Valid-length ciphertext argument so this rejection is unambiguously the
+    // malformed-response branch, not incidentally the ciphertext-floor check below.
     const transport = okTransport({ '/decrypt': { value: 42 } })
     await expect(
-      new CryptoClient(transport).decrypt('e', 'f', Buffer.from('c'), 'p'),
+      new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(28, 3), 'p'),
     ).rejects.toMatchObject({ code: 'CRY-503' })
+  })
+
+  it('fails closed with CRY-503 when the ciphertext argument is empty (0 bytes)', async () => {
+    const transport = okTransport({ '/decrypt': { value: 'irrelevant' } })
+    await expect(
+      new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(0), 'p'),
+    ).rejects.toMatchObject({ code: 'CRY-503', httpStatus: 503 })
+    expect(transport.post).not.toHaveBeenCalled()
+  })
+
+  it('fails closed with CRY-503 when the ciphertext argument is below the 28-byte floor (27 bytes)', async () => {
+    const transport = okTransport({ '/decrypt': { value: 'irrelevant' } })
+    await expect(
+      new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(27, 1), 'p'),
+    ).rejects.toMatchObject({ code: 'CRY-503', httpStatus: 503 })
+    expect(transport.post).not.toHaveBeenCalled()
+  })
+
+  it('accepts a ciphertext argument exactly at the 28-byte floor', async () => {
+    const transport = okTransport({ '/decrypt': { value: '1101700207364' } })
+    const v = await new CryptoClient(transport).decrypt('e', 'f', Buffer.alloc(28, 1), 'p')
+    expect(v).toBe('1101700207364')
+    expect(transport.post).toHaveBeenCalledWith('/decrypt', {
+      entityId: 'e',
+      field: 'f',
+      ciphertext: Buffer.alloc(28, 1).toString('base64'),
+      purpose: 'p',
+    })
   })
 })
 
@@ -184,6 +218,17 @@ describe('CryptoClient.blindIndex', () => {
 
   it('fails closed with CRY-503 when the response decodes to less than the 32-byte HMAC-SHA256 length (31 bytes)', async () => {
     const transport = okTransport({ '/bidx': { bidx: Buffer.alloc(31, 1).toString('base64') } })
+    const c = new CryptoClient(transport)
+    await expect(
+      c.blindIndex('S3', 'email', 'somchai@example.com'),
+    ).rejects.toMatchObject({ code: 'CRY-503', httpStatus: 503 })
+  })
+
+  it('fails closed with CRY-503 when the response decodes to more than the 32-byte HMAC-SHA256 length (33 bytes)', async () => {
+    // An over-long value can't collide with a real 32-byte bidx, but it is still a
+    // knowingly-malformed value that must never be written to a `<field>_bidx` column —
+    // the check is an exact-length equality, not a minimum.
+    const transport = okTransport({ '/bidx': { bidx: Buffer.alloc(33, 1).toString('base64') } })
     const c = new CryptoClient(transport)
     await expect(
       c.blindIndex('S3', 'email', 'somchai@example.com'),
