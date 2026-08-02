@@ -20,3 +20,11 @@ export {
   CONNECTION_TIMEOUT_MS,
   MAX_POOL_SIZE,
 } from './db/pool'
+export type { Decision, AuthzTransport } from './authz/client'
+export { AuthzClient } from './authz/client'
+export type { AuthenticatedRequest } from './authz/guard'
+export { RequirePermission, PermissionGuard } from './authz/guard'
+export type { AuditEntry } from './audit/emitter'
+export { AuditEmitter } from './audit/emitter'
+export type { Locale } from './i18n/format'
+export { toBuddhistEra, formatDate, formatTHB } from './i18n/format'
