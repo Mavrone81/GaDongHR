@@ -115,7 +115,31 @@ biometric.template.read
 | **S1** | rosters, shift definitions, leave types, org units | plaintext; TLS + volume encryption |
 | **S0** | i18n bundles, holiday names | no special treatment |
 
-Encrypted columns are `bytea`. Ciphertext layout is `wrappedDEK ‖ nonce ‖ ct ‖ tag`, AES-256-GCM, **AAD = `entity_id + field_name`** so ciphertext cannot be swapped between rows or fields. Searchable S3 fields get a companion `<field>_bidx bytea` = `HMAC-SHA256(k_class, normalise(plaintext))`.
+Encrypted columns are `bytea`. AES-256-GCM, **AAD = `entity_id + ':' + field_name`** so ciphertext cannot be swapped between rows or fields.
+
+**Ciphertext layout (revised 2026-08-02, Task 3 review):**
+
+```
+u16be(len(wrappedDEK)) ‖ wrappedDEK ‖ nonce(12) ‖ ct ‖ tag(16)
+```
+
+The 2-byte big-endian length prefix was added because the original
+`wrappedDEK ‖ nonce ‖ ct ‖ tag` has no delimiter — a reader cannot find where the wrapped key
+ends, so **no consumer can validate anything beyond a total length**. Concretely, the Task 3
+review verified that a 45-character plaintext address echoed back by a compromised or buggy
+`svc-crypto` is accepted as valid ciphertext under a total-length check alone. The prefix makes
+the envelope self-describing and lets both the kernel client and `svc-crypto` reject a
+structurally impossible blob.
+
+**Minimum valid length** = `2 + len(wrappedDEK) + 12 + 0 + 16`. With Vault Transit's wrapped
+datakey this is roughly 68–100 bytes; the exact floor is pinned in Task 6 once the wrap format is
+fixed, and `@gadong/kernel`'s `MIN_CIPHERTEXT_BYTES` must be raised from its present provisional
+value of 28 in the same change. **28 is a true lower bound** (a zero-length wrapped key and empty
+plaintext) so it can never reject legitimate ciphertext — it is simply far too permissive to
+catch an echoed plaintext.
+
+⚠️ Kernel and `svc-crypto` must adopt the layout and the floor **together**. A mismatch means one
+side writes envelopes the other rejects. Searchable S3 fields get a companion `<field>_bidx bytea` = `HMAC-SHA256(k_class, normalise(plaintext))`.
 
 **Fail closed:** if Vault is sealed or unreachable, S2/S3 operations return 503. There is no plaintext fallback, ever.
 
