@@ -1,9 +1,29 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/kernel" },
-    { "path": "./services/svc-crypto" },
-    { "path": "./services/svc-config" },
-    { "path": "./services/svc-authz" }
+    {
+      "path": "./packages/kernel"
+    },
+    {
+      "path": "./services/svc-audit"
+    },
+    {
+      "path": "./services/svc-authz"
+    },
+    {
+      "path": "./services/svc-config"
+    },
+    {
+      "path": "./services/svc-crypto"
+    },
+    {
+      "path": "./services/svc-docs"
+    },
+    {
+      "path": "./services/svc-i18n"
+    },
+    {
+      "path": "./services/svc-notify"
+    }
   ]
 }
