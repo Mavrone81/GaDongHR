@@ -9,8 +9,13 @@
  *     ot_3x numeric, leave_code text null, status text)
  *   timesheet.time_exception(id uuid pk, day_record_id uuid fk, kind text,
  *     resolution text, resolved_by uuid, reason text)
- *   timesheet.period(id uuid pk, range daterange UK, status text,
+ *   timesheet.period(id uuid pk, range daterange, status text,
  *     lock_version int, locked_by uuid, locked_at timestamptz)
+ *     — range overlap prevented by an EXCLUDE USING gist constraint, not a
+ *     plain UNIQUE (see the `period_no_overlap` comment below: fix round 1,
+ *     coordinator review, 2026-08-02 — a bare UNIQUE only rejects two
+ *     *identical* ranges, not overlapping ones, which leaves `lock_version`
+ *     without a defined meaning for a day claimed by two periods at once).
  *
  * Plus the two tables every schema carries — `outbox` and
  * `processed_events(event_id PK)` (roadmap "Database conventions") — and
@@ -211,23 +216,47 @@ exports.up = (pgm) => {
     },
     {
       constraints: {
-        // Task 14 brief / DATABASE-DESIGN §2.3: `range daterange UK`,
-        // literally a UNIQUE constraint on the range value — not an
-        // EXCLUDE-USING-gist overlap guard. A plain UNIQUE stops two
-        // periods with the *identical* range from being created twice
-        // (e.g. a retried "open next period" call); it does not by itself
-        // stop two *different, overlapping* ranges (e.g. Aug 1-15 and
-        // Aug 10-20) from coexisting — that would need `EXCLUDE USING
-        // gist (range WITH &&)`, deliberately left for Phase 3's period
-        // service to add if the business rule requires it, since this
-        // task's scope is schema shape, not lock workflow logic.
-        period_range_key: { unique: ['range'] },
         period_status_check: { check: "status IN ('open', 'locked')" },
         period_lock_version_check: { check: 'lock_version >= 0' },
       },
     },
   )
   pgm.createIndex({ schema: 'timesheet', name: 'period' }, ['status'])
+
+  // Fix round 1 (coordinator review, 2026-08-02): a plain `UNIQUE (range)`
+  // — the first version of this migration — only rejects two periods with
+  // the *identical* bounds. It does nothing to stop two *different,
+  // overlapping* ranges from coexisting, e.g. 2026-08-01..2026-08-31 and
+  // 2026-08-15..2026-09-15 can both exist under a bare UNIQUE. Both then
+  // contain 2026-08-20, so a `day_record` for that date falls inside two
+  // periods at once, and a payroll run pinning `PAYROLL_RUN
+  // .timesheet_lock_version` to one of them (roadmap DATABASE-DESIGN
+  // §2.5) has no defined answer for which period's lock actually governs
+  // that day's hours — a wage dispute with no row in this schema able to
+  // resolve it. An `EXCLUDE` constraint using the range-overlap operator
+  // (`&&`) rejects the INSERT/UPDATE outright, at the database, the
+  // moment it would create that ambiguity — no window exists in which two
+  // overlapping periods are both live.
+  //
+  // `btree_gist` is required for a GiST index/exclusion constraint over a
+  // range type at all (GiST needs the `&&`/range operator class it
+  // provides); added via `createExtension` (not raw `CREATE EXTENSION`
+  // SQL) so it is idempotent the same way `createSchema(...,
+  // {ifNotExists:true})` is. Added now, before this table holds any rows,
+  // specifically because adding it later against a populated `period`
+  // table means an ACCESS EXCLUSIVE lock on the busiest table in the
+  // system — cheap now, expensive later.
+  //
+  // node-pg-migrate has no first-class helper for an `EXCLUDE` constraint
+  // (only `UNIQUE`/`CHECK`/`FOREIGN KEY` via `constraints:` /
+  // `addConstraint`), so this is raw SQL via `pgm.sql(...)` — the normal
+  // way to do this with this migration tool.
+  pgm.createExtension('btree_gist', { ifNotExists: true })
+  pgm.sql(`
+    ALTER TABLE timesheet.period
+      ADD CONSTRAINT period_no_overlap
+      EXCLUDE USING gist (range WITH &&);
+  `)
 
   // Local read model of `employee.created` / `employee.updated`
   // (roadmap "Event catalog") — see file header for why these columns and
@@ -282,5 +311,15 @@ exports.up = (pgm) => {
 }
 
 exports.down = (pgm) => {
+  // Explicit, ahead of the schema drop below: `dropSchema(..., {cascade:
+  // true})` would take the constraint with it anyway, but naming the drop
+  // here makes it a written statement (matching this file's own
+  // `day_record`/`period` CHECK constraints, which are likewise dropped
+  // implicitly by the schema cascade but are never relied on to vanish
+  // silently) rather than an assumption resting on cascade behaviour.
+  // `btree_gist` is deliberately NOT dropped here — it is a cluster-wide
+  // extension other schemas may also depend on; tearing down one
+  // service's schema must never remove a shared Postgres extension.
+  pgm.sql('ALTER TABLE IF EXISTS timesheet.period DROP CONSTRAINT IF EXISTS period_no_overlap;')
   pgm.dropSchema('timesheet', { cascade: true, ifExists: true })
 }

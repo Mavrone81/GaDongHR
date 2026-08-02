@@ -7,12 +7,16 @@ import { join } from 'node:path'
  * complementary techniques, both used elsewhere in this repo:
  *
  *  - A structured **fake `pgm` recorder**, in the spirit of
- *    `services/svc-config/src/testing/fake-db.ts`: `exports.up` is invoked
- *    for real against a minimal stand-in for node-pg-migrate's builder, so
- *    assertions read the actual `{type, notNull, ...}` column specs the
- *    migration passes, not a regex approximation of them. This is what
- *    proves "the three OT columns are numeric, not real/double precision"
- *    precisely.
+ *    `services/svc-config/src/testing/fake-db.ts`: `exports.up` (and
+ *    `exports.down`) are invoked for real against a minimal stand-in for
+ *    node-pg-migrate's builder, so assertions read the actual
+ *    `{type, notNull, ...}` column specs the migration passes, not a regex
+ *    approximation of them. This is what proves "the three OT columns are
+ *    numeric, not real/double precision" precisely, and — since
+ *    node-pg-migrate has no first-class `EXCLUDE` constraint helper — what
+ *    lets the `period.range` overlap-exclusion assertions check the exact
+ *    `pgm.sql(...)` statement text (fix round 1, coordinator review,
+ *    2026-08-02) rather than merely "some SQL was emitted somewhere".
  *  - **Source-text regex** (matching `services/svc-audit/src/migration.test.ts`)
  *    for properties that are about the *absence* of something (no
  *    cross-schema `REFERENCES`) or about exact SQL fragments (`UNIQUE`,
@@ -64,6 +68,8 @@ class FakePgmRecorder {
   readonly schemas: CreateSchemaCall[] = []
   readonly tables: CreateTableCall[] = []
   readonly indexes: Array<{ schema: string; name: string; columns: string[]; options: Record<string, unknown> }> = []
+  readonly extensions: Array<{ name: string; options: Record<string, unknown> }> = []
+  readonly sqlStatements: string[] = []
   private readonly existingSchemas = new Set<string>()
   private readonly existingTables = new Set<string>()
 
@@ -73,6 +79,16 @@ class FakePgmRecorder {
     }
     this.existingSchemas.add(name)
     this.schemas.push({ name, options })
+  }
+
+  /** `pgm.createExtension('btree_gist', { ifNotExists: true })` — recorded, not executed (no real Postgres here). */
+  createExtension(name: string, options: Record<string, unknown> = {}): void {
+    this.extensions.push({ name, options })
+  }
+
+  /** `pgm.sql(...)` — the escape hatch node-pg-migrate itself recommends for anything with no first-class builder method (here: the `EXCLUDE USING gist` constraint). Recorded verbatim, not executed. */
+  sql(statement: string): void {
+    this.sqlStatements.push(statement)
   }
 
   createTable(
@@ -257,18 +273,69 @@ describe('timesheet schema migration — period', () => {
     expect(period.columns['lock_version']?.type).toBe('integer')
   })
 
-  it('range is a daterange column with a UNIQUE constraint (period_range_key)', () => {
+  it('range is a daterange column', () => {
     const recorder = new FakePgmRecorder()
     loadMigration().up(recorder)
     const period = table(recorder, 'period')
 
     expect(period.columns['range']).toMatchObject({ type: 'daterange', notNull: true })
+  })
+
+  /**
+   * Fix round 1 (coordinator review, 2026-08-02): the first version of this
+   * migration guarded `range` with a plain `UNIQUE (range)`. That only
+   * rejects two periods with the *identical* bounds — it does nothing to
+   * stop 2026-08-01..2026-08-31 and 2026-08-15..2026-09-15 coexisting, even
+   * though both then claim 2026-08-20, leaving `lock_version` with no
+   * defined meaning for that day. The fix is a real overlap-exclusion
+   * constraint, which node-pg-migrate has no first-class builder for — it
+   * has to be raw SQL via `pgm.sql(...)`, so this asserts the EXACT
+   * statement text (gist index method + `&&` overlap operator), not just
+   * "some constraint exists on range".
+   */
+  it('range overlap is prevented by an EXCLUDE USING gist(range WITH &&) constraint — NOT a plain UNIQUE', () => {
+    const recorder = new FakePgmRecorder()
+    loadMigration().up(recorder)
+
+    const excludeStatement = recorder.sqlStatements.find((s) => /EXCLUDE/i.test(s))
+    expect(excludeStatement).toBeDefined()
+    expect(excludeStatement).toMatch(/ALTER TABLE\s+timesheet\.period/i)
+    expect(excludeStatement).toMatch(/ADD CONSTRAINT\s+period_no_overlap/i)
+    expect(excludeStatement).toMatch(/EXCLUDE USING gist\s*\(\s*range\s+WITH\s+&&\s*\)/i)
+
+    // The old guard must be gone, not merely supplemented: no `unique`
+    // naming `range` anywhere in `period`'s structured constraints.
+    const period = table(recorder, 'period')
     const constraints = period.options['constraints'] as Record<string, { unique?: string[] | string }> | undefined
     const rangeUnique = Object.values(constraints ?? {}).find((c) => {
       const cols = Array.isArray(c.unique) ? c.unique : c.unique !== undefined ? [c.unique] : []
       return cols.includes('range')
     })
-    expect(rangeUnique).toBeDefined()
+    expect(rangeUnique).toBeUndefined()
+  })
+
+  it('creates the btree_gist extension (required for a GiST exclusion constraint over a range type), idempotently', () => {
+    const recorder = new FakePgmRecorder()
+    loadMigration().up(recorder)
+
+    const btreeGist = recorder.extensions.find((e) => e.name === 'btree_gist')
+    expect(btreeGist).toBeDefined()
+    expect(btreeGist?.options).toMatchObject({ ifNotExists: true })
+  })
+
+  it('the down migration drops period_no_overlap (and never drops the shared btree_gist extension)', () => {
+    const recorder = new FakePgmRecorder()
+    const migration = loadMigration()
+    migration.up(recorder)
+    migration.down(recorder)
+
+    const dropStatement = recorder.sqlStatements.find((s) => /DROP CONSTRAINT/i.test(s))
+    expect(dropStatement).toBeDefined()
+    expect(dropStatement).toMatch(/ALTER TABLE(\s+IF EXISTS)?\s+timesheet\.period/i)
+    expect(dropStatement).toMatch(/DROP CONSTRAINT(\s+IF EXISTS)?\s+period_no_overlap/i)
+
+    const source = migrationSource()
+    expect(source).not.toMatch(/dropExtension\(\s*['"]btree_gist['"]/)
   })
 
   it('also carries locked_by and locked_at, and status/lock_version columns per the ERD', () => {
