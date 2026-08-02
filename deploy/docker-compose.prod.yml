@@ -1,0 +1,66 @@
+# GaDongHR — production overlay (Task 13)
+#
+# Applied on top of docker-compose.yml on gadonghr-prod ONLY:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Replaces every one of the seven services' `build:` with a pinned GHCR
+# `image:` and `pull_policy: always`. `build: !reset null` is not a no-op
+# comment — without it, Compose's merge would keep the base file's
+# `build:` key alongside this file's `image:`, and `docker compose up`
+# builds automatically for any service with a `build:` key whose image
+# isn't already present locally. On a server that has the git checkout
+# (needed for `docker-entrypoint-initdb.d`/`vault.hcl`/scripts) but must
+# NEVER build (roadmap "Standing constraints": "Build only in CI, pull
+# from ghcr.io/mavrone81/gadonghr-<service>. Never `docker compose build`
+# on the server."), that silent auto-build path is exactly the failure
+# this overlay exists to close. Verified empirically: `docker compose
+# -f docker-compose.yml -f docker-compose.prod.yml config` (this file's
+# own test, deploy/compose-validation.test.ts) shows no service with both
+# `build` and `image` set.
+#
+# `GADONG_BUILD_SHA` is the exact commit sha CI built and pushed
+# (auto-deploy-gadonghr.sh sets it from `refs/ci-pass/<sha>` before
+# calling this). The `:-latest` fallback exists ONLY so this file parses
+# in CI/local validation with no `.env` present — production deploys
+# always pass a real sha; `auto-deploy-gadonghr.sh` never lets `latest`
+# reach a running container (see that script's header).
+
+name: gadonghr
+
+services:
+  svc-crypto:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-crypto:${GADONG_BUILD_SHA:-latest}
+    pull_policy: always
+
+  svc-config:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-config:${GADONG_BUILD_SHA:-latest}
+    pull_policy: always
+
+  svc-authz:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-authz:${GADONG_BUILD_SHA:-latest}
+    pull_policy: always
+
+  svc-audit:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-audit:${GADONG_BUILD_SHA:-latest}
+    pull_policy: always
+
+  svc-i18n:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-i18n:${GADONG_BUILD_SHA:-latest}
+    pull_policy: always
+
+  svc-notify:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-notify:${GADONG_BUILD_SHA:-latest}
+    pull_policy: always
+
+  svc-docs:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-docs:${GADONG_BUILD_SHA:-latest}
+    pull_policy: always
