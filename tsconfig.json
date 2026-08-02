@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/kernel" },
     { "path": "./services/svc-crypto" },
-    { "path": "./services/svc-config" }
+    { "path": "./services/svc-config" },
+    { "path": "./services/svc-authz" }
   ]
 }
