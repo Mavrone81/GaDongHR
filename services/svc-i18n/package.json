@@ -4,8 +4,7 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -b",
-    "start": "node dist/main.js",
-    "migrate": "node-pg-migrate -m migrations up"
+    "start": "node dist/main.js"
   },
   "name": "@gadong/svc-i18n",
   "dependencies": {
