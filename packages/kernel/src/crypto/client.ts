@@ -4,13 +4,27 @@ import type { CryptoTransport, EncryptRequest, FieldClass } from './types'
 export type { CryptoTransport, EncryptRequest, FieldClass } from './types'
 
 /**
- * Ciphertext layout is `wrappedDEK ‖ nonce ‖ ct ‖ tag` (AES-256-GCM), per the roadmap's
- * data-classification contract. The GCM nonce is 12 bytes and the GCM tag is 16 bytes, so
- * even a response with a zero-length wrappedDEK and an empty plaintext must decode to at
- * least 28 bytes. Anything shorter — including an empty string — cannot be genuine
- * ciphertext, so it must never be written to a `bytea` column believing it is.
+ * Ciphertext layout is `u16be(len(wrappedDEK)) ‖ wrappedDEK ‖ nonce(12) ‖ ct ‖ tag(16)`
+ * (AES-256-GCM), per the roadmap's data-classification contract (revised 2026-08-02,
+ * Task 3 review — supersedes the earlier prefix-less `wrappedDEK ‖ nonce ‖ ct ‖ tag`,
+ * which had no delimiter and so could only be checked on total length). The 2-byte
+ * big-endian length prefix is what lets a reader find where `wrappedDEK` ends at all.
+ *
+ * `svc-crypto` (Task 6) wraps each 32-byte DEK with Vault Transit's `datakey/plaintext`
+ * operation, whose ciphertext is the string `vault:v1:` + base64(version(1) ‖ nonce(12)
+ * ‖ ct(32) ‖ tag(16)) — 9 + base64(61 bytes) = 9 + 84 = 93 ASCII bytes. That 93-byte
+ * figure is pinned by `services/svc-crypto/src/vault.client.test.ts`
+ * ("pins the wrappedDek byte length from a realistic Vault response"), not by memory,
+ * per Task 6 brief §4. So the true floor is:
+ *
+ *   2 (length prefix) + 93 (wrappedDEK) + 12 (nonce) + 0 (empty ct) + 16 (tag) = 123
+ *
+ * Anything shorter — including an empty string — cannot be genuine ciphertext under
+ * this wrap format, so it must never be written to a `bytea` column believing it is.
+ * Kernel and `svc-crypto` must move this floor together: a mismatch means one side
+ * writes envelopes the other rejects (roadmap "Contracts every phase depends on").
  */
-const MIN_CIPHERTEXT_BYTES = 28
+const MIN_CIPHERTEXT_BYTES = 123
 
 /**
  * A blind index is `HMAC-SHA256(k_class, normalise(plaintext))`, which is invariantly
