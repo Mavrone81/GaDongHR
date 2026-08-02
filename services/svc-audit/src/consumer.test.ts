@@ -6,6 +6,14 @@ import { GENESIS_PREV_HASH, computeEntryHash, hashValue } from './chain'
 
 const FIXED_NOW = new Date('2026-08-01T12:00:00.000Z')
 
+/**
+ * Hand-written fixture in the CORRECT (post-`bae5a8a`) wire shape:
+ * `beforeHash`/`afterHash`, never raw `before`/`after` — this is what
+ * `AuditEmitter.emit` actually puts on the wire. `wire-contract.test.ts`
+ * covers the shape by going through the real emitter instead of agreeing
+ * with itself; these fixtures exist for consumer-side behaviour (fail-closed
+ * validation, idempotency, chaining) that doesn't need a real emitter.
+ */
 function basePayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     actorId: 'user-1',
@@ -13,8 +21,8 @@ function basePayload(overrides: Record<string, unknown> = {}): Record<string, un
     action: 'employee.update',
     entity: 'employee',
     entityId: 'emp-1',
-    before: { status: 'active' },
-    after: { status: 'terminated' },
+    beforeHash: hashValue({ status: 'active' }),
+    afterHash: hashValue({ status: 'terminated' }),
     ...overrides,
   }
 }
@@ -41,7 +49,7 @@ describe('AuditConsumer.consume', () => {
     expect(rows[0]?.entity_id).toBe('emp-1')
   })
 
-  it('hashes before/after — the row never carries the raw values', async () => {
+  it('stores the beforeHash/afterHash the payload carries, unchanged — no re-hashing, and the row never carries a raw value', async () => {
     const db = new FakeAuditDb()
     const consumer = new AuditConsumer(new EntriesRepository(db.asPool()), () => FIXED_NOW)
     const tx = db.connect()
@@ -149,18 +157,68 @@ describe('AuditConsumer.consume', () => {
     expect(db.debugEntries()[0]?.purpose).toBe('payroll export')
   })
 
-  it('a non-sensitive action with no before/after stores null hashes, not a hash of null', async () => {
+  it('a payload carrying explicit null beforeHash/afterHash (a create or delete) stores null hashes — legitimate, not an error', async () => {
     const db = new FakeAuditDb()
     const consumer = new AuditConsumer(new EntriesRepository(db.asPool()), () => FIXED_NOW)
     const tx = db.connect()
 
     await tx.query('BEGIN')
-    await consumer.consume(tx, event({ payload: basePayload({ before: undefined, after: undefined }) }))
+    await consumer.consume(tx, event({ payload: basePayload({ beforeHash: null, afterHash: null }) }))
     await tx.query('COMMIT')
 
     const row = db.debugEntries()[0]
     expect(row?.before_hash).toBeNull()
     expect(row?.after_hash).toBeNull()
+  })
+
+  it('rejects a payload carrying neither beforeHash/afterHash nor a recognised shape — no entry is written, and the event is not marked processed', async () => {
+    const db = new FakeAuditDb()
+    const consumer = new AuditConsumer(new EntriesRepository(db.asPool()), () => FIXED_NOW)
+    const tx = db.connect()
+    const malformed = basePayload()
+    delete (malformed as Record<string, unknown>)['beforeHash']
+    delete (malformed as Record<string, unknown>)['afterHash']
+
+    await tx.query('BEGIN')
+    await expect(consumer.consume(tx, event({ payload: malformed }))).rejects.toThrow(/beforeHash|afterHash/)
+    await tx.query('ROLLBACK')
+
+    expect(db.debugEntries()).toHaveLength(0)
+  })
+
+  it('rejects the legacy pre-bae5a8a shape (raw before/after, no hash fields) rather than treating it as null hashes', async () => {
+    const db = new FakeAuditDb()
+    const consumer = new AuditConsumer(new EntriesRepository(db.asPool()), () => FIXED_NOW)
+    const tx = db.connect()
+    const legacy = {
+      actorId: 'user-1',
+      actorRole: 'hr-officer',
+      action: 'employee.update',
+      entity: 'employee',
+      entityId: 'emp-1',
+      before: { salary: 45000 },
+      after: { salary: 47000 },
+    }
+
+    await tx.query('BEGIN')
+    await expect(consumer.consume(tx, event({ payload: legacy }))).rejects.toThrow(/beforeHash|afterHash/)
+    await tx.query('ROLLBACK')
+
+    expect(db.debugEntries()).toHaveLength(0)
+  })
+
+  it('rejects a payload carrying only one of beforeHash/afterHash (partial/truncated, not a legitimate create or delete)', async () => {
+    const db = new FakeAuditDb()
+    const consumer = new AuditConsumer(new EntriesRepository(db.asPool()), () => FIXED_NOW)
+    const tx = db.connect()
+    const partial = basePayload()
+    delete (partial as Record<string, unknown>)['afterHash']
+
+    await tx.query('BEGIN')
+    await expect(consumer.consume(tx, event({ payload: partial }))).rejects.toThrow(/beforeHash|afterHash/)
+    await tx.query('ROLLBACK')
+
+    expect(db.debugEntries()).toHaveLength(0)
   })
 
   it('the inserted entry_hash matches an independent recomputation via chain.ts', async () => {
