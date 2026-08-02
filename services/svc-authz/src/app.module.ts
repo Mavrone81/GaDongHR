@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { Module } from '@nestjs/common'
-import { AuthzClient, PermissionGuard, createPool } from '@gadong/kernel'
+import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
+import { AuthzClient, OidcMiddleware, PermissionGuard, createPool } from '@gadong/kernel'
 import type { AuthzTransport, Queryable } from '@gadong/kernel'
 import { DB_POOL, AuthzController } from './authz.controller'
 import { AuthzService } from './authz.service'
@@ -51,10 +52,30 @@ function requiredEnv(name: string): string {
   return value
 }
 
+/**
+ * Task 13c: closes the gap where `PermissionGuard` reads `request.userId`
+ * but nothing ever set it — see `services/svc-config/src/app.module.ts`'s
+ * `createOidcMiddleware` comment for the full story. Applied here too,
+ * ahead of the three `@UseGuards(PermissionGuard)` admin routes on
+ * `AuthzController` — those need a populated `request.userId` exactly like
+ * every other guarded route in this system. It also runs ahead of
+ * `POST /decide` (deliberately unguarded — see the module doc below), which
+ * is fine: this middleware never throws and `/decide`'s handler never reads
+ * `request.userId`, so its presence there is a harmless no-op, not a guard.
+ */
+function createOidcMiddleware(): OidcMiddleware {
+  return new OidcMiddleware({
+    issuer: requiredEnv('OIDC_ISSUER'),
+    audience: requiredEnv('OIDC_AUDIENCE'),
+    jwksUri: requiredEnv('OIDC_JWKS_URI'),
+  })
+}
+
 @Module({
   controllers: [AuthzController],
   providers: [
     PermissionGuard,
+    { provide: OidcMiddleware, useFactory: createOidcMiddleware },
     {
       provide: AuthzClient,
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://127.0.0.1:3000')),
@@ -80,4 +101,8 @@ function requiredEnv(name: string): string {
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(OidcMiddleware).forRoutes('*')
+  }
+}

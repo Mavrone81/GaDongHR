@@ -47,6 +47,28 @@ x-http-health: &http-health
   retries: 10
   start_period: 20s
 
+# Task 13c: every service that mounts the kernel's `PermissionGuard`
+# (`packages/kernel/src/authz/guard.ts`) now also mounts `OidcMiddleware`
+# (`packages/kernel/src/authz/oidc.middleware.ts`) — the guard reads
+# `request.userId`, and until this task nothing ever set it, so every
+# guarded route was unreachable (`AUZ-403` on every request; found via
+# `seed.sh`'s pack import in Task 13, see task-13-report.md deviation 2).
+# `OIDC_ISSUER` MUST equal Keycloak's own configured issuer for this realm
+# — that is `--hostname=https://${PUBLIC_HOST}/auth` (below) plus
+# `/realms/<realm>`, the PUBLIC address, because that is the literal string
+# Keycloak stamps into every token's `iss` claim regardless of which
+# network path a service used to reach it. `OIDC_JWKS_URI` is the INTERNAL
+# address on purpose — a container-to-container JWKS fetch has no reason to
+# round-trip through Traefik/TLS the way a browser does, matching
+# `AUTHZ_URL`/`CRYPTO_URL` elsewhere in this file. Provisioning the
+# `gadonghr` realm and the `gadonghr-services` client inside Keycloak
+# itself (a one-time admin ceremony, analogous to `vault-init.sh`) is not
+# part of this file — see deploy/README.md's "Out of scope" section.
+x-oidc-env: &oidc-env
+  OIDC_ISSUER: https://${PUBLIC_HOST}/auth/realms/gadonghr
+  OIDC_AUDIENCE: gadonghr-services
+  OIDC_JWKS_URI: http://keycloak:8080/auth/realms/gadonghr/protocol/openid-connect/certs
+
 services:
   # ==================== Edge ====================
   traefik:
@@ -241,6 +263,7 @@ services:
     <<: *node-defaults
     mem_limit: 192m
     environment:
+      <<: *oidc-env
       NODE_ENV: ${NODE_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgresql://config:${DB_PASSWORD_CONFIG}@postgres:5432/${POSTGRES_DB}
@@ -249,6 +272,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       svc-authz: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
     healthcheck: *http-health
 
   svc-authz:
@@ -256,6 +280,7 @@ services:
     <<: *node-defaults
     mem_limit: 192m
     environment:
+      <<: *oidc-env
       NODE_ENV: ${NODE_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgresql://authz:${DB_PASSWORD_AUTHZ}@postgres:5432/${POSTGRES_DB}
@@ -266,6 +291,7 @@ services:
       AUTHZ_URL: http://svc-authz:3000
     depends_on:
       postgres: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
     healthcheck: *http-health
 
   svc-audit:
@@ -273,6 +299,7 @@ services:
     <<: *node-defaults
     mem_limit: 96m
     environment:
+      <<: *oidc-env
       NODE_ENV: ${NODE_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgresql://audit:${DB_PASSWORD_AUDIT}@postgres:5432/${POSTGRES_DB}
@@ -280,6 +307,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       svc-authz: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
     healthcheck: *http-health
 
   svc-i18n:
@@ -300,6 +328,7 @@ services:
     <<: *node-defaults
     mem_limit: 160m
     environment:
+      <<: *oidc-env
       NODE_ENV: ${NODE_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgresql://notify:${DB_PASSWORD_NOTIFY}@postgres:5432/${POSTGRES_DB}
@@ -314,6 +343,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       svc-authz: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
     healthcheck: *http-health
 
   svc-docs:
@@ -324,6 +354,7 @@ services:
     # deploy/README.md's memory budget table for the arithmetic.
     mem_limit: 512m
     environment:
+      <<: *oidc-env
       NODE_ENV: ${NODE_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgresql://docs:${DB_PASSWORD_DOCS}@postgres:5432/${POSTGRES_DB}
@@ -340,6 +371,7 @@ services:
       svc-authz: { condition: service_healthy }
       svc-crypto: { condition: service_healthy }
       minio: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
     healthcheck: *http-health
 
 networks:

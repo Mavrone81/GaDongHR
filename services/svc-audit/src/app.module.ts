@@ -1,7 +1,8 @@
 import 'reflect-metadata'
 import { Module } from '@nestjs/common'
+import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_GUARD } from '@nestjs/core'
-import { AuthzClient, PermissionGuard, createPool } from '@gadong/kernel'
+import { AuthzClient, OidcMiddleware, PermissionGuard, createPool } from '@gadong/kernel'
 import type { AuthzTransport, Queryable } from '@gadong/kernel'
 import { DB_POOL, EntriesController } from './entries.controller'
 import { EntriesService } from './entries.service'
@@ -34,6 +35,19 @@ function requiredEnv(name: string): string {
 }
 
 /**
+ * Task 13c: closes the gap where `PermissionGuard` reads `request.userId`
+ * but nothing ever set it — see `services/svc-config/src/app.module.ts`'s
+ * `createOidcMiddleware` comment for the full story; identical wiring here.
+ */
+function createOidcMiddleware(): OidcMiddleware {
+  return new OidcMiddleware({
+    issuer: requiredEnv('OIDC_ISSUER'),
+    audience: requiredEnv('OIDC_AUDIENCE'),
+    jwksUri: requiredEnv('OIDC_JWKS_URI'),
+  })
+}
+
+/**
  * `svc-audit` is reached by HR admins, auditors, and the DPO console
  * (`audit.read`), so — like `svc-config` and unlike `svc-crypto` — it
  * mounts the kernel's `PermissionGuard` as `APP_GUARD`: every route not
@@ -49,6 +63,7 @@ function requiredEnv(name: string): string {
   controllers: [EntriesController],
   providers: [
     { provide: APP_GUARD, useClass: PermissionGuard },
+    { provide: OidcMiddleware, useFactory: createOidcMiddleware },
     {
       provide: AuthzClient,
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
@@ -72,4 +87,8 @@ function requiredEnv(name: string): string {
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(OidcMiddleware).forRoutes('*')
+  }
+}

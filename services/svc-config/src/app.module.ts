@@ -1,7 +1,8 @@
 import 'reflect-metadata'
 import { Module } from '@nestjs/common'
+import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_GUARD } from '@nestjs/core'
-import { AuthzClient, PermissionGuard, createPool } from '@gadong/kernel'
+import { AuthzClient, OidcMiddleware, PermissionGuard, createPool } from '@gadong/kernel'
 import type { AuthzTransport, Queryable } from '@gadong/kernel'
 import { DB_POOL, RulesController } from './rules.controller'
 import { RulesService } from './rules.service'
@@ -35,6 +36,24 @@ function requiredEnv(name: string): string {
 }
 
 /**
+ * Task 13c: `PermissionGuard` reads `request.userId` but nothing ever set
+ * it — every guarded route was unreachable (`AUZ-403` on every request,
+ * found via `seed.sh`'s pack import in Task 13). `OidcMiddleware` (kernel
+ * `authz/oidc.middleware.ts`) is the fix: it validates the bearer token
+ * against Keycloak's real JWKS and populates `request.userId` from `sub`
+ * only on a fully verified token — never on a merely decoded one. `OIDC_*`
+ * come from config, matching `AUTHZ_URL`/`DATABASE_URL` below, never
+ * hard-coded.
+ */
+function createOidcMiddleware(): OidcMiddleware {
+  return new OidcMiddleware({
+    issuer: requiredEnv('OIDC_ISSUER'),
+    audience: requiredEnv('OIDC_AUDIENCE'),
+    jwksUri: requiredEnv('OIDC_JWKS_URI'),
+  })
+}
+
+/**
  * Unlike `svc-crypto` (deliberately no `PermissionGuard` — service-to-
  * service only), `svc-config` IS reached by HR admins and every other
  * service asking "what's the rule", so it mounts the kernel's
@@ -47,6 +66,7 @@ function requiredEnv(name: string): string {
   controllers: [RulesController],
   providers: [
     { provide: APP_GUARD, useClass: PermissionGuard },
+    { provide: OidcMiddleware, useFactory: createOidcMiddleware },
     {
       provide: AuthzClient,
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
@@ -80,4 +100,12 @@ function requiredEnv(name: string): string {
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  // Nest runs middleware ahead of guards for every matched route, so this
+  // ordering — `OidcMiddleware` populates `request.userId`, then
+  // `PermissionGuard` (registered above as `APP_GUARD`) reads it — is
+  // automatic; there is no separate "run before the guard" wiring needed.
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(OidcMiddleware).forRoutes('*')
+  }
+}
