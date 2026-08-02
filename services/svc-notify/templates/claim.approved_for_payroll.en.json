@@ -1,0 +1,4 @@
+{
+  "subject": "Your claim has been approved for payroll",
+  "body": "Your {{claimType}} claim for {{amount}} has been approved and will be included in the next payroll run."
+}
