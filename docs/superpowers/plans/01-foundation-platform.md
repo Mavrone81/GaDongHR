@@ -757,6 +757,48 @@ Each follows the same shape. For each: migrations first, then repository, then s
 
 ---
 
+## Task 13b: Integration tests against real Postgres
+
+Task 4's outbox, relay and consumer are tested against an in-memory fake. The Task 4 review
+mutation-tested that fake and judged it genuine — 10 of 12 mutations caught, including every one
+that would lose or duplicate a punch event. But it named five things the fake **structurally
+cannot** catch. Each is a silent-loss path in the pipeline that carries a worker's punch to their
+payslip, so each gets a test against a real Postgres in the compose test profile.
+
+**Files:** `services/svc-config/test/integration/outbox.integration.test.ts` (first service with a
+schema; the suite is shared and re-run per service thereafter).
+
+- [ ] **(a) Transaction abort poisons the rest of the batch.** The fake happily runs statements
+  after a failed one. Real Postgres does not: once a statement errors inside a transaction, every
+  later statement fails until rollback, and COMMIT becomes a silent ROLLBACK. So the relay's
+  per-row `catch` — correct against the fake — may swallow a SQL error and then lose the whole
+  batch while reporting success. Test: force one row's UPDATE to fail mid-batch, assert what
+  actually persists.
+
+- [ ] **(b) No-transaction lock release.** Removing `BEGIN`/`COMMIT` from `drainOnce` leaves every
+  unit test passing, but in real Postgres it releases every row lock the instant the SELECT
+  returns, so two relays double-publish. Test: run two `drainOnce` calls concurrently against one
+  batch, assert each row publishes exactly once.
+
+- [ ] **(c) `search_path` resolution.** Assert every outbox write lands in the intended schema when
+  `search_path` is deliberately set to something else.
+
+- [ ] **(d) Concurrent `ON CONFLICT DO NOTHING`.** Real Postgres blocks the second inserter until
+  the first commits or aborts; the fake lets both through, so exactly-once under true concurrency
+  is currently unproven. Test: two concurrent `idempotent` calls with the same `event_id`, assert
+  the handler runs exactly once.
+
+- [ ] **(e) The `processed_events(event_id PK)` DDL itself.** Without that primary key the dedupe
+  degrades silently to a no-op. Assert the constraint exists and that a duplicate insert conflicts.
+
+- [ ] **(f) Relay `ORDER BY created_at` and `LIMIT`.** Deleting either leaves all unit tests green
+  because the fake sorts and slices unconditionally. Assert ordering and batch size against real
+  rows.
+
+- [ ] Commit — `test(kernel): integration suite for outbox semantics real Postgres only`
+
+---
+
 ## Task 14: Scaffold the seven module services
 
 All of M1–M7 exist in the repo with their real schema, migrations and health endpoint, so Phases 2–5 add logic to a structure that is already wired, reviewed and deploying.
