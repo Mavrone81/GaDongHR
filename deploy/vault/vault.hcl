@@ -65,9 +65,53 @@ listener "tcp" {
 api_addr     = "http://vault:8200"
 cluster_addr = "http://vault:8201"
 
-# `cap_add: [IPC_LOCK]` (docker-compose.yml) is what makes this safe: locks
-# Vault's memory pages so secret material is never swapped to disk.
-disable_mlock = false
+# disable_mlock — Task 16, decided deliberately, not mechanically.
+#
+# What actually happened on gadonghr-prod (four attempts, in order): a
+# fresh `vault_data` named volume is root-owned, so uid 100 (the image's
+# `vault` user) got `permission denied` opening `vault.db`. Fixed (see the
+# ownership fix below). Then, with `disable_mlock = false` and
+# `cap_add: [IPC_LOCK]` (both still true in name only at that point), Vault
+# still crash-looped: the entrypoint runs as root, calls
+# `setcap cap_ipc_lock=+ep` on the `vault` binary, then `su-exec vault ...`
+# to drop to uid 100 — and `security_opt: ["no-new-privileges:true"]`
+# (inherited by every service from `node-defaults`, docker-compose.yml)
+# makes the kernel refuse to honour that file capability at that su-exec's
+# execve(), by design (`man 2 prctl`, PR_SET_NO_NEW_PRIVS: file
+# capabilities are not honoured once no_new_privs is set) — regardless of
+# `cap_add`. So the non-root Vault process never actually held
+# CAP_IPC_LOCK, and `disable_mlock = false` failed hard: "Failed to lock
+# memory... please enable mlock or set disable_mlock".
+#
+# The other way to close that gap — drop `no-new-privileges` for just the
+# `vault` service (Compose needs `!override` on the list, since `!reset`/
+# `!override` is the only way an override file actually replaces rather
+# than merges a list here, confirmed by this repo's own
+# `docker-compose.prod.yml` doing exactly that for `build:`) — was
+# considered and rejected: it carves a permanent hardening exception into
+# the one service that holds every unseal key and every S2/S3 KEK, for a
+# guarantee (mlock) HashiCorp itself does not consider load-bearing in a
+# container. The official Vault Helm chart ships `disable_mlock = true`
+# for exactly this reason. This file follows that precedent instead:
+# `disable_mlock = true`, no capability exception, `no-new-privileges`
+# stays on for `vault` exactly like every other service in this file
+# (`compose-validation.test.ts` asserts this — no silent, spreadable
+# exception).
+#
+# THE HONEST COST, not a formality: with mlock disabled, Vault's in-memory
+# unseal/master key material CAN be paged to the host's swap device, where
+# it persists on disk after the process dies (or the host reboots) until
+# overwritten. This is a genuine weakening of this specific process's
+# memory hygiene, not a paperwork risk — this droplet runs with swap
+# enabled. The accepted mitigation is host-level, not process-level:
+# `docs/07-operations/OPERATIONS-RUNBOOK.md`'s own prerequisite line
+# recommends LUKS full-disk encryption on the host, which covers the swap
+# device too — an attacker who doesn't already have the encrypted disk (or
+# a live root shell, at which point mlock was never the binding control
+# anyway) cannot recover a leaked key from swap. If this droplet is ever
+# provisioned without LUKS, that gap is real and open; it is not closed by
+# this config file, only by the host's disk encryption.
+disable_mlock = true
 
 # Audit device — every Vault request (not just svc-crypto's transit
 # encrypt/decrypt/HMAC calls, every request including failed auth) is

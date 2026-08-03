@@ -154,8 +154,46 @@ services:
     image: hashicorp/vault:1.17
     <<: *node-defaults
     mem_limit: 224m
-    cap_add: [IPC_LOCK]
-    command: ["vault", "server", "-config=/vault/config/vault.hcl"]
+    # Task 16: `disable_mlock = true` (vault.hcl — read that file's comment
+    # for the full trade-off) means Vault never calls mlock, so it no
+    # longer needs CAP_IPC_LOCK. `cap_add: [IPC_LOCK]` is deliberately
+    # ABSENT here now — granting an unused capability to the service that
+    # holds every unseal key is the opposite of least-privilege, and
+    # `no-new-privileges` (inherited from `node-defaults` like every other
+    # service, no exception) would make the capability inert anyway (see
+    # vault.hcl).
+    environment:
+      # The stock entrypoint still attempts `setcap cap_ipc_lock=+ep` on
+      # the `vault` binary unconditionally unless told not to; with no
+      # `cap_add` and `no-new-privileges` on, that attempt is now
+      # pure no-op noise (the grant can never take effect at the later
+      # `su-exec` into the non-root `vault` user) — skip it outright rather
+      # than let it run and silently do nothing.
+      SKIP_SETCAP: "true"
+    # Task 16: the root cause of the ORIGINAL crash-loop, before mlock ever
+    # entered the picture — `/vault/data` is a named volume, not a path the
+    # image pre-creates (unlike `/vault/config`/`/vault/logs`/`/vault/file`,
+    # which the image ships pre-owned by `vault:vault` and which the stock
+    # entrypoint already re-chowns if bind-mounted). Docker creates a fresh
+    # named volume's mountpoint root-owned, and the stock entrypoint never
+    # touches `/vault/data` at all — so every clean host reproduces the
+    # original `permission denied` opening `vault.db` unless something
+    # chowns it first. This runs as root (no `user:` override — the image's
+    # own entrypoint needs to start as root to do this and its own
+    # config/logs/file chown before it drops privilege itself via
+    # `su-exec`; forcing a non-root `user:` here was tried on the droplet
+    # and broke that root phase entirely, see vault.hcl), mirrors the stock
+    # entrypoint's own "only chown if not already owned" check so it's a
+    # cheap no-op on every boot after the first, and then hands off to the
+    # real entrypoint with the exact args this service always ran with —
+    # no manual chown step for a human to remember on the next fresh host.
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if [ "$$(stat -c %u /vault/data)" != "$$(id -u vault)" ]; then
+          chown -R vault:vault /vault/data
+        fi
+        exec docker-entrypoint.sh vault server -config=/vault/config/vault.hcl
     volumes:
       - vault_data:/vault/data
       - ./vault/vault.hcl:/vault/config/vault.hcl:ro

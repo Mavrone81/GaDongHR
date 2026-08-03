@@ -25,6 +25,8 @@ interface ComposeService {
   build?: unknown
   image?: string
   labels?: Record<string, string>
+  security_opt?: string[]
+  cap_add?: string[]
 }
 
 interface ComposeConfig {
@@ -202,6 +204,104 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
       expect(rule).toMatch(/PathPrefix/)
       const priority = routerPriority(svc, name)
       expect(priority).toBeGreaterThan(webPriority)
+    }
+  })
+})
+
+/**
+ * Task 16: the actual bug that blocked a live deploy was two files
+ * disagreeing with nothing ever reading both — `vault.hcl`'s
+ * `disable_mlock` setting and `docker-compose.yml`'s `security_opt`/
+ * `cap_add` for the `vault` service made mutually exclusive promises
+ * (mlock enabled + `no-new-privileges` blocking the only mechanism that
+ * could ever grant CAP_IPC_LOCK to the non-root `vault` process). This
+ * suite parses BOTH sources — `vault.hcl` directly, and the merged,
+ * canonical `docker compose config` output, the same thing
+ * `runComposeConfig` above reads — so a future edit to either file that
+ * reintroduces the conflict is caught here, not on a droplet.
+ */
+describe('vault.hcl and docker-compose.yml agree on mlock / no-new-privileges', () => {
+  let config: ComposeConfig
+  let vaultHclSource: string
+
+  beforeAll(() => {
+    config = runComposeConfig('docker-compose.yml', 'docker-compose.prod.yml')
+    vaultHclSource = readFileSync(join(DEPLOY_DIR, 'vault', 'vault.hcl'), 'utf8')
+  })
+
+  /**
+   * Parses the live `disable_mlock` value out of `vault.hcl`, ignoring
+   * comment lines (`#...`) — a naive substring search would match the
+   * word inside this very file's own explanatory comments above the real
+   * setting.
+   */
+  function parseDisableMlock(source: string): boolean {
+    const uncommented = source
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'))
+      .join('\n')
+    const match = uncommented.match(/disable_mlock\s*=\s*(true|false)/)
+    if (!match?.[1]) {
+      throw new Error('vault.hcl does not set disable_mlock at all — expected an explicit true or false')
+    }
+    return match[1] === 'true'
+  }
+
+  test('vault.hcl sets disable_mlock exactly once, outside of comments', () => {
+    const uncommented = vaultHclSource
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'))
+      .join('\n')
+    const matches = [...uncommented.matchAll(/disable_mlock\s*=\s*(true|false)/g)]
+    expect(matches.length).toBe(1)
+  })
+
+  test('vault\'s merged security_opt / cap_add are consistent with vault.hcl\'s disable_mlock', () => {
+    const disableMlock = parseDisableMlock(vaultHclSource)
+    const vault = config.services.vault
+    expect(vault).toBeDefined()
+    const securityOpt = vault?.security_opt ?? []
+    const capAdd = vault?.cap_add ?? []
+    const noNewPrivileges = securityOpt.includes('no-new-privileges:true')
+    const hasIpcLock = capAdd.includes('IPC_LOCK')
+
+    if (!disableMlock) {
+      // mlock is ON (disable_mlock = false): the non-root `vault` process
+      // MUST be able to actually acquire CAP_IPC_LOCK at its su-exec, or
+      // Vault crash-loops with "Failed to lock memory... please enable
+      // mlock or set disable_mlock" — the exact failure this task fixed.
+      // That requires BOTH the capability to be granted AND
+      // `no-new-privileges` to be absent (file capabilities are not
+      // honoured at execve() once no_new_privs is set — the mechanism
+      // that defeated this on the droplet).
+      expect([disableMlock, hasIpcLock]).toEqual([disableMlock, true])
+      expect([disableMlock, noNewPrivileges]).toEqual([disableMlock, false])
+    } else {
+      // mlock is OFF (disable_mlock = true, this file's actual decision —
+      // see vault.hcl's comment for the trade-off): vault no longer needs
+      // CAP_IPC_LOCK at all, so it must not be granted (least privilege —
+      // an unused capability on the service holding every unseal key is
+      // pure downside), and there is no reason for `vault` to be
+      // exempted from the same hardening every other service carries.
+      expect([disableMlock, hasIpcLock]).toEqual([disableMlock, false])
+      expect([disableMlock, noNewPrivileges]).toEqual([disableMlock, true])
+    }
+  })
+
+  /**
+   * The merge-vs-replace trap that defeated the droplet attempt: Compose
+   * merges list values (`security_opt`) from an override rather than
+   * replacing them, so a per-service `security_opt: []` silently does
+   * nothing. This reads the REAL merged output (not the source YAML) for
+   * every service, so it would fail immediately if `vault` (or anything
+   * else) ever lost `no-new-privileges` without an explicit, effective
+   * `!override`/`!reset` — and it proves the exception did not spread:
+   * every service in the stack, `vault` included under this task's chosen
+   * design, still carries it.
+   */
+  test('every service in the merged config carries no-new-privileges:true — no silent exception', () => {
+    for (const [name, svc] of Object.entries(config.services)) {
+      expect([name, svc.security_opt ?? []]).toEqual([name, ['no-new-privileges:true']])
     }
   })
 })
