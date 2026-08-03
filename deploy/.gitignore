@@ -1,3 +1,12 @@
 .env
 secrets/
 letsencrypt/
+
+# vault-ceremony.sh inputs/outputs — officer PGP public keys and the
+# PGP-encrypted shares generated from them. Never committed: even though
+# the shares are ciphertext, key-register.md's standing rules require
+# them off any host (this one included) once each officer confirms
+# decryption, and the pgp-keys/ directory can carry officers' personal
+# contact-linked key material that doesn't belong in git history either.
+signoff/pgp-keys/
+signoff/shares/

@@ -25,14 +25,161 @@ Verify: `docker compose ps` all healthy; login at `https://PUBLIC_HOST`; Setup W
 
 ## 2. Vault Key Ceremony (CRITICAL — do once, do it right)
 
-`vault-init.sh` initialises Vault with **5 Shamir unseal shares, threshold 3**, creates transit KEKs per data class, and the AppRole for `svc-crypto` (secret → `deploy/secrets/vault_approle_secret`).
+**Current state on `gadonghr-prod` (as of this writing): Vault was
+initialised with ONE Shamir share, threshold ONE, plus the initial root
+token, both sitting in `deploy/.env` under a "STAGING ONLY — NOT FOR REAL
+EMPLOYEE DATA" block. This is a bring-up convenience, not a production
+configuration, and it MUST be closed by the procedure below before any
+real employee data enters the system.** Vault is already initialised —
+this procedure is a **rekey**, not an init: `vault operator init` is not
+run again.
 
-Rules:
-1. Each share goes to a **different named key officer** (print/QR to paper or hardware token — never stored on the host, never in chat/email).
-2. Record officers' names in the key register (template `signoff/key-register.md`).
-3. **Loss of 3+ shares = permanent loss of all encrypted data.** There is no vendor backdoor — say this out loud in the ceremony.
-4. After host reboot Vault starts **sealed**: 3 officers run `docker compose exec vault vault operator unseal` (once each). Until unsealed, sensitive-field operations return 503 by design (fail closed).
-5. Rotate the AppRole secret quarterly (`scripts/rotate-approle.sh`); rotate KEK versions yearly (`scripts/rotate-keks.sh` — re-wraps, no downtime).
+### Why `-pgp-keys`, not a plain rekey
+
+`vault operator rekey` on its own PRINTS every new share to whoever runs
+it — the operator sees all five, which defeats the split entirely. The
+correct mechanism is `vault operator rekey -pgp-keys=<5 officer public
+keys>`: Vault encrypts each new share to a different officer's PGP public
+key before returning it, so the operator (human or script) only ever
+sees ciphertext. `deploy/scripts/vault-ceremony.sh` always uses this
+mechanism and refuses to run any other way.
+
+### Before the ceremony — what each of the 5 officers must supply
+
+Each officer generates their own PGP keypair in advance (their own
+machine, never generated for them by the operator) and exports the
+**public** half only:
+
+```bash
+gpg --armor --export <officer-email> > <officer-slug>.asc
+```
+
+The operator collects all 5 `.asc` files into `deploy/signoff/pgp-keys/`
+on the deploy host (gitignored — never committed, see `deploy/.gitignore`),
+named `<officer-slug>.asc`. `vault-ceremony.sh` refuses to run unless
+**exactly 5** files are present and none of them looks like a private
+key.
+
+### Running the ceremony
+
+All 5 officers present (in person or on a call, per your organisation's
+policy — not delegated to one person "on behalf of" the others):
+
+```bash
+cd deploy && set -a && source .env && set +a
+./scripts/vault-ceremony.sh --confirm-five-officers-present
+```
+
+`vault-ceremony.sh`:
+1. Refuses to run without the confirmation flag, without Vault reachable
+   and unsealed, without exactly 5 PGP public keys present, or without
+   the current unseal key available to authorise the rekey.
+2. Refuses to run again against a Vault already rekeyed to 5 shares,
+   unless `--force` is passed (only for a deliberate re-rekey, e.g.
+   replacing an officer — see `signoff/key-register.md` rule 5).
+3. Runs `vault operator rekey -init -key-shares=5 -key-threshold=3
+   -pgp-keys=... -backup` — the `-backup` flag keeps a Vault-side copy
+   recoverable **only for the ceremony window**, not indefinitely (see
+   below).
+4. Submits the CURRENT unseal key to authorise the operation, over
+   stdin only — never as a command argument, never logged.
+5. Verifies Vault's response is genuinely PGP-encrypted (5 fingerprints,
+   ciphertext-shaped payloads) before writing anything. **If Vault ever
+   returns anything that doesn't look encrypted, the script aborts and
+   says so — it does not write a plaintext share, ever, under any
+   condition.**
+6. Writes each officer's encrypted share to its own file, mode 400,
+   under `deploy/signoff/shares/` (also gitignored).
+7. Removes `VAULT_UNSEAL_KEY` and `VAULT_ROOT_TOKEN` — and the "STAGING
+   ONLY" warning block around them — from `deploy/.env`.
+8. Prints the exact remaining manual steps (below).
+
+### Rules
+
+1. Each share goes to a **different named key officer**, hand-delivered
+   or over a channel already trusted with this class of secret — **never
+   stored on the host, never in chat/email, even encrypted.**
+2. Record officers in `deploy/signoff/key-register.md` — name, role,
+   contact, PGP fingerprint, share file, date issued, signature.
+3. **Loss of 3+ of the 5 shares is permanent, irreversible loss of every
+   encrypted field in the system** — national IDs, bank accounts,
+   salaries, health attachments, face-template references, all of it,
+   forever. **There is no vendor backdoor.** This is the design, not an
+   oversight. Say it out loud in the ceremony room before the first
+   share is generated.
+4. After host reboot Vault starts **sealed**: 3 officers run
+   `docker compose exec vault vault operator unseal` (once each). Until
+   unsealed, sensitive-field operations return 503 by design (fail
+   closed).
+5. No officer ever holds two shares. A vacant seat is filled by
+   re-rekeying with a replacement officer (`--force`), never by doubling
+   up.
+6. Rotate the AppRole secret quarterly (`scripts/rotate-approle.sh`);
+   rotate KEK versions yearly (`scripts/rotate-keks.sh` — re-wraps, no
+   downtime). Both remain out of scope for this task — see
+   `deploy/README.md`.
+
+### After the ceremony — verification
+
+Each officer independently confirms they can decrypt their own share:
+
+```bash
+base64 -d <officer-slug>.share.b64 | gpg --decrypt
+```
+
+and signs `deploy/signoff/key-register.md`. Then run the read-only proof
+step — this is what shows the ceremony actually happened, rather than
+the team believing it did:
+
+```bash
+./scripts/vault-verify-ceremony.sh
+```
+
+It reports `Total Shares` / `Threshold` from `vault status`, confirms
+`deploy/.env` no longer holds either staging key, and best-effort
+confirms the `-backup` copy is gone (see below for why that one can't
+always be proven with certainty).
+
+### The `-backup` copy — destroy it, and not before
+
+`-backup` exists so a share lost or corrupted **during the ceremony
+itself** (a bad hand-off, a decryption failure) can be recovered without
+re-rekeying from scratch. It is not a standing safety net and must not
+outlive the ceremony:
+
+- **Destroy it only once every one of the 5 officers has confirmed
+  successful decryption above** — destroying it earlier removes the
+  ceremony's own recovery path before it's needed; leaving it after
+  defeats the purpose of the split (a copy of every new share, still
+  sitting on the one Vault instance).
+- Once all 5 have confirmed:
+  ```bash
+  docker compose exec -e VAULT_TOKEN="$VAULT_ROOT_TOKEN" vault vault operator rekey -backup-delete
+  ```
+
+### The root token
+
+`vault-ceremony.sh` does not run this for you — it is correctly gated on
+every officer's confirmation above, which cannot happen inside one
+non-interactive script run. After the `-backup-delete` step:
+
+```bash
+docker compose exec -e VAULT_TOKEN="$VAULT_ROOT_TOKEN" vault vault token revoke -self
+```
+
+There is deliberately **no standing replacement token or AppRole for
+interactive admin access** after this. `svc-crypto`'s own ongoing access
+is unaffected (a separate AppRole, unrelated to the root token). Any
+future admin operation that genuinely needs root-equivalent Vault access
+(policy changes, mounting a secrets engine) goes through
+`vault operator generate-root`, which itself requires a fresh quorum of 3
+of the 5 officers — the same trust model as unsealing, deliberately,
+rather than a long-lived credential sitting in `.env` again. **If a
+standing, lower-privilege admin credential (a named policy plus an
+AppRole or OIDC login) is later wanted for convenience, that is a
+separate, explicitly scoped follow-up task** — trading the current
+"no standing credential" posture for a "standing but least-privilege
+credential" one is a real decision with real trade-offs, not a default.
 
 ## 3. Backup & Restore (RPO ≤ 24 h, RTO ≤ 4 h)
 
@@ -63,7 +210,7 @@ Golden signals per service (Prometheus): p95 latency, error rate, queue depth (R
 - **Vault sealed unexpectedly**: check container restart/OOM; gather 3 officers to unseal; if raft data corrupt → restore snapshot (§3).
 - **Kiosk offline**: it keeps capturing ≥24 h; fix network; verify spool drain count vs device counter; reconcile in Timesheet exceptions.
 - **Payroll discrepancy reported**: never edit committed runs — reproduce via fixture, classify (config vs data vs defect), correct through adjustment run; if statutory config wrong, fix with effective date + governance approval and document in verification log.
-- **Lost unseal share**: if ≥3 remain, immediately `vault operator rekey` to issue a fresh share set; update key register.
+- **Lost unseal share**: if ≥3 remain, immediately re-run `./scripts/vault-ceremony.sh --confirm-five-officers-present --force` with a replacement officer to issue a fresh 5-share/threshold-3 set (§2); update `signoff/key-register.md`. If <3 remain, this is not a routine incident — see §2 rule 3.
 
 ## 7. Kiosk Hardware Baseline
 Android 12+ tablet, 1080p front camera, wall-mounted at ~1.5 m, diffuse frontal lighting (no backlight/window behind users), wired network preferred, kiosk-mode locked launcher, device registered + approved in Admin (per-device secret). Two devices per high-traffic entrance for redundancy.
