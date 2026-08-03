@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { Module } from '@nestjs/common'
-import { createPool } from '@gadong/kernel'
+import { APP_FILTER } from '@nestjs/core'
+import { GadongErrorFilter, createPool } from '@gadong/kernel'
 import { CRYPTO_HEALTH, DB_POOL, LeaveController } from './leave.controller'
 import type { HealthCheckPort } from './leave.controller'
 
@@ -42,6 +43,11 @@ function createHttpHealthCheck(url: string): HealthCheckPort {
 @Module({
   controllers: [LeaveController],
   providers: [
+    // Task 16e, defect 2: see `services/svc-attendance/src/app.module.ts`'s
+    // identical comment — maps a thrown `GadongError` onto its declared HTTP
+    // status/envelope from day one, ahead of this service's first business
+    // route.
+    { provide: APP_FILTER, useClass: GadongErrorFilter },
     {
       provide: DB_POOL,
       // `createPool` pins `search_path` to `leave` so every unqualified

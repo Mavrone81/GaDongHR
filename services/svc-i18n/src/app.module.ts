@@ -1,5 +1,7 @@
 import 'reflect-metadata'
 import { Module } from '@nestjs/common'
+import { APP_FILTER } from '@nestjs/core'
+import { GadongErrorFilter } from '@gadong/kernel'
 import { BundlesController } from './bundles.controller'
 import { BundlesService } from './bundles.service'
 import { loadRawBundles } from './bundle-loader'
@@ -27,6 +29,10 @@ export const RAW_BUNDLES = Symbol('RAW_BUNDLES')
 @Module({
   controllers: [BundlesController],
   providers: [
+    // Task 16e, defect 2: maps a thrown `GadongError` (e.g.
+    // `localeNotSupported()` in `bundles.controller.ts`) onto its declared
+    // HTTP status/envelope — see kernel `http/gadong-error.filter.ts`.
+    { provide: APP_FILTER, useClass: GadongErrorFilter },
     { provide: RAW_BUNDLES, useFactory: (): RawBundles => loadRawBundles() },
     {
       provide: BundlesService,

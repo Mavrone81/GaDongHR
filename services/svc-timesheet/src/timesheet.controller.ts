@@ -1,5 +1,5 @@
 import { Controller, Get, Inject } from '@nestjs/common'
-import { buildHealth } from '@gadong/kernel'
+import { Public, buildHealth } from '@gadong/kernel'
 import type { HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
 
@@ -22,6 +22,7 @@ export class TimesheetController {
   constructor(@Inject(DB_POOL) private readonly pool: Pool) {}
 
   @Get('health')
+  @Public()
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
     return buildHealth('svc-timesheet', { db })

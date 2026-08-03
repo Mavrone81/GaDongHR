@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpException, Inject, Param, Post, Query } from '@nestjs/common'
-import { GadongError, RequirePermission, buildHealth, withTransaction } from '@gadong/kernel'
+import { GadongError, Public, RequirePermission, buildHealth, withTransaction } from '@gadong/kernel'
 import type { HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { RulesService } from './rules.service'
@@ -72,6 +72,7 @@ export class RulesController {
   }
 
   @Get('health')
+  @Public()
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
     return buildHealth('svc-config', { db })

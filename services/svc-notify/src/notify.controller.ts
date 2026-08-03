@@ -1,5 +1,5 @@
 import { Controller, Get, HttpException, Inject, Param, Query, Post, Req } from '@nestjs/common'
-import { GadongError, RequirePermission, buildHealth, withTransaction } from '@gadong/kernel'
+import { GadongError, Public, RequirePermission, buildHealth, withTransaction } from '@gadong/kernel'
 import type { AuthenticatedRequest, HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { NotifyService, NotificationNotFound } from './notify.service'
@@ -60,6 +60,7 @@ export class NotifyController {
   }
 
   @Get('health')
+  @Public()
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
     const smtp = await this.checkSmtp()

@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { Module } from '@nestjs/common'
-import { createPool } from '@gadong/kernel'
+import { APP_FILTER } from '@nestjs/core'
+import { GadongErrorFilter, createPool } from '@gadong/kernel'
 import { AttendanceController, CRYPTO_HEALTH, DB_POOL, FACE_ENGINE_HEALTH } from './attendance.controller'
 import type { HealthCheckPort } from './attendance.controller'
 
@@ -41,6 +42,14 @@ function createHttpHealthCheck(url: string): HealthCheckPort {
 @Module({
   controllers: [AttendanceController],
   providers: [
+    // Task 16e, defect 2: maps a thrown `GadongError` onto its declared
+    // `httpStatus` and `{code, message_i18n_key, details}` envelope — see
+    // kernel `http/gadong-error.filter.ts`. Registered here even though this
+    // service mounts no `PermissionGuard` yet (no business routes exist —
+    // see this module's own header comment) so a future route that throws a
+    // `GadongError` is correctly mapped from the day it lands, not left for
+    // whoever adds the first business route to remember.
+    { provide: APP_FILTER, useClass: GadongErrorFilter },
     {
       provide: DB_POOL,
       // `createPool` pins `search_path` to `attendance` so every

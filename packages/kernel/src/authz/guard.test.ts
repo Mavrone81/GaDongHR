@@ -3,7 +3,7 @@ import type { CanActivate, ExecutionContext } from '@nestjs/common'
 import { GadongError } from '../errors'
 import { AuthzClient } from './client'
 import type { AuthzTransport, Decision } from './client'
-import { PermissionGuard, RequirePermission } from './guard'
+import { Public, PermissionGuard, RequirePermission } from './guard'
 
 /**
  * Minimal stand-in for Nest's ExecutionContext. Only the members
@@ -64,6 +64,32 @@ class WrappedController {
 @RequirePermission('employee.read')
 class ClassLevelController {
   annotatedAtClassLevel(): void {
+    /* no-op */
+  }
+}
+
+class PublicController {
+  @Public()
+  health(): void {
+    /* no-op */
+  }
+
+  unannotated(): void {
+    /* no-op */
+  }
+}
+
+@Public()
+class ClassLevelPublicController {
+  publicAtClassLevel(): void {
+    /* no-op */
+  }
+}
+
+class WrappedPublicController {
+  @WrapsHandler()
+  @Public()
+  wrappedPublic(): void {
     /* no-op */
   }
 }
@@ -154,6 +180,51 @@ describe('PermissionGuard', () => {
     await expect(guard.canActivate(context)).rejects.toMatchObject({
       code: 'AUZ-403',
       details: [{ reason: 'no_permission_declared' }],
+    })
+  })
+
+  describe('@Public() (Task 16e)', () => {
+    it('allows a @Public() route with no authenticated principal at all — no userId, no AuthzClient call', async () => {
+      const { guard, post } = guardWith({ allowed: true, scopeOrgUnitIds: '*' })
+      const controller = new PublicController()
+      const context = fakeContext(controller.health, PublicController, {}) // no userId
+
+      await expect(guard.canActivate(context)).resolves.toBe(true)
+      expect(post).not.toHaveBeenCalled()
+    })
+
+    it('supports a class-level @Public()', async () => {
+      const { guard } = guardWith({ allowed: true, scopeOrgUnitIds: '*' })
+      const controller = new ClassLevelPublicController()
+      const context = fakeContext(controller.publicAtClassLevel, ClassLevelPublicController, {})
+
+      await expect(guard.canActivate(context)).resolves.toBe(true)
+    })
+
+    it('a @Public() route on the SAME controller as an unannotated route does not make the unannotated route public', async () => {
+      const { guard } = guardWith({ allowed: true, scopeOrgUnitIds: '*' })
+      const controller = new PublicController()
+      const context = fakeContext(controller.unannotated, PublicController, { userId: 'user-1' })
+
+      await expect(guard.canActivate(context)).rejects.toMatchObject({
+        code: 'AUZ-403',
+        details: [{ reason: 'no_permission_declared' }],
+      })
+    })
+
+    it('fails closed (denies) when a composed decorator replaces the descriptor value above @Public() — the same property @RequirePermission relies on', async () => {
+      const { guard } = guardWith({ allowed: true, scopeOrgUnitIds: '*' })
+      const controller = new WrappedPublicController()
+      const context = fakeContext(controller.wrappedPublic, WrappedPublicController, {})
+
+      // The final handler `getHandler()` returns never received the
+      // `@Public()` metadata attached to the original — so this must deny,
+      // not silently allow. Weakening deny-by-default here would be exactly
+      // the kind of accidental bypass the brief forbids.
+      await expect(guard.canActivate(context)).rejects.toMatchObject({
+        code: 'AUZ-403',
+        details: [{ reason: 'no_permission_declared' }],
+      })
     })
   })
 })

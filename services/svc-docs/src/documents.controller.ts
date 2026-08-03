@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpException, Inject, Param, Post } from '@nestjs/common'
-import { GadongError, RequirePermission, buildHealth, withTransaction } from '@gadong/kernel'
+import { GadongError, Public, RequirePermission, buildHealth, withTransaction } from '@gadong/kernel'
 import type { HealthPayload, Locale } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { DocumentsService } from './documents.service'
@@ -98,6 +98,7 @@ export class DocumentsController {
   }
 
   @Get('health')
+  @Public()
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
     const { storage, fonts } = await this.documentsService.health()

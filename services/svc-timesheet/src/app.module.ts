@@ -1,8 +1,8 @@
 import 'reflect-metadata'
 import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
-import { APP_GUARD } from '@nestjs/core'
-import { AuthzClient, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
+import { APP_FILTER, APP_GUARD } from '@nestjs/core'
+import { AuthzClient, GadongErrorFilter, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
 import type { OidcMiddlewareHandler } from '@gadong/kernel'
 import type { AuthzTransport } from '@gadong/kernel'
 import { DB_POOL, TimesheetController } from './timesheet.controller'
@@ -66,6 +66,15 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
   controllers: [TimesheetController],
   providers: [
     { provide: APP_GUARD, useClass: PermissionGuard },
+    // Task 16e, defect 2: maps a thrown `GadongError` (most importantly the
+    // ones `PermissionGuard` above throws directly, before any controller's
+    // own `try`/`catch` ever runs) onto its declared `httpStatus` and
+    // `{code, message_i18n_key, details}` envelope — see kernel
+    // `http/gadong-error.filter.ts`. Global (`APP_FILTER`), not a per-route
+    // `@UseFilters`, for the same reason `PermissionGuard` is global: a
+    // route-scoped filter would never see an exception thrown by a
+    // globally-mounted guard.
+    { provide: APP_FILTER, useClass: GadongErrorFilter },
     {
       provide: AuthzClient,
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),

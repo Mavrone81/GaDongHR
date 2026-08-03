@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, Query } from '@nestjs/common'
-import { RequirePermission, buildHealth } from '@gadong/kernel'
+import { Public, RequirePermission, buildHealth } from '@gadong/kernel'
 import type { HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { EntriesService } from './entries.service'
@@ -52,6 +52,7 @@ export class EntriesController {
   }
 
   @Get('health')
+  @Public()
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
     return buildHealth('svc-audit', { db })

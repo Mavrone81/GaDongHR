@@ -1,7 +1,8 @@
 import 'reflect-metadata'
 import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
-import { AuthzClient, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
+import { APP_FILTER } from '@nestjs/core'
+import { AuthzClient, GadongErrorFilter, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
 import type { OidcMiddlewareHandler } from '@gadong/kernel'
 import type { AuthzTransport, Queryable } from '@gadong/kernel'
 import { DB_POOL, AuthzController } from './authz.controller'
@@ -76,6 +77,13 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
   controllers: [AuthzController],
   providers: [
     PermissionGuard,
+    // Task 16e, defect 2: maps a thrown `GadongError` (e.g. the three
+    // `@UseGuards(PermissionGuard)` admin routes' denials) onto its declared
+    // `httpStatus` and `{code, message_i18n_key, details}` envelope — see
+    // kernel `http/gadong-error.filter.ts`. Global (`APP_FILTER`) even
+    // though the guard here is per-route, not `APP_GUARD`, so it also covers
+    // any `GadongError` a future route throws directly.
+    { provide: APP_FILTER, useClass: GadongErrorFilter },
     {
       provide: AuthzClient,
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://127.0.0.1:3000')),
