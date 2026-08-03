@@ -89,6 +89,37 @@ covers the seven platform services' live endpoints, not only the ESS screens. Th
 scope anyway: the statutory-rules governance screen and the audit-chain verifier are where the
 compliance story becomes visible to a buyer, and they are the parts no competitor screenshot shows.
 
+## 🔴 Open security gap — `GET /documents/:id` has no ownership scoping
+
+Found 2026-08-03 while fixing unreachable permissions. **Must be closed before Phase 2 puts real
+employee data behind it.**
+
+`svc-docs`'s `GET /documents/:id` is guarded by a single `document.read` permission that covers
+every document kind — employment contracts, letters, and **payslips** — and the controller performs
+no row-level ownership check. Anyone holding `document.read` can fetch any document by id,
+including another employee's payslip. The kernel's `PermissionGuard` answers "may this user read
+documents", never "may this user read *this* document"; `svc-authz` returns `scopeOrgUnitIds`, and
+nothing consumes it here.
+
+Mitigated for now, not fixed: `document.read` is deliberately withheld from `hr-officer` and
+`hr-system-admin` so the viewer cannot become a side door around the Security doc §4.2 rule that HR
+roles never see payroll amounts. That keeps the blast radius small while the schema is empty. It is
+not a solution — `employee-ess` still holds the permission, and an employee guessing or enumerating
+a document id reaches a colleague's payslip.
+
+**The fix, owned by Phase 2:**
+1. `docs.document` already carries `entity_type` and `entity_id`; the controller must compare them
+   against the caller's identity and `scopeOrgUnitIds` before returning anything.
+2. Split the permission by sensitivity — `document.read.self` for one's own contracts and payslips,
+   `document.read.scoped` for HR within an org subtree, and keep payroll documents behind a payroll
+   permission rather than a document one.
+3. Every read emits an audit entry with a purpose, because a payslip is S3 data.
+4. Regression test: employee A requesting employee B's document id gets 403, not 200.
+
+This is the third defect of the same shape found this phase — a component correct in isolation, with
+the authorisation question asked one level too coarsely. Worth checking for the same pattern in
+every module controller Phase 2 adds.
+
 ## Parallel execution
 
 Services are independent; the monorepo around them is not. Four agents in one tree collide on the
