@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -241,5 +242,105 @@ describe('deploy scripts are syntactically valid shell', () => {
   test.each(scripts)('%s passes `bash -n`', (script) => {
     const path = join(DEPLOY_DIR, 'scripts', script)
     expect(() => execFileSync('bash', ['-n', path], { encoding: 'utf8' })).not.toThrow()
+  })
+})
+
+/**
+ * Task 15e: every `ghcr.io/mavrone81/*` image tag must be pinned by the
+ * SAME variable, defaulting to a tag CI actually publishes. This exists
+ * because Task 15 pinned the seven platform services with
+ * `${GADONG_BUILD_SHA:-latest}` while `web` alone used
+ * `${GADONG_VERSION:-main}` — `GADONG_BUILD_SHA` is a build-time-only
+ * `docker build --build-arg` (never set at deploy time, never in `.env`),
+ * so all seven fell through to `:latest`, a tag
+ * `.github/workflows/ci.yml`'s `build-images` matrix never pushes (it
+ * only ever pushes `:<sha>` and `:main`) — and the `docker compose pull`
+ * that `auto-deploy-gadonghr.sh` runs 404'd on the production droplet.
+ *
+ * `runComposeConfig` (used by the describe blocks above) is the wrong
+ * tool here: `docker compose config` substitutes `${VAR:-default}` with a
+ * live value and destroys both the variable's name and its static
+ * fallback, which is exactly what this needs to inspect. So this section
+ * reads docker-compose.prod.yml's raw source instead.
+ */
+describe('deploy/docker-compose.prod.yml image tag variables (raw source, cross-checked against ci.yml)', () => {
+  const composeSource = readFileSync(join(DEPLOY_DIR, 'docker-compose.prod.yml'), 'utf8')
+  const ciSource = readFileSync(join(DEPLOY_DIR, '..', '.github', 'workflows', 'ci.yml'), 'utf8')
+
+  interface ImageRef {
+    service: string
+    variable: string
+    fallback: string
+  }
+
+  // Matches e.g. `image: ghcr.io/mavrone81/gadonghr-svc-crypto:${GADONG_VERSION:-main}`.
+  const imageRefPattern = /image:\s*ghcr\.io\/mavrone81\/gadonghr-([\w-]+):\$\{(\w+):-([\w.-]+)\}/g
+
+  function extractImageRefs(source: string): ImageRef[] {
+    return [...source.matchAll(imageRefPattern)].map((m) => {
+      const [, service, variable, fallback] = m
+      if (!service || !variable || !fallback) {
+        throw new Error(`image-ref regex matched but a capture group was empty: ${m[0]}`)
+      }
+      return { service, variable, fallback }
+    })
+  }
+
+  const refs = extractImageRefs(composeSource)
+
+  test('finds a ${VAR:-fallback} image reference for all eight ghcr.io/mavrone81 services', () => {
+    // Seven platform services + web. If this count is wrong, every test
+    // below is vacuous, so it is asserted on its own first.
+    expect(refs.map((r) => r.service).sort()).toEqual(
+      ['svc-audit', 'svc-authz', 'svc-config', 'svc-crypto', 'svc-docs', 'svc-i18n', 'svc-notify', 'web'].sort(),
+    )
+  })
+
+  test('every ghcr.io/mavrone81 image reference is pinned by the SAME variable', () => {
+    // Derived from the file, not hard-coded: a test that asserted
+    // `=== 'GADONG_VERSION'` would have passed on the original bug just as
+    // easily as a test that asserted `=== 'GADONG_BUILD_SHA'` — the actual
+    // defect was TWO variables coexisting for one job, so what must be
+    // asserted is that the derived set of variables in use has exactly one
+    // member, whatever its name.
+    const variablesUsed = new Set(refs.map((r) => r.variable))
+    if (variablesUsed.size !== 1) {
+      const bySvc = refs.map((r) => `${r.service}=\${${r.variable}}`).join(', ')
+      throw new Error(
+        `expected exactly one image-tag variable across all ghcr.io/mavrone81 services, ` +
+          `found ${variablesUsed.size} (${[...variablesUsed].join(', ')}): ${bySvc}`,
+      )
+    }
+    expect(variablesUsed.size).toBe(1)
+  })
+
+  test('no ghcr.io/mavrone81 image tag defaults to `latest`', () => {
+    // CI's build-images matrix (asserted below) never pushes a `:latest`
+    // tag, so any service whose fallback is `latest` is guaranteed to 404
+    // on `docker compose pull` the moment its variable is unset.
+    for (const ref of refs) {
+      expect([ref.service, ref.fallback]).not.toEqual([ref.service, 'latest'])
+    }
+  })
+
+  test('the compose fallback tag is one CI actually publishes (cross-checked against ci.yml)', () => {
+    // The only literal (non-templated) tag CI's `build-images` matrix
+    // pushes for `ghcr.io/mavrone81/gadonghr-*` images — `${{ github.sha }}`
+    // is excluded because it is a CI-runtime expression, not a static
+    // string a compose fallback could ever equal.
+    const ciTagPattern = /ghcr\.io\/mavrone81\/gadonghr-\$\{\{\s*matrix\.name\s*\}\}:(\S+)/g
+    const ciTags = [...ciSource.matchAll(ciTagPattern)]
+      .map((m) => m[1] ?? '')
+      .filter((tag) => tag.length > 0 && !tag.includes('${{'))
+    expect(ciTags.length).toBeGreaterThan(0)
+    expect(ciTags).not.toContain('latest')
+
+    for (const ref of refs) {
+      if (!ciTags.includes(ref.fallback)) {
+        throw new Error(
+          `${ref.service}'s fallback tag ':-${ref.fallback}' is not among the tags CI publishes (${ciTags.join(', ')})`,
+        )
+      }
+    }
   })
 })

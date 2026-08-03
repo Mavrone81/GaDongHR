@@ -110,7 +110,15 @@ log "Deploying ${remote_sha} (new_code=${new_code}, stack_running=${stack_runnin
 git checkout --quiet "$remote_sha"
 
 # ---------- 4 & 5. Pull from GHCR only, then up -d ----------
-export GADONG_BUILD_SHA="$remote_sha"
+# `GADONG_VERSION`, not `GADONG_BUILD_SHA`: docker-compose.prod.yml's
+# `image:` tags all read `GADONG_VERSION` (the one deploy-time variable,
+# shared by all eight services). `GADONG_BUILD_SHA` is a build-time-only
+# `docker build --build-arg` (CI sets it; see ci.yml's `build-images`) and
+# is never read by `compose pull` — exporting it here instead of
+# `GADONG_VERSION` was Task 15's bug: every image tag fell through to its
+# `:-main`/formerly `:-latest` default regardless of which sha was
+# CI-verified above.
+export GADONG_VERSION="$remote_sha"
 compose pull
 compose up -d --remove-orphans
 
