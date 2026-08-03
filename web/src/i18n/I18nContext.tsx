@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import type { Locale } from './locale'
 import { detectInitialLocale, storeLocale } from './locale'
 import { fetchBundle } from '../api/svcI18n'
+import { FALLBACK_EN_BUNDLE } from './fallbackBundle'
 
 export type Bundle = Record<string, string>
 export type TranslateVars = Record<string, string | number>
@@ -14,20 +15,26 @@ export interface I18nContextValue {
    * Resolves one bundle key, interpolating `{name}` placeholders from
    * `vars`. Every user-visible string in this app is required to go
    * through this function — see `web/README.md`'s "no hard-coded strings"
-   * rule and `src/i18n/__tests__/no-hardcoded-strings.test.tsx`, which
-   * enforces it mechanically.
+   * rule and `src/i18n/noHardcodedStrings.test.tsx`, which enforces it
+   * mechanically.
    *
-   * Fallback (deliberately mirrors `svc-i18n`'s own `BundlesService.resolveKey`,
-   * `services/svc-i18n/src/bundles.service.ts`): a key absent from the
-   * fetched bundle renders as the key string itself, never a hardcoded
-   * English literal baked into this file. Some keys this app calls (the
-   * `admin.statutoryRules.*`, `config.error.*`, `authz.error.*` and
-   * `shell.*` namespaces the statutory-rules console needs) do not exist in
-   * `services/svc-i18n/bundles/*.json` yet — extending that content is
-   * svc-i18n's own workstream, out of this task's "own web/, don't touch
-   * services/" boundary. Every call site still only ever calls `t(key)`;
-   * the raw-key fallback is what renders today, and it upgrades to a real
-   * translation the moment svc-i18n ships one, with no code change here.
+   * FALLBACK CHAIN (the fix for the "blank screen when svc-i18n is
+   * unreachable" defect — see `I18nProvider` below):
+   *
+   *   1. The requested locale's fetched bundle (mirrors `svc-i18n`'s own
+   *      `BundlesService.resolveKey`, `services/svc-i18n/src/bundles.service.ts`
+   *      — the server itself already resolves a `th`/`zh` gap against `en`
+   *      before this app ever sees the response).
+   *   2. A separately fetched `en` bundle, for the case the primary fetch
+   *      itself is incomplete or failed while an `en` fetch still succeeds.
+   *   3. `FALLBACK_EN_BUNDLE` (`./fallbackBundle.ts`) — the English bundle
+   *      compiled INTO this app at build time, used only when every network
+   *      path above failed or is missing the key. This is what keeps the
+   *      login screen legible with zero backend running at all.
+   *   4. The raw key string itself — ugly, but diagnosable; never `''`.
+   *
+   * Never returns an empty string: an empty label is invisible (the exact
+   * defect this chain exists to prevent), a raw key is at least readable.
    */
   t: (key: string, vars?: TranslateVars) => string
   ready: boolean
@@ -55,28 +62,50 @@ export function createTranslator(bundle: Bundle): (key: string, vars?: Translate
 
 export function I18nProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [locale, setLocaleState] = useState<Locale>(() => detectInitialLocale())
-  const [bundle, setBundle] = useState<Bundle | null>(null)
+  // Two independently-tracked network layers, resolved in this order by
+  // `t()` below: the requested locale's own fetch, then (only relevant when
+  // `locale !== 'en'`) a separately fetched `en` bundle. Kept as two
+  // `Bundle | null` values rather than merged eagerly, so `t()` can apply
+  // the exact "requested locale -> fetched English -> bundled English ->
+  // raw key" order per key, not per whole-bundle merge.
+  const [localeBundle, setLocaleBundle] = useState<Bundle | null>(null)
+  const [englishBundle, setEnglishBundle] = useState<Bundle | null>(null)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     setReady(false)
-    fetchBundle(locale)
-      .then((data) => {
-        if (!cancelled) {
-          setBundle(data)
-          setReady(true)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          // Network/service failure: fall back to an empty bundle so `t()`
-          // still returns diagnosable raw keys instead of throwing —
-          // the app stays usable (if unlabeled) rather than blank.
-          setBundle({})
-          setReady(true)
-        }
-      })
+
+    const localeFetch = fetchBundle(locale)
+    // When the requested locale IS English, re-using the same promise
+    // (rather than issuing a second, identical request) means this only
+    // ever makes one network call — `Promise.allSettled` below is fine
+    // awaiting the same promise object twice.
+    const englishFetch = locale === 'en' ? localeFetch : fetchBundle('en')
+
+    Promise.allSettled([localeFetch, englishFetch]).then(([localeResult, englishResult]) => {
+      if (cancelled) return
+
+      const localeFailed = localeResult.status === 'rejected'
+      const englishFailed = locale !== 'en' && englishResult.status === 'rejected'
+      if (localeFailed || englishFailed) {
+        // Exactly ONE warning naming what failed — never one per missing
+        // key (that would fire dozens of times for a single dead backend;
+        // `t()` below logs nothing at all). This is the "svc-i18n
+        // unreachable" case that used to render a blank screen: every
+        // affected `t()` call still resolves through `FALLBACK_EN_BUNDLE`
+        // (bundled at build time) or, failing that, the raw key — never
+        // `''`.
+        console.warn(
+          `[i18n] could not fetch translations for locale "${locale}" from svc-i18n — falling back to the English bundle shipped with the app.`,
+        )
+      }
+
+      setLocaleBundle(localeResult.status === 'fulfilled' ? localeResult.value : null)
+      setEnglishBundle(englishResult.status === 'fulfilled' ? englishResult.value : null)
+      setReady(true)
+    })
+
     return () => {
       cancelled = true
     }
@@ -92,8 +121,11 @@ export function I18nProvider({ children }: { children: ReactNode }): React.JSX.E
   }, [])
 
   const t = useCallback(
-    (key: string, vars?: TranslateVars): string => createTranslator(bundle ?? {})(key, vars),
-    [bundle],
+    (key: string, vars?: TranslateVars): string => {
+      const value = localeBundle?.[key] ?? englishBundle?.[key] ?? FALLBACK_EN_BUNDLE[key] ?? key
+      return interpolate(value, vars)
+    },
+    [localeBundle, englishBundle],
   )
 
   const value = useMemo<I18nContextValue>(() => ({ locale, setLocale, t, ready }), [locale, setLocale, t, ready])

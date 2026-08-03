@@ -16,6 +16,6 @@
     "isolatedModules": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "vitest.setup.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.json", "vite.config.ts", "vitest.setup.ts"],
   "references": [{ "path": "../packages/kernel" }]
 }

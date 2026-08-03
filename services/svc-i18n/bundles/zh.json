@@ -181,5 +181,90 @@
       "fifty_tavi": "50 ทวิ",
       "kor_11": "กร.11"
     }
+  },
+  "shell": {
+    "brand": "GaDongHR",
+    "nav": {
+      "statutoryRules": "法定规则",
+      "audit": "审计",
+      "documents": "文档",
+      "roles": "角色",
+      "notifications": "通知"
+    },
+    "locale": {
+      "th": "ไทย",
+      "en": "English",
+      "zh": "中文"
+    },
+    "comingSoon": {
+      "title": "即将推出",
+      "body": "此功能尚未开放。"
+    }
+  },
+  "admin": {
+    "statutoryRules": {
+      "title": "法定规则",
+      "asOfLabel": "截至日期",
+      "emptyState": "暂无法定规则。",
+      "propose": {
+        "cta": "提议新规则",
+        "title": "提议法定规则",
+        "success": "规则提议成功。",
+        "ruleKey": "规则键",
+        "value": "数值",
+        "unit": "单位",
+        "citation": "法律依据",
+        "governanceClass": "治理类别",
+        "statutoryFloor": "法定下限",
+        "effectiveFrom": "生效日期",
+        "reason": "原因",
+        "submit": "提交提议"
+      },
+      "governanceClass": {
+        "STATUTORY_FLOOR": "法定下限",
+        "STATUTORY_FIXED": "法定固定值",
+        "COMPANY_POLICY": "公司政策"
+      },
+      "status": {
+        "draft": "草稿",
+        "pending_approval": "待审批",
+        "active": "生效中",
+        "superseded": "已被取代"
+      },
+      "approve": {
+        "cta": "批准",
+        "selfProposed": "您是此规则的提议人，不能批准该规则。"
+      },
+      "floorViolation": {
+        "title": "低于法定下限",
+        "body": "{value} 低于法定下限 {floor}。"
+      },
+      "ceilingViolation": {
+        "title": "超过法定上限",
+        "body": "{value} 超过法定上限 {ceiling}。"
+      },
+      "citationSeal": {
+        "withFloor": "§ {citation} · 下限 {floor}",
+        "withCeiling": "§ {citation} · 上限 {ceiling}",
+        "plain": "§ {citation}"
+      }
+    }
+  },
+  "config": {
+    "error": {
+      "below_statutory_floor": "提议的数值低于法定下限。",
+      "above_statutory_ceiling": "提议的数值超过法定上限。",
+      "pack_signature_invalid": "配置包的签名无效。",
+      "rule_not_found": "未找到该规则。",
+      "rule_version_not_found": "未找到该规则版本。",
+      "not_a_draft": "该规则不是草稿状态。",
+      "statutory_fixed_not_editable": "法定固定值规则不可编辑。"
+    }
+  },
+  "authz": {
+    "error": {
+      "denied": "您没有执行此操作的权限。",
+      "sod_violation": "根据职责分离原则，此操作需要由其他审批人处理。"
+    }
   }
 }

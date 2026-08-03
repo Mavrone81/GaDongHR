@@ -181,5 +181,90 @@
       "fifty_tavi": "50 ทวิ",
       "kor_11": "กร.11"
     }
+  },
+  "shell": {
+    "brand": "GaDongHR",
+    "nav": {
+      "statutoryRules": "กฎเกณฑ์ตามกฎหมาย",
+      "audit": "การตรวจสอบ",
+      "documents": "เอกสาร",
+      "roles": "บทบาท",
+      "notifications": "การแจ้งเตือน"
+    },
+    "locale": {
+      "th": "ไทย",
+      "en": "English",
+      "zh": "中文"
+    },
+    "comingSoon": {
+      "title": "เร็วๆ นี้",
+      "body": "ฟีเจอร์นี้ยังไม่พร้อมใช้งาน"
+    }
+  },
+  "admin": {
+    "statutoryRules": {
+      "title": "กฎเกณฑ์ตามกฎหมาย",
+      "asOfLabel": "ณ วันที่",
+      "emptyState": "ยังไม่มีกฎเกณฑ์ตามกฎหมาย",
+      "propose": {
+        "cta": "เสนอกฎเกณฑ์ใหม่",
+        "title": "เสนอกฎเกณฑ์ตามกฎหมาย",
+        "success": "เสนอกฎเกณฑ์สำเร็จแล้ว",
+        "ruleKey": "รหัสกฎเกณฑ์",
+        "value": "ค่า",
+        "unit": "หน่วย",
+        "citation": "การอ้างอิงกฎหมาย",
+        "governanceClass": "ประเภทการกำกับดูแล",
+        "statutoryFloor": "อัตราขั้นต่ำตามกฎหมาย",
+        "effectiveFrom": "มีผลบังคับใช้ตั้งแต่",
+        "reason": "เหตุผล",
+        "submit": "ส่งข้อเสนอ"
+      },
+      "governanceClass": {
+        "STATUTORY_FLOOR": "อัตราขั้นต่ำตามกฎหมาย",
+        "STATUTORY_FIXED": "อัตราคงที่ตามกฎหมาย",
+        "COMPANY_POLICY": "นโยบายบริษัท"
+      },
+      "status": {
+        "draft": "ฉบับร่าง",
+        "pending_approval": "รอการอนุมัติ",
+        "active": "มีผลบังคับใช้",
+        "superseded": "ถูกแทนที่แล้ว"
+      },
+      "approve": {
+        "cta": "อนุมัติ",
+        "selfProposed": "คุณเป็นผู้เสนอกฎเกณฑ์นี้ จึงไม่สามารถอนุมัติได้"
+      },
+      "floorViolation": {
+        "title": "ต่ำกว่าอัตราขั้นต่ำตามกฎหมาย",
+        "body": "{value} ต่ำกว่าอัตราขั้นต่ำตามกฎหมายที่ {floor}"
+      },
+      "ceilingViolation": {
+        "title": "สูงกว่าเพดานตามกฎหมาย",
+        "body": "{value} สูงกว่าเพดานตามกฎหมายที่ {ceiling}"
+      },
+      "citationSeal": {
+        "withFloor": "§ {citation} · ขั้นต่ำ {floor}",
+        "withCeiling": "§ {citation} · เพดาน {ceiling}",
+        "plain": "§ {citation}"
+      }
+    }
+  },
+  "config": {
+    "error": {
+      "below_statutory_floor": "ค่าที่เสนอต่ำกว่าอัตราขั้นต่ำตามกฎหมาย",
+      "above_statutory_ceiling": "ค่าที่เสนอสูงกว่าเพดานตามกฎหมาย",
+      "pack_signature_invalid": "ลายเซ็นของชุดการตั้งค่าไม่ถูกต้อง",
+      "rule_not_found": "ไม่พบกฎเกณฑ์",
+      "rule_version_not_found": "ไม่พบเวอร์ชันของกฎเกณฑ์",
+      "not_a_draft": "กฎเกณฑ์นี้ไม่ใช่ฉบับร่าง",
+      "statutory_fixed_not_editable": "กฎเกณฑ์ประเภทอัตราคงที่ตามกฎหมายไม่สามารถแก้ไขได้"
+    }
+  },
+  "authz": {
+    "error": {
+      "denied": "คุณไม่มีสิทธิ์ในการดำเนินการนี้",
+      "sod_violation": "การดำเนินการนี้ต้องมีผู้อนุมัติคนละคนตามหลักการแบ่งแยกหน้าที่"
+    }
   }
 }
