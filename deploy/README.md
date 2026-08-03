@@ -20,9 +20,12 @@ cutover *from* the old droplet's IP, not a stale workaround.)
 | `docker-compose.prod.yml` | Production overlay: replaces every service's `build:` with a pinned `ghcr.io/mavrone81/gadonghr-<service>:<sha>` image and `pull_policy: always`. Never used alone — always `-f docker-compose.yml -f docker-compose.prod.yml`. |
 | `postgres/init/01-roles.sql` | Runs once, automatically, on a fresh `postgres` volume. Creates the 12 business-schema roles + `keycloak`, each owning exactly one schema. |
 | `vault/vault.hcl` | Vault server config (raft storage, no auto-unseal). **Read this file's header before doing anything else with Vault.** |
+| `keycloak/realm-gadonghr.json` | Task 15b: the `gadonghr` realm import — clients `web` (public PWA) and `seeder` (confidential service account). Imported automatically by the `keycloak` service's `--import-realm` flag. See `keycloak/README.md`. |
+| `keycloak/README.md` | Why redirect URIs are literal (not parameterised), how the `seeder` client's secret is provisioned without ever being committed, and how the seeder's identity reaches svc-authz as a grant. |
 | `scripts/auto-deploy-gadonghr.sh` | Cron-driven pull-and-deploy. |
 | `scripts/prune-gadonghr-images.sh` | Cron-driven image cleanup (keep 4 newest SHA tags per repo). |
-| `scripts/seed.sh` | Statutory rule packs + role catalog, run once after first `up -d`. |
+| `scripts/seed.sh` | Statutory rule packs + role catalog + (Task 15b) pins the `seeder` client secret and grants it its svc-authz permissions. Run once after first `up -d`. |
+| `scripts/bootstrap-admin.sh` | Task 15b: creates the first HR/System Admin (forced password change + OTP enrolment) and grants them `hr-system-admin` in svc-authz. Idempotent — run once, after `seed.sh`. |
 | `scripts/backup.sh` | Nightly Postgres + Vault + MinIO backup, encrypted, 30 daily / 12 monthly. |
 | `.env.example` | Copy to `.env`, fill every `CHANGE_ME`. Never commit `.env`. |
 | `compose-validation.test.ts` | The test suite for the two compose files (`pnpm test` runs it — see below). |
@@ -37,6 +40,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d postgres v
 # --- Vault key ceremony here (vault-init.sh, NOT part of this task — see "Out of scope" below) ---
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ./scripts/seed.sh
+./scripts/bootstrap-admin.sh
 ```
 
 **What breaks if a step is skipped:**
@@ -72,33 +76,26 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
   a human to write and review it for that specific situation, not a
   cron-safe default).
 
-## Known gap: `seed.sh`'s pack import cannot succeed yet
+## Closed by Task 15b: `seed.sh`'s pack import now has a realm to authenticate against
 
-Read directly from the code, not assumed: `PermissionGuard`
-(`packages/kernel/src/authz/guard.ts`) denies any request where
-`request.userId` is unset, and **no service in this repository yet has
-middleware that sets `request.userId`** from a Keycloak-issued token or
-any other credential (verified by grepping every service's `src/` — Task
-1.5's web-shell auth wiring, per the roadmap, doesn't exist yet). This
-means `POST /packs/import` (guarded by `config.pack.import`) currently
-returns `403 AUZ-403` for every caller, including `seed.sh` itself.
-`seed.sh` still calls the real endpoint — the architecturally correct
-thing to do, and it starts working with zero changes to the script the
-day that middleware ships — but until then, running it will fail loudly
-at that step. This is a pre-existing gap in the service layer, out of
-scope for a deploy-only task ("No service code"), and is flagged here so
-it isn't mistaken for a bug in this task's work.
+Task 13c's `OidcMiddleware` (`packages/kernel/src/authz/oidc.middleware.ts`)
+has validated bearer tokens since it shipped — the gap was that **nothing
+issued them**: Keycloak ran with no realm, no clients, no users.
+`deploy/keycloak/realm-gadonghr.json` (Task 15b) closes that: `POST
+/packs/import` (guarded by `config.pack.import`) now succeeds, because
+`seed.sh` obtains a real client-credentials token from the `seeder`
+service account and that account has a real grant in svc-authz — see
+`deploy/keycloak/README.md` for the full identity/authorisation split.
 
 ## Out of scope for this task
 
 The Runbook (`docs/07-operations/OPERATIONS-RUNBOOK.md` §1–2) also
 references `scripts/vault-init.sh` (the unseal-share ceremony),
-`scripts/bootstrap-admin.sh` (first HR/System Admin), `scripts/rotate-approle.sh`,
-`scripts/rotate-keks.sh`, and `scripts/verify-restore.sh`. Task 13's brief
-explicitly lists only `auto-deploy-gadonghr.sh`, `prune-gadonghr-images.sh`,
-`seed.sh`, and `backup.sh` as deliverables — those five other scripts do
-not exist yet and are not silently assumed to. Fresh-install and
-restore-drill instructions above stop where they'd need one of them.
+`scripts/rotate-approle.sh`, `scripts/rotate-keks.sh`, and
+`scripts/verify-restore.sh`. Those four do not exist yet and are not
+silently assumed to — restore-drill instructions above stop where they'd
+need one of them. (`scripts/bootstrap-admin.sh` is no longer in this list —
+Task 15b delivered it.)
 
 ## Memory budget — the binding constraint
 

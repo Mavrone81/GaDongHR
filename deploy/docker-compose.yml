@@ -60,10 +60,13 @@ x-http-health: &http-health
 # network path a service used to reach it. `OIDC_JWKS_URI` is the INTERNAL
 # address on purpose — a container-to-container JWKS fetch has no reason to
 # round-trip through Traefik/TLS the way a browser does, matching
-# `AUTHZ_URL`/`CRYPTO_URL` elsewhere in this file. Provisioning the
-# `gadonghr` realm and the `gadonghr-services` client inside Keycloak
-# itself (a one-time admin ceremony, analogous to `vault-init.sh`) is not
-# part of this file — see deploy/README.md's "Out of scope" section.
+# `AUTHZ_URL`/`CRYPTO_URL` elsewhere in this file. Task 15b: the `gadonghr`
+# realm itself (clients `web`/`seeder`, NOT a client literally named
+# `gadonghr-services` — that string is a logical audience value, stamped
+# into `aud` by an audience protocol mapper on both clients, matching
+# `OIDC_AUDIENCE` below exactly) is provisioned by
+# `keycloak/realm-gadonghr.json`, imported by the `keycloak` service's own
+# `--import-realm` flag below — see deploy/keycloak/README.md.
 x-oidc-env: &oidc-env
   OIDC_ISSUER: https://${PUBLIC_HOST}/auth/realms/gadonghr
   OIDC_AUDIENCE: gadonghr-services
@@ -106,7 +109,15 @@ services:
     image: quay.io/keycloak/keycloak:26.0
     <<: *node-defaults
     mem_limit: 768m
-    command: ["start", "--http-enabled=true", "--hostname=https://${PUBLIC_HOST}/auth", "--http-relative-path=/auth", "--proxy-headers=xforwarded"]
+    # Task 15b: `--import-realm` imports every realm JSON found under
+    # `/opt/keycloak/data/import` on EVERY boot, but Keycloak's own import
+    # strategy skips a realm that already exists (`IGNORE_EXISTING`) — so
+    # this is idempotent across restarts, the same contract every other
+    # bootstrap step in this file relies on. It does NOT re-apply changes
+    # to an already-imported realm; editing `keycloak/realm-gadonghr.json`
+    # after the first boot needs a manual re-import or `kcadm.sh` edit
+    # (see deploy/keycloak/README.md).
+    command: ["start", "--http-enabled=true", "--hostname=https://${PUBLIC_HOST}/auth", "--http-relative-path=/auth", "--proxy-headers=xforwarded", "--import-realm"]
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?currentSchema=keycloak
@@ -115,6 +126,15 @@ services:
       KC_DB_PASSWORD: ${KC_DB_PASSWORD}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
+    volumes:
+      # Task 15b: the `gadonghr` realm import — `web` (public PWA client)
+      # and `seeder` (confidential service-account client) — read-only, so
+      # the container can never write back into the source-controlled
+      # file. See deploy/keycloak/README.md for what is and is not
+      # parameterised in this file, and deploy/scripts/seed.sh for how the
+      # seeder client's secret is provisioned without ever being committed
+      # here.
+      - ./keycloak/realm-gadonghr.json:/opt/keycloak/data/import/realm-gadonghr.json:ro
     depends_on:
       postgres: { condition: service_healthy }
     labels:
