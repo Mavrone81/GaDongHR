@@ -1,0 +1,257 @@
+{
+  "$schema": "https://gadonghr.internal/schemas/ui-coverage.json",
+  "routes": [
+    {
+      "service": "svc-scheduler",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser."
+    },
+    {
+      "service": "svc-audit",
+      "method": "GET",
+      "path": "entries",
+      "permission": "audit.read",
+      "screen": "/compliance/audit",
+      "notes": "Filterable list of hash-chained audit entries (entity, entityId, date range) for the auditor/compliance console."
+    },
+    {
+      "service": "svc-audit",
+      "method": "GET",
+      "path": "verify",
+      "permission": "audit.read",
+      "screen": "/compliance/audit",
+      "notes": "Runs chain verification and shows the result inline on the same audit console — the compliance story a buyer sees."
+    },
+    {
+      "service": "svc-audit",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. No business routes exist yet — Phase 3 adds them."
+    },
+    {
+      "service": "svc-i18n",
+      "method": "GET",
+      "path": "bundles/:locale",
+      "exempt": "consumed-not-displayed",
+      "reason": "The app reads this to render every string on every screen, including the login screen before a principal exists; it has no screen of its own."
+    },
+    {
+      "service": "svc-i18n",
+      "method": "GET",
+      "path": "glossary",
+      "exempt": "consumed-not-displayed",
+      "reason": "Cross-language terminology the app reads to keep labels consistent across th/en/zh; not itself a screen a user navigates to."
+    },
+    {
+      "service": "svc-i18n",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser."
+    },
+    {
+      "service": "svc-authz",
+      "method": "POST",
+      "path": "decide",
+      "exempt": "service-to-service",
+      "reason": "Called only by @gadong/kernel's PermissionGuard/AuthzClient on every other service's request path; never reachable from a browser."
+    },
+    {
+      "service": "svc-authz",
+      "method": "GET",
+      "path": "roles",
+      "permission": "authz.role.read",
+      "screen": "/admin/roles",
+      "notes": "Lists the ten role templates and their permissions for the HR/System Admin role-management console."
+    },
+    {
+      "service": "svc-authz",
+      "method": "POST",
+      "path": "users/:id/roles",
+      "permission": "authz.role.grant",
+      "screen": "/admin/roles",
+      "notes": "Grants a role (optionally org-scoped) to a user from the same role-management console."
+    },
+    {
+      "service": "svc-authz",
+      "method": "DELETE",
+      "path": "users/:id/roles/:roleId",
+      "permission": "authz.role.grant",
+      "screen": "/admin/roles",
+      "notes": "Revokes a previously granted role from the same role-management console."
+    },
+    {
+      "service": "svc-authz",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. No business routes exist yet — Phase 3 adds them."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. No business routes exist yet — Phase 5 adds them."
+    },
+    {
+      "service": "svc-leave",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. No business routes exist yet — Phase 4 adds them."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. No business routes exist yet — Phase 2 adds them."
+    },
+    {
+      "service": "svc-notify",
+      "method": "GET",
+      "path": "notifications",
+      "permission": "notify.notification.read",
+      "screen": "/notifications",
+      "notes": "The in-app notification inbox every role sees; self-scoped to the authenticated caller's own notifications."
+    },
+    {
+      "service": "svc-notify",
+      "method": "POST",
+      "path": "notifications/:id/read",
+      "permission": "notify.notification.update",
+      "screen": "/notifications",
+      "notes": "Marks a notification read from the same inbox screen."
+    },
+    {
+      "service": "svc-notify",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser."
+    },
+    {
+      "service": "svc-crypto",
+      "method": "POST",
+      "path": "encrypt",
+      "exempt": "service-to-service",
+      "reason": "Called only by @gadong/kernel's CryptoClient; never reachable from a browser."
+    },
+    {
+      "service": "svc-crypto",
+      "method": "POST",
+      "path": "decrypt",
+      "exempt": "service-to-service",
+      "reason": "Called only by @gadong/kernel's CryptoClient; never reachable from a browser."
+    },
+    {
+      "service": "svc-crypto",
+      "method": "POST",
+      "path": "bidx",
+      "exempt": "service-to-service",
+      "reason": "Called only by @gadong/kernel's CryptoClient; never reachable from a browser."
+    },
+    {
+      "service": "svc-crypto",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser."
+    },
+    {
+      "service": "svc-docs",
+      "method": "POST",
+      "path": "render",
+      "permission": "document.generate",
+      "screen": "/documents",
+      "notes": "Generates a document (contract, letter, payslip) from a template on the document console."
+    },
+    {
+      "service": "svc-docs",
+      "method": "GET",
+      "path": "documents/:id",
+      "permission": "document.read",
+      "screen": "/documents",
+      "notes": "Views/downloads a previously rendered document from the same console."
+    },
+    {
+      "service": "svc-docs",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser."
+    },
+    {
+      "service": "svc-config",
+      "method": "GET",
+      "path": "rules/:key",
+      "permission": "config.rule.read",
+      "screen": "/admin/statutory-rules",
+      "notes": "Reads one effective-dated statutory rule for the governance console's detail view."
+    },
+    {
+      "service": "svc-config",
+      "method": "GET",
+      "path": "rules",
+      "permission": "config.rule.read",
+      "screen": "/admin/statutory-rules",
+      "notes": "Lists current statutory rules by key prefix — the console's default list view."
+    },
+    {
+      "service": "svc-config",
+      "method": "POST",
+      "path": "rules",
+      "permission": "config.rule.propose",
+      "screen": "/admin/statutory-rules",
+      "notes": "Proposes a new statutory rule version from the same console."
+    },
+    {
+      "service": "svc-config",
+      "method": "POST",
+      "path": "rules/:id/approve",
+      "permission": "config.rule.approve",
+      "screen": "/admin/statutory-rules",
+      "notes": "Approve a proposed rule change; second-person approval, proposer cannot approve."
+    },
+    {
+      "service": "svc-config",
+      "method": "POST",
+      "path": "packs/import",
+      "permission": "config.pack.import",
+      "screen": "/admin/statutory-rules",
+      "notes": "Imports a signed statutory rule pack from the same console."
+    },
+    {
+      "service": "svc-config",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser."
+    },
+    {
+      "service": "svc-claims",
+      "method": "GET",
+      "path": "health",
+      "exempt": "operational",
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. No business routes exist yet — Phase 4 adds them."
+    }
+  ]
+}

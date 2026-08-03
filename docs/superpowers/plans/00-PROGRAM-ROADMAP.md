@@ -145,12 +145,22 @@ leave.request  leave.approve  leave.admin  leave.balance.read
 claim.submit  claim.approve  claim.approve.finance  claim.admin
 payroll.profile.read  payroll.profile.write  payroll.run.prepare  payroll.run.calculate
 payroll.run.approve  payroll.run.commit  payroll.export  payslip.read.self  payslip.read.any
-config.rule.propose  config.rule.approve  config.pack.import
+config.rule.propose  config.rule.approve  config.pack.import  config.rule.read
 audit.read  dpo.console  dsr.manage  retention.approve
 biometric.template.read
+authz.role.read  authz.role.grant  document.read
+notify.notification.read  notify.notification.update
 ```
 
 **`biometric.template.read` is granted to no human role, ever** — it exists only as a machine grant to `svc-attendance`. Security doc §4.2, asserted globally by XC-RBAC.
+
+**Added 2026-08-03 (Task 14b, building `web/ui-coverage.json`):** the five codes on the last two
+lines were already shipped in `@RequirePermission(...)` decorators but missing from this list.
+`config.rule.read`/`authz.role.read`/`authz.role.grant` were already reconciled in
+`services/svc-authz/src/seed/roles.ts`'s `PERMISSION_CATALOG`; `document.read` and both
+`notify.notification.*` codes were not reconciled anywhere and are not granted to any of the ten
+role templates in `seed/roles.ts` — those three routes are unreachable by any human role today.
+Fixing the grants is `svc-authz`'s/`svc-notify`'s/`svc-docs`'s work, out of this task's scope.
 
 **Segregation of duties, enforced in code and by DB constraint:**
 - payroll run: `prepared_by ≠ approved_by`

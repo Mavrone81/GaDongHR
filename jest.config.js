@@ -3,7 +3,7 @@ module.exports = {
   // `deploy` added by Task 13: `deploy/compose-validation.test.ts` is the
   // test suite for the compose files themselves (this task's deliverable
   // is configuration, not application code — see that file's header).
-  roots: ['<rootDir>/packages', '<rootDir>/services', '<rootDir>/deploy'],
+  roots: ['<rootDir>/packages', '<rootDir>/services', '<rootDir>/deploy', '<rootDir>/web'],
   testMatch: ['**/*.test.ts'],
   collectCoverageFrom: ['packages/**/src/**/*.ts', 'services/**/src/**/*.ts'],
   // `preset: 'ts-jest'` (the previous config) transforms with an empty ts-jest
