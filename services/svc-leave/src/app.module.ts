@@ -1,9 +1,30 @@
 import 'reflect-metadata'
+import { randomUUID } from 'node:crypto'
 import { Module } from '@nestjs/common'
-import { APP_FILTER } from '@nestjs/core'
-import { GadongErrorFilter, createPool } from '@gadong/kernel'
-import { CRYPTO_HEALTH, DB_POOL, LeaveController } from './leave.controller'
+import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
+import { APP_FILTER, APP_GUARD } from '@nestjs/core'
+import {
+  AuthzClient,
+  CryptoClient,
+  GadongErrorFilter,
+  PermissionGuard,
+  createOidcMiddlewareHandler,
+  createPool,
+} from '@gadong/kernel'
+import type { AuthzTransport, CryptoTransport, OidcMiddlewareHandler, Queryable } from '@gadong/kernel'
+import { ApprovalsRepository } from './approvals.repository'
+import { ApprovalsService } from './approvals.service'
+import { BalancesRepository } from './balances.repository'
+import { BalancesService } from './balances.service'
+import { CONFIG_HEALTH, CRYPTO_HEALTH, DB_POOL, LeaveController } from './leave.controller'
 import type { HealthCheckPort } from './leave.controller'
+import { EssBalancesService } from './ess-balances.service'
+import { HttpConfigClient } from './config-client'
+import type { ConfigClient } from './config-client'
+import { LeaveTypesRepository } from './leave-types.repository'
+import { LeaveTypesService } from './leave-types.service'
+import { RequestsRepository } from './requests.repository'
+import { RequestsService } from './requests.service'
 
 function requiredEnv(name: string): string {
   const value = process.env[name]
@@ -11,15 +32,7 @@ function requiredEnv(name: string): string {
   return value
 }
 
-/**
- * A `HealthCheckPort` backed by a plain `fetch` reachability probe against
- * `url` — "is anyone answering", not a deep protocol check. Any thrown
- * error (DNS failure, connection refused, timeout) or non-2xx response
- * reports `down` rather than propagating, matching every other service's
- * `checkDb`/`checkSmtp`-style health checks (`/health` must never itself
- * throw and take the whole endpoint down). Same shape as
- * `services/svc-attendance/src/app.module.ts`'s `createHttpHealthCheck`.
- */
+/** Same `fetch`-reachability shape every other service's health dependency check uses (`services/svc-attendance/src/app.module.ts`'s `createHttpHealthCheck`) — `/health` must never itself throw. */
 function createHttpHealthCheck(url: string): HealthCheckPort {
   return {
     async check() {
@@ -33,41 +46,142 @@ function createHttpHealthCheck(url: string): HealthCheckPort {
   }
 }
 
+function createHttpCryptoTransport(baseUrl: string): CryptoTransport {
+  return {
+    async post(path, body) {
+      const res = await fetch(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const text = await res.text()
+      return text.length > 0 ? (JSON.parse(text) as unknown) : {}
+    },
+  }
+}
+
+/** Same fail-closed reasoning as `services/svc-config/src/app.module.ts`'s identical function: `svc-authz` treats an unreachable transport as a denial, which is the correct behaviour, not a placeholder. */
+function createHttpAuthzTransport(baseUrl: string): AuthzTransport {
+  return {
+    async post(path, body) {
+      const res = await fetch(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const text = await res.text()
+      return text.length > 0 ? (JSON.parse(text) as unknown) : {}
+    },
+  }
+}
+
+function createOidcMiddleware(): OidcMiddlewareHandler {
+  return createOidcMiddlewareHandler({
+    issuer: requiredEnv('OIDC_ISSUER'),
+    audience: requiredEnv('OIDC_AUDIENCE'),
+    jwksUri: requiredEnv('OIDC_JWKS_URI'),
+  })
+}
+
 /**
- * `AppModule` for Task 14: schema, migrations, and `GET /health` only — no
- * `PermissionGuard`/`OidcMiddleware` wiring (see `leave.controller.ts` for
- * why), no repository/service layer (there is no business logic yet to
- * back one). Phase 4 extends this module when leave-type/balance/request/
- * approval-chain endpoints land.
+ * `svc-leave` IS reached by employees, managers and HR admins — like
+ * `svc-config` (and unlike `svc-crypto`, which is service-to-service only),
+ * this module mounts the kernel's `PermissionGuard` as `APP_GUARD`: every
+ * route not explicitly marked `@Public()` (only `GET /health` is) must
+ * declare a permission or the guard denies it.
+ *
+ * Every business service this module wires reads statutory figures from
+ * `svc-config` (`ConfigClient`) and writes health-data pointers through
+ * `svc-crypto` (`CryptoClient`) — both real HTTP clients here, both fakes
+ * in every test (Task brief CONSTRAINTS: "no Postgres here — test against a
+ * fake").
  */
 @Module({
   controllers: [LeaveController],
   providers: [
-    // Task 16e, defect 2: see `services/svc-attendance/src/app.module.ts`'s
-    // identical comment — maps a thrown `GadongError` onto its declared HTTP
-    // status/envelope from day one, ahead of this service's first business
-    // route.
+    { provide: APP_GUARD, useClass: PermissionGuard },
     { provide: APP_FILTER, useClass: GadongErrorFilter },
     {
+      provide: AuthzClient,
+      useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
+    },
+    {
       provide: DB_POOL,
-      // `createPool` pins `search_path` to `leave` so every unqualified
-      // table name (and the fully-qualified `leave.*` names future
-      // repositories will use) resolves in this service's own schema and
-      // nowhere else (global-constraints: "every service owns one
-      // schema").
+      // `createPool` pins `search_path` to `leave` (global-constraints:
+      // "every service owns one schema").
       useFactory: () => createPool(requiredEnv('DATABASE_URL'), 'leave'),
     },
     {
       provide: CRYPTO_HEALTH,
-      // `svc-crypto` is a real dependency of this service from day one
-      // even before Phase 4's request-submission code lands:
-      // `leave_request.attachment_ref` (a medical-certificate pointer,
-      // health data under PDPA s.26) is envelope-encrypted through it. No
-      // default hard-coded to a guessable production hostname
-      // (carried-forward binding: fail closed) — `CRYPTO_URL` matches
-      // every other service's env var name for the same dependency.
       useFactory: () => createHttpHealthCheck(`${process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000'}/health`),
+    },
+    {
+      provide: CONFIG_HEALTH,
+      useFactory: () => createHttpHealthCheck(`${process.env['CONFIG_URL'] ?? 'http://svc-config:3000'}/health`),
+    },
+    {
+      provide: CryptoClient,
+      useFactory: () => new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000')),
+    },
+    {
+      provide: HttpConfigClient,
+      useFactory: () => new HttpConfigClient(process.env['CONFIG_URL'] ?? 'http://svc-config:3000'),
+    },
+    // Bound to the interface, not the concrete class, so every consumer
+    // below depends on `ConfigClient` (the seam tests substitute a fake
+    // through) rather than the HTTP implementation directly.
+    { provide: 'CONFIG_CLIENT', useExisting: HttpConfigClient },
+    {
+      provide: LeaveTypesRepository,
+      useFactory: (pool: Queryable) => new LeaveTypesRepository(pool),
+      inject: [DB_POOL],
+    },
+    {
+      provide: LeaveTypesService,
+      useFactory: (repo: LeaveTypesRepository, config: ConfigClient) => new LeaveTypesService(repo, config, () => randomUUID()),
+      inject: [LeaveTypesRepository, 'CONFIG_CLIENT'],
+    },
+    {
+      provide: BalancesRepository,
+      useFactory: (pool: Queryable) => new BalancesRepository(pool),
+      inject: [DB_POOL],
+    },
+    {
+      provide: BalancesService,
+      useFactory: (repo: BalancesRepository) => new BalancesService(repo, () => randomUUID()),
+      inject: [BalancesRepository],
+    },
+    {
+      provide: EssBalancesService,
+      useFactory: (types: LeaveTypesRepository, balances: BalancesService) => new EssBalancesService(types, balances),
+      inject: [LeaveTypesRepository, BalancesService],
+    },
+    {
+      provide: RequestsRepository,
+      useFactory: (pool: Queryable) => new RequestsRepository(pool),
+      inject: [DB_POOL],
+    },
+    {
+      provide: RequestsService,
+      useFactory: (repo: RequestsRepository, types: LeaveTypesRepository, balances: BalancesService, crypto: CryptoClient, config: ConfigClient) =>
+        new RequestsService(repo, types, balances, crypto, config, () => randomUUID()),
+      inject: [RequestsRepository, LeaveTypesRepository, BalancesService, CryptoClient, 'CONFIG_CLIENT'],
+    },
+    {
+      provide: ApprovalsRepository,
+      useFactory: (pool: Queryable) => new ApprovalsRepository(pool),
+      inject: [DB_POOL],
+    },
+    {
+      provide: ApprovalsService,
+      useFactory: (repo: ApprovalsRepository, requestsRepo: RequestsRepository, typesRepo: LeaveTypesRepository, balances: BalancesService) =>
+        new ApprovalsService(repo, requestsRepo, typesRepo, balances, () => randomUUID()),
+      inject: [ApprovalsRepository, RequestsRepository, LeaveTypesRepository, BalancesService],
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(createOidcMiddleware()).forRoutes('*')
+  }
+}
