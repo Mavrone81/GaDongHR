@@ -89,7 +89,42 @@ covers the seven platform services' live endpoints, not only the ESS screens. Th
 scope anyway: the statutory-rules governance screen and the audit-chain verifier are where the
 compliance story becomes visible to a buyer, and they are the parts no competitor screenshot shows.
 
-## 🔴 Open security gap — `GET /documents/:id` has no ownership scoping
+## 🔴 Open security gap — permissions are too coarse for row-level access
+
+**Three instances found, same shape. Must close before Phase 2 puts real employee data behind them.**
+
+The kernel's `PermissionGuard` answers "may this user perform this action", never "may this user
+perform it on *this row*". `svc-authz` returns `scopeOrgUnitIds`, and **nothing consumes it**. So a
+permission granted for a legitimate self-service purpose also unlocks every other row the same
+route can reach.
+
+| Route | Permission | The hole |
+|---|---|---|
+| `GET /documents/:id` | `document.read` | One permission covers contracts *and payslips*, with no ownership check. An employee who enumerates a document id reaches a colleague's payslip. |
+| `GET /my/schedule` | `roster.read` | Same permission also covers team-wide roster routes. |
+| Employee document/roster grants | both | Granted to `employee-ess` so self-service works, which is exactly what widens the exposure. |
+
+Mitigated, not fixed: `document.read` is withheld from `hr-officer` and `hr-system-admin` so the
+viewer cannot become a side door around Security doc §4.2's rule that HR roles never see payroll
+amounts. That contains the blast radius while the tables are empty. It does nothing about
+employee-to-employee exposure.
+
+**The fix, and it is one fix for all three:**
+1. Split permissions by scope — `*.read.self` for one's own rows, `*.read.scoped` for an org
+   subtree, `*.read.any` for auditors. Keep payroll documents behind a payroll permission rather
+   than a document one.
+2. Make the guard *attach* `scopeOrgUnitIds` to the request, and give services a helper that
+   applies it. The data is already returned and thrown away.
+3. Every S3 read emits an audit entry with a purpose.
+4. Regression test per route: employee A requesting employee B's row gets 403, not 200.
+
+This is the fourth defect of this shape this phase — a component correct in isolation, asking the
+authorisation question one level too coarsely. **Check every module controller in Phases 3–5 for
+it as they are written**, rather than auditing afterwards.
+
+---
+
+## Superseded — `GET /documents/:id` has no ownership scoping
 
 Found 2026-08-03 while fixing unreachable permissions. **Must be closed before Phase 2 puts real
 employee data behind it.**
