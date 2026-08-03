@@ -17,20 +17,31 @@ import { join } from 'node:path'
  * run this stack at all.
  */
 
+interface ComposeHealthcheck {
+  test?: string[]
+}
+
 interface ComposeService {
   container_name?: string
   ports?: unknown[]
   mem_limit?: number | string
-  healthcheck?: unknown
+  healthcheck?: ComposeHealthcheck
   build?: unknown
   image?: string
   labels?: Record<string, string>
   security_opt?: string[]
   cap_add?: string[]
+  environment?: Record<string, string>
+}
+
+interface ComposeFileSecret {
+  file?: string
+  name?: string
 }
 
 interface ComposeConfig {
   services: Record<string, ComposeService>
+  secrets?: Record<string, ComposeFileSecret>
 }
 
 const DEPLOY_DIR = __dirname
@@ -204,6 +215,111 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
       expect(rule).toMatch(/PathPrefix/)
       const priority = routerPriority(svc, name)
       expect(priority).toBeGreaterThan(webPriority)
+    }
+  })
+
+  /**
+   * Task 16b: the general form of the Redis healthcheck bug — a
+   * healthcheck's `test` command referencing a shell variable that is
+   * never actually in the container's own `environment` block always
+   * authenticates/operates with an EMPTY value for it, which for
+   * `redis-cli -a $$REDIS_PASSWORD` means "authenticate with an empty
+   * password" against a server that requires a real one, forever
+   * `WRONGPASS`, even though the underlying process is healthy. `docker
+   * compose config` fully resolves any single-`$`/`${...}` reference at
+   * CONFIG time (see e.g. `postgres`'s healthcheck, which config
+   * substitutes down to a literal `-U gadong_admin`) — so any `$name`
+   * pattern still present in the MERGED config's `healthcheck.test` is,
+   * by construction, a `$$`-escaped reference Compose deliberately left
+   * for the CONTAINER's own shell to resolve at runtime. That variable
+   * must therefore exist in this same service's `environment` block, or
+   * it resolves to nothing at runtime, exactly like `REDIS_PASSWORD` did.
+   */
+  test('every service whose healthcheck references a shell variable declares it in `environment`', () => {
+    const shellVarPattern = /\$\$?\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g
+
+    function referencedVars(test: string[] | undefined): string[] {
+      if (!test) return []
+      const found = new Set<string>()
+      for (const part of test) {
+        for (const m of part.matchAll(shellVarPattern)) {
+          if (m[1]) found.add(m[1])
+        }
+      }
+      return [...found]
+    }
+
+    let sawAtLeastOneReference = false
+    for (const [name, svc] of Object.entries(config.services)) {
+      const referenced = referencedVars(svc.healthcheck?.test)
+      const envKeys = Object.keys(svc.environment ?? {})
+      for (const varName of referenced) {
+        sawAtLeastOneReference = true
+        expect([name, varName, envKeys.includes(varName)]).toEqual([name, varName, true])
+      }
+    }
+    // If this ever went to zero, every assertion above would be vacuously
+    // true and the test would be worthless — `redis` is expected to
+    // always be the (at least) one service exercising this path.
+    expect(sawAtLeastOneReference).toBe(true)
+  })
+})
+
+/**
+ * Task 16b: the actual bug — `svc-crypto` could not read
+ * `/run/secrets/vault_approle_secret` because Compose's file-sourced
+ * `secrets:` bind-mounts the HOST file into the container with the HOST's
+ * own ownership preserved verbatim, and the correct, least-privilege host
+ * permission (`-rw------- root:root`) is unreadable by the container's
+ * `node` (uid 1000) process. The Compose *spec* documents a per-service
+ * `uid`/`gid`/`mode` on a `secrets:` entry that would remount the secret
+ * under different ownership without ever touching the host file — but
+ * this was verified empirically against the actual engine in use here
+ * (Docker Compose, non-Swarm `docker compose up`/`run` — this repo has no
+ * `deploy:`/`docker stack deploy` anywhere), which prints "secrets `uid`,
+ * `gid` and `mode` are not supported, they will be ignored" and mounts
+ * with the host owner unchanged regardless. So every file-sourced secret
+ * must instead have its ownership enforced by the deploy script itself,
+ * every run — `scripts/auto-deploy-gadonghr.sh`'s "Ensure secret file
+ * ownership" step — or a fresh host reproduces the exact EACCES
+ * crash-loop this task fixed, waiting on a human to remember a manual
+ * `chown`. This test asserts that enforcement exists for EVERY
+ * file-sourced secret the compose files declare, not just the one known
+ * today, and that it runs before `compose up -d` (an enforcement step
+ * that ran only after the container already started reading the file
+ * would be too late).
+ */
+describe('every file-sourced Compose secret has its host ownership enforced, not left to luck (Task 16b)', () => {
+  let config: ComposeConfig
+  let deployScript: string
+
+  beforeAll(() => {
+    config = runComposeConfig('docker-compose.yml', 'docker-compose.prod.yml')
+    deployScript = readFileSync(join(DEPLOY_DIR, 'scripts', 'auto-deploy-gadonghr.sh'), 'utf8')
+  })
+
+  test('at least one file-sourced secret exists (otherwise this suite is vacuous)', () => {
+    const fileSecrets = Object.entries(config.secrets ?? {}).filter(([, s]) => typeof s.file === 'string')
+    expect(fileSecrets.length).toBeGreaterThan(0)
+  })
+
+  test('every file-sourced secret is chown/chmod-enforced by the deploy script before `up -d`', () => {
+    const fileSecrets = Object.entries(config.secrets ?? {}).filter(([, s]) => typeof s.file === 'string')
+    const upIndex = deployScript.search(/compose\s+up\s+-d/)
+    expect(upIndex).toBeGreaterThan(-1)
+
+    for (const [secretName] of fileSecrets) {
+      const lines = deployScript.split('\n').filter((l) => l.includes(`secrets/${secretName}`))
+      const hasChown = lines.some((l) => /chown\s+1000:1000/.test(l))
+      const hasChmod = lines.some((l) => /chmod\s+600\b/.test(l))
+      expect([secretName, hasChown, hasChmod]).toEqual([secretName, true, true])
+
+      // Ordering: the enforcement must appear before `compose up -d` in
+      // the script's source, or the container may already have started
+      // reading the (still wrongly-owned) file by the time it runs.
+      const enforceIndex = deployScript.indexOf(`secrets/${secretName}`)
+      expect(enforceIndex).toBeGreaterThan(-1)
+      expect(enforceIndex).toBeLessThan(upIndex)
     }
   })
 })
@@ -442,5 +558,84 @@ describe('deploy/docker-compose.prod.yml image tag variables (raw source, cross-
         )
       }
     }
+  })
+})
+
+/**
+ * Task 16b: the actual bug — every schema-owning service's own migration
+ * unconditionally re-issues `CREATE SCHEMA IF NOT EXISTS "<schema>"` at
+ * every boot (over the same `DATABASE_URL` the runtime pool then reuses),
+ * and Postgres evaluates the CREATE privilege on the DATABASE before ever
+ * reaching the `IF NOT EXISTS` short-circuit — an already-existing schema
+ * does not save you. `01-roles.sql` fixes this with one `GRANT CREATE ON
+ * DATABASE` per role, but the defect that shipped past a green suite
+ * BEFORE this task was never "the grant is wrong", it was "the grant
+ * doesn't exist at all, for any of the twelve" — so what this must catch
+ * is a FUTURE partial fix (eleven roles granted, one quietly missed) just
+ * as much as total absence. Hard-coding the expected list of twelve names
+ * here would defeat that purpose (a test that lists the same twelve names
+ * the SQL file lists proves nothing) — the expected set is derived
+ * instead from `docs/superpowers/plans/00-PROGRAM-ROADMAP.md`'s own
+ * "Service inventory" table (`Schema` column), the single canonical
+ * source `01-roles.sql`'s own header comment already points at ("Twelve
+ * business schemas (roadmap Database conventions ...)").
+ */
+describe('deploy/postgres/init/01-roles.sql grants CREATE ON DATABASE to every roadmap schema role (Task 16b)', () => {
+  const roadmapSource = readFileSync(
+    join(DEPLOY_DIR, '..', 'docs', 'superpowers', 'plans', '00-PROGRAM-ROADMAP.md'),
+    'utf8',
+  )
+  const sqlSource = readFileSync(join(DEPLOY_DIR, 'postgres', 'init', '01-roles.sql'), 'utf8')
+
+  /**
+   * Pulls every `Schema` cell out of the roadmap's "Service inventory"
+   * markdown table (stops at the next `##` heading) — a cell is only
+   * counted if it is backtick-quoted (` `config` `, not the bare `—` used
+   * for the services that own no schema), so `svc-crypto`, `svc-i18n`,
+   * `web`, `retention-job`, and `@gadong/kernel` are excluded exactly as
+   * the table itself excludes them, not by name-matching.
+   */
+  function extractRoadmapSchemas(source: string): string[] {
+    const tableSection = source.split('## Service inventory')[1]?.split(/\n## /)[0] ?? ''
+    const rows = tableSection.split('\n').filter((l) => l.trim().startsWith('|'))
+    const schemas: string[] = []
+    for (const row of rows) {
+      const cells = row.split('|').map((c) => c.trim())
+      const schemaCell = cells[3]
+      const match = schemaCell?.match(/`([\w-]+)`/)
+      if (match?.[1]) schemas.push(match[1])
+    }
+    return schemas
+  }
+
+  /** Every `GRANT CREATE ON DATABASE ... TO <role>;` in the SQL source. */
+  function extractGrantedRoles(source: string): string[] {
+    const pattern = /GRANT\s+CREATE\s+ON\s+DATABASE\s+\S+\s+TO\s+(\w+)\s*;/gi
+    return [...source.matchAll(pattern)].map((m) => m[1]).filter((r): r is string => Boolean(r))
+  }
+
+  const expectedRoles = extractRoadmapSchemas(roadmapSource).sort()
+  const grantedRoles = extractGrantedRoles(sqlSource).sort()
+
+  test('the roadmap table yields a non-empty schema list (otherwise this suite is vacuous)', () => {
+    expect(expectedRoles.length).toBeGreaterThan(0)
+  })
+
+  test('01-roles.sql contains at least one GRANT CREATE ON DATABASE statement', () => {
+    expect(grantedRoles.length).toBeGreaterThan(0)
+  })
+
+  test('every roadmap schema role — no subset, no extra — is granted CREATE ON DATABASE', () => {
+    expect(grantedRoles).toEqual(expectedRoles)
+  })
+
+  test('each GRANT CREATE ON DATABASE statement names the database via the POSTGRES_DB env var, not a literal', () => {
+    // Guards against a future edit hard-coding a database name (e.g.
+    // `GRANT CREATE ON DATABASE gadonghr TO ...`) that would silently
+    // diverge from whatever `POSTGRES_DB` is actually set to in `.env`.
+    const literalDbGrants = [...sqlSource.matchAll(/GRANT\s+CREATE\s+ON\s+DATABASE\s+(\S+)\s+TO\s+\w+\s*;/gi)].filter(
+      (m) => m[1] !== ':"gadong_db"',
+    )
+    expect(literalDbGrants).toEqual([])
   })
 })

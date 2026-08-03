@@ -38,6 +38,14 @@ cp .env.example .env                 # fill every CHANGE_ME (openssl rand -base6
 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d postgres vault
 # --- Vault key ceremony here (vault-init.sh, NOT part of this task — see "Out of scope" below) ---
+# vault-init.sh writes the AppRole secret half to ./secrets/vault_approle_secret.
+# Task 16b: Compose's file-sourced `secrets:` preserves the HOST file's own
+# ownership inside the container verbatim (this engine does not honour the
+# compose-spec's per-service secret `uid`/`gid`/`mode` outside Swarm — see
+# docker-compose.yml's svc-crypto comment) — svc-crypto's container runs as
+# `node` (uid 1000), so the file must be readable by uid 1000 and by NO ONE
+# else (never `chmod 644`):
+chown 1000:1000 ./secrets/vault_approle_secret && chmod 600 ./secrets/vault_approle_secret
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ./scripts/seed.sh
 ./scripts/bootstrap-admin.sh

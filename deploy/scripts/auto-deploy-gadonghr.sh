@@ -109,6 +109,28 @@ log "Deploying ${remote_sha} (new_code=${new_code}, stack_running=${stack_runnin
 # "is there new code?" check next run would say no forever without it.
 git checkout --quiet "$remote_sha"
 
+# ---------- 3b. Ensure secret file ownership (Task 16b) ----------
+# Compose's file-sourced `secrets:` (docker-compose.yml's `vault_approle_secret`)
+# bind-mounts `./secrets/vault_approle_secret` into svc-crypto's container
+# with the HOST file's own ownership preserved verbatim — this compose
+# engine does not honour the compose-spec's per-service `uid`/`gid`/`mode`
+# secret fields outside Swarm (verified empirically: `docker compose up`
+# prints "secrets `uid`, `gid` and `mode` are not supported, they will be
+# ignored" and mounts with the host owner unchanged regardless — see
+# docker-compose.yml's svc-crypto comment). The correct host permission is
+# `-rw------- root:root` (never world/group-readable — brief: do not fix
+# this with `chmod 644`), but svc-crypto's container runs as `node` (uid
+# 1000, `services/svc-crypto/Dockerfile`'s `USER node`), so without this
+# step every fresh host/volume/backup-restore reproduces the exact EACCES
+# crash-loop this task fixed, waiting on a human to remember a manual
+# `chown`. Idempotent, cheap, and safe to run even before the file exists
+# (e.g. before the Vault ceremony has produced it on a brand new host) —
+# `[ -f ... ]` skips silently rather than failing the whole deploy.
+if [ -f "$DEPLOY_DIR/secrets/vault_approle_secret" ]; then
+  chown 1000:1000 "$DEPLOY_DIR/secrets/vault_approle_secret"
+  chmod 600 "$DEPLOY_DIR/secrets/vault_approle_secret"
+fi
+
 # ---------- 4 & 5. Pull from GHCR only, then up -d ----------
 # `GADONG_VERSION`, not `GADONG_BUILD_SHA`: docker-compose.prod.yml's
 # `image:` tags all read `GADONG_VERSION` (the one deploy-time variable,

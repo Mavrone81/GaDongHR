@@ -62,6 +62,38 @@
 -- belt to the pool-level client option's suspenders — pool.ts's own
 -- comment says this exact thing; this file is what makes it true rather
 -- than aspirational.
+--
+-- GRANT CREATE ON DATABASE (Task 16b): every one of these twelve roles
+-- owns its own schema via `AUTHORIZATION` below, but that is NOT enough
+-- for the role's own service to boot. Each service's own node-pg-migrate
+-- migration (run at container startup, over the SAME `DATABASE_URL` the
+-- runtime pool then reuses — see e.g. `services/svc-authz/src/main.ts`)
+-- unconditionally re-issues `CREATE SCHEMA IF NOT EXISTS "<schema>"`
+-- itself, every single boot, even though this file already created that
+-- exact schema. Postgres evaluates the CREATE privilege on the DATABASE
+-- before it ever gets to the IF NOT EXISTS short-circuit — an already-
+-- existing schema does not save you — so without database-level CREATE,
+-- every one of these twelve services crash-loops on its own migration
+-- with `permission denied for database <db>` (verified live: this is
+-- exactly how it surfaced on `svc-authz`, the first of the twelve to
+-- boot; the other eleven have the identical defect, just not yet
+-- observed, because nothing before this file's fix ever started them
+-- far enough to hit it).
+--
+-- Two fixes were possible: grant `CREATE ON DATABASE` here, or make each
+-- service's migration stop attempting `CREATE SCHEMA IF NOT EXISTS` at
+-- all. The second is a change to `services/*`, which this deploy-only
+-- task does not own; the first is a single, minimal, deploy-side grant.
+-- `GRANT CREATE ON DATABASE` is deliberately the ONLY privilege granted
+-- here — it lets a role create schemas/objects in the database and
+-- nothing else; it is not CONNECT (already implied by LOGIN), not
+-- SUPERUSER, and confers no access whatsoever to another role's schema
+-- (roadmap "Database conventions": "No cross-schema queries. Each
+-- service's DB role is granted only its own schema" — a second role's
+-- `CREATE SCHEMA IF NOT EXISTS "authz"` from anywhere but the `authz`
+-- role itself would still fail on `CREATE SCHEMA ... AUTHORIZATION`
+-- ownership rules, so this grant does not weaken that invariant).
+\getenv gadong_db POSTGRES_DB
 
 -- ---------- Database-wide hardening (once) ----------
 
@@ -95,66 +127,77 @@ CREATE ROLE onboarding LOGIN PASSWORD :'db_password_onboarding' CONNECTION LIMIT
 ALTER ROLE onboarding SET statement_timeout = '30s';
 ALTER ROLE onboarding SET search_path = onboarding;
 CREATE SCHEMA IF NOT EXISTS onboarding AUTHORIZATION onboarding;
+GRANT CREATE ON DATABASE :"gadong_db" TO onboarding;
 
 \getenv db_password_scheduler DB_PASSWORD_SCHEDULER
 CREATE ROLE scheduler LOGIN PASSWORD :'db_password_scheduler' CONNECTION LIMIT 20;
 ALTER ROLE scheduler SET statement_timeout = '30s';
 ALTER ROLE scheduler SET search_path = scheduler;
 CREATE SCHEMA IF NOT EXISTS scheduler AUTHORIZATION scheduler;
+GRANT CREATE ON DATABASE :"gadong_db" TO scheduler;
 
 \getenv db_password_timesheet DB_PASSWORD_TIMESHEET
 CREATE ROLE timesheet LOGIN PASSWORD :'db_password_timesheet' CONNECTION LIMIT 20;
 ALTER ROLE timesheet SET statement_timeout = '30s';
 ALTER ROLE timesheet SET search_path = timesheet;
 CREATE SCHEMA IF NOT EXISTS timesheet AUTHORIZATION timesheet;
+GRANT CREATE ON DATABASE :"gadong_db" TO timesheet;
 
 \getenv db_password_attendance DB_PASSWORD_ATTENDANCE
 CREATE ROLE attendance LOGIN PASSWORD :'db_password_attendance' CONNECTION LIMIT 20;
 ALTER ROLE attendance SET statement_timeout = '30s';
 ALTER ROLE attendance SET search_path = attendance;
 CREATE SCHEMA IF NOT EXISTS attendance AUTHORIZATION attendance;
+GRANT CREATE ON DATABASE :"gadong_db" TO attendance;
 
 \getenv db_password_leave DB_PASSWORD_LEAVE
 CREATE ROLE leave LOGIN PASSWORD :'db_password_leave' CONNECTION LIMIT 20;
 ALTER ROLE leave SET statement_timeout = '30s';
 ALTER ROLE leave SET search_path = leave;
 CREATE SCHEMA IF NOT EXISTS leave AUTHORIZATION leave;
+GRANT CREATE ON DATABASE :"gadong_db" TO leave;
 
 \getenv db_password_claims DB_PASSWORD_CLAIMS
 CREATE ROLE claims LOGIN PASSWORD :'db_password_claims' CONNECTION LIMIT 20;
 ALTER ROLE claims SET statement_timeout = '30s';
 ALTER ROLE claims SET search_path = claims;
 CREATE SCHEMA IF NOT EXISTS claims AUTHORIZATION claims;
+GRANT CREATE ON DATABASE :"gadong_db" TO claims;
 
 \getenv db_password_payroll DB_PASSWORD_PAYROLL
 CREATE ROLE payroll LOGIN PASSWORD :'db_password_payroll' CONNECTION LIMIT 20;
 ALTER ROLE payroll SET statement_timeout = '30s';
 ALTER ROLE payroll SET search_path = payroll;
 CREATE SCHEMA IF NOT EXISTS payroll AUTHORIZATION payroll;
+GRANT CREATE ON DATABASE :"gadong_db" TO payroll;
 
 \getenv db_password_authz DB_PASSWORD_AUTHZ
 CREATE ROLE authz LOGIN PASSWORD :'db_password_authz' CONNECTION LIMIT 20;
 ALTER ROLE authz SET statement_timeout = '30s';
 ALTER ROLE authz SET search_path = authz;
 CREATE SCHEMA IF NOT EXISTS authz AUTHORIZATION authz;
+GRANT CREATE ON DATABASE :"gadong_db" TO authz;
 
 \getenv db_password_config DB_PASSWORD_CONFIG
 CREATE ROLE config LOGIN PASSWORD :'db_password_config' CONNECTION LIMIT 20;
 ALTER ROLE config SET statement_timeout = '30s';
 ALTER ROLE config SET search_path = config;
 CREATE SCHEMA IF NOT EXISTS config AUTHORIZATION config;
+GRANT CREATE ON DATABASE :"gadong_db" TO config;
 
 \getenv db_password_notify DB_PASSWORD_NOTIFY
 CREATE ROLE notify LOGIN PASSWORD :'db_password_notify' CONNECTION LIMIT 20;
 ALTER ROLE notify SET statement_timeout = '30s';
 ALTER ROLE notify SET search_path = notify;
 CREATE SCHEMA IF NOT EXISTS notify AUTHORIZATION notify;
+GRANT CREATE ON DATABASE :"gadong_db" TO notify;
 
 \getenv db_password_docs DB_PASSWORD_DOCS
 CREATE ROLE docs LOGIN PASSWORD :'db_password_docs' CONNECTION LIMIT 20;
 ALTER ROLE docs SET statement_timeout = '30s';
 ALTER ROLE docs SET search_path = docs;
 CREATE SCHEMA IF NOT EXISTS docs AUTHORIZATION docs;
+GRANT CREATE ON DATABASE :"gadong_db" TO docs;
 
 -- `audit` — INSERT and SELECT only, never UPDATE, never DELETE (brief §2;
 -- roadmap "Audit entry": "Append-only: the audit role holds INSERT and
@@ -201,6 +244,7 @@ CREATE ROLE audit LOGIN PASSWORD :'db_password_audit' CONNECTION LIMIT 20;
 ALTER ROLE audit SET statement_timeout = '30s';
 ALTER ROLE audit SET search_path = audit;
 CREATE SCHEMA IF NOT EXISTS audit AUTHORIZATION audit;
+GRANT CREATE ON DATABASE :"gadong_db" TO audit;
 
 -- ---------- Keycloak (identity provider's own database) ----------
 -- Not one of the twelve business schemas above — Keycloak (Task 13

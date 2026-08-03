@@ -268,6 +268,27 @@ services:
     image: redis:7
     <<: *node-defaults
     mem_limit: 80m
+    # Task 16b: the healthcheck below reads `$$REDIS_PASSWORD` — `$$` is
+    # Compose's own escape for a literal `$`, so this is a RUNTIME
+    # reference to an environment variable inside the container (resolved
+    # by the container's own shell when the healthcheck actually runs),
+    # deliberately NOT a Compose-time `${REDIS_PASSWORD}` substitution
+    # like `command:` below uses. Without this `environment:` block that
+    # variable was never set inside the container at all — `printenv
+    # REDIS_PASSWORD` was empty — so the healthcheck authenticated with an
+    # empty password against a server actually guarded by `--requirepass`
+    # and failed forever (`WRONGPASS`) even though Redis itself was
+    # healthy. Fixed by passing the same value into the container's own
+    # environment, not by rewriting the healthcheck to inline the literal
+    # password via Compose-time substitution instead: the password is
+    # already visible in `docker inspect`'s `Config.Cmd` either way (via
+    # `--requirepass` below), so relocating it into `Config.Env` adds
+    # exactly the same one extra plaintext-bearing field that inlining it
+    # into `Healthcheck.Test` would have — no net reduction in `docker
+    # inspect` exposure is actually achievable here, so this keeps the
+    # more standard, idiomatic pattern instead.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     # `--maxmemory` below the container's own `mem_limit` cgroup ceiling
     # is defense-in-depth: Redis evicts under its own policy well before
     # the kernel OOM-killer would ever have to act on this container.
@@ -311,6 +332,30 @@ services:
       VAULT_ADDR: http://vault:8200
       VAULT_APPROLE_ID: ${VAULT_APPROLE_ID}
       VAULT_APPROLE_SECRET_FILE: /run/secrets/vault_approle_secret
+    # Task 16b: `secrets:` (short or long mapping form) bind-mounts the
+    # HOST `file:` source into the container with the HOST file's own
+    # ownership/mode preserved verbatim — this container's process runs as
+    # `node` (uid 1000, `services/svc-crypto/Dockerfile`'s own `USER
+    # node`), so a root-only-readable host file (`-rw------- root:root`,
+    # the correct host-side permission — least privilege for the one
+    # thing with real filesystem access, e.g. a backup job) is EACCES to
+    # it. The Compose *spec* documents `uid`/`gid`/`mode` fields on a
+    # service's own `secrets:` entry that would remount the secret inside
+    # the container under different ownership without touching the host
+    # file — tried first here, then verified empirically rather than
+    # assumed: `docker compose up`/`run` on this stack's actual engine
+    # (Docker Compose v5.3.0, non-Swarm `docker compose`, which is what
+    # this file and `auto-deploy-gadonghr.sh` both use — there is no
+    # `docker stack deploy`/`deploy:` section anywhere in this repo) prints
+    # `secrets \`uid\`, \`gid\` and \`mode\` are not supported, they will
+    # be ignored` and mounts the file with the host owner untouched
+    # regardless — those fields are Swarm-only. So the fix is the brief's
+    # other option: keep the host file `-rw------- root:root` (never
+    # `chmod 644`) and have the deploy script itself enforce the ownership
+    # the `node` (uid 1000) container process needs, every run, so a fresh
+    # host is never one remembered manual `chown` away from this exact
+    # crash — see `scripts/auto-deploy-gadonghr.sh`'s "Ensure secret file
+    # ownership" step and `README.md`'s install order.
     secrets: [vault_approle_secret]
     depends_on:
       vault: { condition: service_healthy }
