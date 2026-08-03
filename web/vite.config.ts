@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'node:url'
 
 // Config from env, not hardcoded (task brief): every VITE_* var below is
 // read at runtime from import.meta.env, populated by Vite from `.env.local`
@@ -10,6 +11,38 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+  },
+  resolve: {
+    alias: {
+      // `web` deliberately imports only this one deep path out of
+      // `@gadong/kernel` (see `src/api/svcConfig.ts`'s header) to keep `pg`,
+      // `jose` and `@nestjs/common` out of the browser bundle. The problem:
+      // `@gadong/kernel/dist/i18n/format.js` is CommonJS —
+      // `tsconfig.base.json` sets `module: "commonjs"` for the whole
+      // monorepo, correct for the 15 Node services — and `vite dev` serves
+      // that file to the browser verbatim ("Object.defineProperty(exports,
+      // ...)"). `exports` is undefined in a browser ES module, so the
+      // import throws, the module graph dies, and React never mounts —
+      // with no console error, because the failure happens before any
+      // listener attaches. `commonjsOptions` below fixes this for `vite
+      // build`'s Rollup pipeline, but `vite dev` doesn't use Rollup, so
+      // that option can't reach it.
+      //
+      // `packages/kernel/src/i18n/format.ts` has no imports of its own
+      // (verified: it's a pure module), so aliasing straight to the
+      // TypeScript source is safe — nothing server-only (pg, jose, Nest
+      // decorators) can ride in behind it. This `resolve.alias` is a single
+      // top-level config, not scoped with `apply: 'serve'`, so Vite applies
+      // it identically to `vite dev` and `vite build` — the two paths
+      // cannot diverge. This also resolves before Rollup's commonjs
+      // interop plugin ever runs, which makes the `packages/kernel/dist`
+      // entry in `commonjsOptions.include` below unreachable for this
+      // particular import; it's left in place as defence-in-depth for any
+      // future import that targets kernel's compiled output directly.
+      '@gadong/kernel/dist/i18n/format': fileURLToPath(
+        new URL('../packages/kernel/src/i18n/format.ts', import.meta.url),
+      ),
+    },
   },
   build: {
     target: 'es2022',
