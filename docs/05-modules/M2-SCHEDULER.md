@@ -96,19 +96,29 @@ classDiagram
 
 ## 3. API Manual
 
+> **Permission names corrected 2026-08-04** (M1/M2/M5/M6 reconciliation, following M2's own build
+> report): this table originally specified `schedule.shift.manage` / `schedule.read` /
+> `schedule.manage` / `schedule.publish` / `schedule.ot.request` / `schedule.ot.approve` /
+> `schedule.holiday.manage`. None of those codes exist in
+> `docs/superpowers/plans/00-PROGRAM-ROADMAP.md`'s permission catalog or
+> `services/svc-authz/src/seed/roles.ts`'s `PERMISSION_CATALOG` — the roadmap catalog is this
+> program's actual fixed contract, reserved for scheduler under different names before this doc was
+> written. The M2 build agent correctly followed the roadmap's names instead of this draft; the code
+> is right and this table was wrong. Corrected below; the doc is updated, not the code.
+
 | # | Method & Path | Permission | Description |
 |---|---|---|---|
-| 1 | `POST /shifts` · `GET /shifts` · `PATCH /shifts/{id}` | `schedule.shift.manage` | Shift CRUD incl. midnight-crossing and differentials |
-| 2 | `GET /rosters?org_unit&from&to` | `schedule.read` (scoped) | Team roster grid |
-| 3 | `POST /rosters/entries` | `schedule.manage` (scoped) | Assign `{employeeId, shiftId, date}` → 200 with ConflictReport; 422 `SCH-010` on blocking violation |
-| 4 | `POST /rosters/entries/{id}/override` | `schedule.manage` | Confirm warn-level conflict `{reason}` |
-| 5 | `POST /rosters/copy` | `schedule.manage` | `{sourceRange, targetRange, team}` pattern copy |
-| 6 | `POST /rosters/publish` | `schedule.publish` | Publishes period → `roster.published`; notifies employees |
-| 7 | `POST /ot-requests` | self / `schedule.ot.request` | `{date, hours, rateClass, reason, employeeConsent}` |
-| 8 | `POST /ot-requests/{id}/decision` | `schedule.ot.approve` | approve/reject; approval re-checks 36h ceiling → `SCH-020` |
-| 9 | `GET /holidays/{year}` · `POST /holidays/{year}` | read: all · manage: `schedule.holiday.manage` | Company list ≥13 floor (`SCH-030` if below); substitute preview included |
-| 10 | `GET /my/schedule?from&to` | self | Employee's own roster + holidays in own language |
-| 11 | `POST /shift-swaps` (P1) | self | Swap request → counterpart accept → manager approve |
+| 1 | `POST /shifts` · `PATCH /shifts/{id}` (write) · `GET /shifts` (read) | `roster.write` (write) · `roster.read` (read) | Shift CRUD incl. midnight-crossing and differentials |
+| 2 | `GET /rosters?org_unit&from&to` | `roster.read` (scoped) | Team roster grid |
+| 3 | `POST /rosters/entries` | `roster.write` (scoped) | Assign `{employeeId, shiftId, date}` → 200 with ConflictReport; 422 `SCH-010` on blocking violation |
+| 4 | `POST /rosters/entries/{id}/override` | `roster.write` | Confirm warn-level conflict `{reason}` |
+| 5 | `POST /rosters/copy` | `roster.write` | `{sourceRange, targetRange, team}` pattern copy |
+| 6 | `POST /rosters/publish` | `roster.publish` | Publishes period → `roster.published`; notifies employees |
+| 7 | `POST /ot-requests` | `ot.request` (self, or a manager on a named employee's behalf) | `{date, hours, rateClass, reason, employeeConsent}` |
+| 8 | `POST /ot-requests/{id}/decision` | `ot.approve` | approve/reject; approval re-checks 36h ceiling → `SCH-020` |
+| 9 | `GET /holidays/{year}` · `POST /holidays/{year}` | read: `roster.read` · manage: `holiday.manage` | Company list ≥13 floor (`SCH-030` if below); substitute preview included |
+| 10 | `GET /my/schedule?from&to` | `roster.read` (self-scoped) | Employee's own roster + holidays in own language |
+| 11 | `POST /shift-swaps` (P1) | self | Swap request → counterpart accept → manager approve — **not built (P1)**, see PRD M2-6 |
 
 ### Events
 

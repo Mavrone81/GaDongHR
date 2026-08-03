@@ -97,18 +97,26 @@ classDiagram
 
 ## 3. API Manual
 
+> **Corrected 2026-08-04** (M1/M2/M5/M6 reconciliation, following M5's own build report):
+> `leave.type.manage`, `leave.manage`, `leave.balance.adjust` do not exist in the roadmap's
+> permission catalog or `services/svc-authz/src/seed/roles.ts`; the catalog reserves
+> `leave.request` / `leave.approve` / `leave.admin` / `leave.balance.read` for this module, and the
+> build used those (row 1 read uses `leave.request` — the same permission a requester needs — since
+> no separate "browse types" code exists in the catalog). Row 7's team calendar was not built (PRD
+> M5-6 is explicitly P1); marked below.
+
 | # | Method & Path | Permission | Description |
 |---|---|---|---|
-| 1 | `GET /types` · `POST /types` · `PATCH /types/{id}` | read: all · manage: `leave.type.manage` | Type CRUD; statutory floor check → 422 `LVE-030` with citation |
-| 2 | `GET /my/balances?year` | self | Balances + projection `?asOf=date` in own language |
-| 3 | `POST /requests` | self | Apply `{typeCode, dates, days, attachment?}`; sick-cert rule enforced |
-| 4 | `POST /requests/{id}/cancel` | self / `leave.manage` | Guarded cancel; publishes `leave.cancelled` |
-| 5 | `GET /approvals?status=pending` | approver (scoped) | Queue with delegation view |
-| 6 | `POST /approvals/{id}/decision` | approver (scoped) | `{decision, comment}`; final level publishes `leave.approved` |
-| 7 | `GET /teams/{orgUnit}/calendar?month` | `leave.read` (scoped) | Team absence calendar (P1: concurrency limits) |
-| 8 | `POST /balances/{employeeId}/adjust` | `leave.balance.adjust` (HR) | Manual adjustment `{delta, reason}` → ledger + audit |
-| 9 | `GET /balances/{employeeId}/ledger` | HR / self(own) | Immutable accrual history |
-| 10 | `POST /encashment` (P1) | self | Request payout where policy allows → payroll line |
+| 1 | `GET /types` (read) · `POST /types` · `PATCH /types/{id}` (manage) | read: `leave.request` · manage: `leave.admin` | Type CRUD; statutory floor check → 422 `LVE-030` with citation |
+| 2 | `GET /my/balances?year` | `leave.balance.read` (self) | Balances + projection `?asOf=date` in own language |
+| 3 | `POST /requests` | `leave.request` (self) | Apply `{typeCode, dates, days, attachment?}`; sick-cert rule enforced |
+| 4 | `POST /requests/{id}/cancel` | `leave.request` (self) | Guarded cancel; publishes `leave.cancelled` |
+| 5 | `GET /approvals` | `leave.approve` (scoped) | Queue, including delegated approvals |
+| 6 | `POST /approvals/{id}/decision` | `leave.approve` (scoped) | `{decision, comment}`; final level publishes `leave.approved` |
+| 7 | `GET /teams/{orgUnit}/calendar?month` | `leave.approve` (scoped) | Team absence calendar — **not built (P1)**, per PRD M5-6 |
+| 8 | `POST /balances/{employeeId}/adjust` | `leave.admin` | Manual adjustment `{delta, reason}` → ledger + audit |
+| 9 | `GET /balances/{employeeId}/ledger` | `leave.balance.read` | Immutable accrual history |
+| 10 | `POST /encashment` (P1) | self | Request payout where policy allows → payroll line — **not built (P1)**, per PRD M5-7 |
 
 ### Events
 

@@ -133,6 +133,30 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'claim.submit',
       'payslip.read.self',
       'consent.self',
+      // M1/M2/M5/M6 reconciliation (2026-08-04): `roster.read` and
+      // `ot.request` power `GET /my/schedule` and `POST /ot-requests` in
+      // svc-scheduler — an employee viewing their own upcoming shifts and
+      // requesting their own overtime (PRD M2-5: "Manager (or
+      // employee-request) OT"; `ot.controller.ts`'s own comment: "an
+      // employee requesting their own OT relies on the authenticated
+      // caller's own id"). Before this fix `ot.request` was granted to NO
+      // role — the route existed, correctly guarded, and was unreachable by
+      // anyone, the exact Task 14c defect shape.
+      //
+      // `roster.read` is the SAME coarse permission `GET /rosters` (the full
+      // team grid) uses — this role template does not yet have a narrower
+      // `roster.read.self`, so this grant carries the same accepted,
+      // documented scope gap as `document.read` above (see that comment):
+      // `RosterController` does not row-scope by caller identity beyond the
+      // one self-scoped route, so an `employee-ess` grant technically also
+      // authorizes the team-grid route at the permission-check level. This
+      // mirrors the roadmap's own open item ("🔴 Open security gap — GET
+      // /documents/:id has no ownership scoping") rather than inventing a
+      // one-off fix for scheduler alone; a real fix needs a scoped/self
+      // permission split across both routes, tracked as follow-up work, not
+      // papered over here.
+      'roster.read',
+      'ot.request',
       // Task 14c: notify.notification.* are self-scoped by construction —
       // `NotifyController` derives the recipient solely from `req.userId`,
       // never a request param, so every human role gets these two, not a
@@ -156,6 +180,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'roster.write',
       'roster.publish',
       'ot.approve',
+      // M2 reconciliation (2026-08-04): PRD M2-5 — "Manager (or
+      // employee-request) OT" — a manager may submit an OT request on
+      // behalf of a named employee (`ot.controller.ts`'s `body.employeeId`
+      // path), distinct from approving one (`ot.approve`, already held).
+      'ot.request',
       'timesheet.read',
       'timesheet.correct',
       'leave.approve',
@@ -183,6 +212,12 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'timesheet.read',
       'timesheet.correct',
       'holiday.manage',
+      // M6 reconciliation (2026-08-04): `claim.admin` (claim type/band
+      // policy administration) follows the exact same pattern already
+      // established for `leave.admin`/`holiday.manage` above — HR
+      // administers each module's company-policy configuration. Before this
+      // fix it was granted to NO role (Task 14c defect shape, again).
+      'claim.admin',
       'config.rule.read',
       // Task 14c: self-scoped notification inbox — see employee-ess comment.
       // Deliberately NOT `document.read`: that permission guards
@@ -210,6 +245,15 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'payroll.run.prepare',
       'payroll.run.calculate',
       'payroll.export',
+      // M6 reconciliation (2026-08-04): `claim.approve.finance` — PRD M6-3's
+      // second approval band ("manager + finance" above 2,000 THB). The ten
+      // role templates have no dedicated "Finance" persona; `payroll-officer`
+      // is this catalog's closest financial function (pay profiles, bank
+      // files, exports — money movement) and is not the same actor as
+      // `claim.approve` (line-manager), so the two-level band is still two
+      // distinct roles, not one person self-approving both levels. Before
+      // this fix it was granted to NO role.
+      'claim.approve.finance',
       'config.rule.read',
       // Task 14c: self-scoped notification inbox — see employee-ess comment.
       // `document.read` granted here too: this role already holds

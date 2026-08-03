@@ -59,6 +59,15 @@ const EXPECTED_PUBLIC_ROUTES: PublicRoute[] = [
   { service: 'svc-docs', method: 'GET', path: 'health' },
   { service: 'svc-notify', method: 'GET', path: 'health' },
   { service: 'svc-timesheet', method: 'GET', path: 'health' },
+  // Added 2026-08-04 (M1/M5/M6 reconciliation): each of these three mounted
+  // `PermissionGuard` globally for the first time to guard real business
+  // routes, which would otherwise deny-by-default their own healthcheck —
+  // the same Task 16e defect class `health.controller.ts`'s M1 fix caught.
+  // svc-scheduler's health stays non-public: M2 did not mount a global
+  // guard, so its health route needs no bypass.
+  { service: 'svc-onboarding', method: 'GET', path: 'health' },
+  { service: 'svc-leave', method: 'GET', path: 'health' },
+  { service: 'svc-claims', method: 'GET', path: 'health' },
 ]
 
 function routeKeyString(r: PublicRoute): string {

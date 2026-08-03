@@ -10,12 +10,39 @@ import { join } from 'node:path'
  *    `@Controller(...)` prefix and `@Get`/`@Post`/`@Put`/`@Patch`/`@Delete`
  *    decorators — never hand-maintained, so it cannot silently drift from
  *    the code the way a second, manually-kept list could.
- *  - the DECLARED routes in `web/ui-coverage.json`, each either pointing at a
- *    screen or carrying one of the three legitimate exemptions.
+ *  - the DECISIONS in `web/ui-coverage.json`: for a route that exists, either
+ *    a screen or one of the three legitimate exemptions.
  *
- * A route in one list and not the other is a defect: either a shipped
- * endpoint nobody decided where a human sees it, or a manifest entry
- * pointing at nothing (a deleted or renamed route).
+ * Redesigned 2026-08-04 (reconciliation after M1/M2/M5/M6 landed — see
+ * `.superpowers/sdd/02-modules/reconciliation-report.md`). The original
+ * design treated `web/ui-coverage.json` as a second, hand-maintained ROUTE
+ * LIST that had to mirror `services/**\/*.controller.ts` exactly in both
+ * directions: every code route needed a manifest entry (still true, and
+ * still enforced below) AND every manifest entry needed a matching code
+ * route, on pain of failing the whole gate. That second direction is what
+ * made this file a bottleneck: four module-building agents (M1, M2, M5, M6),
+ * each scoped to `services/<name>/{src,migrations}` only, independently hit
+ * the same wall — a new, correctly-built route always requires a decision
+ * edit to a file none of them own, so the gate could never be green from
+ * inside any module's own boundary. Renaming or removing a route would hit
+ * the identical wall in reverse (an ORPHANED manifest entry, requiring the
+ * same out-of-scope edit just to delete a line).
+ *
+ * The fix: the manifest is a DECISION STORE, not an inventory. The true
+ * route inventory is, and only ever needs to be, the parsed
+ * `*.controller.ts` output above.
+ *  - A route that exists in code with no manifest decision FAILS the gate,
+ *    loudly, naming the exact route — "no endpoint ships without a
+ *    deliberate decision" is preserved in full.
+ *  - A manifest entry whose route no longer exists in code (renamed,
+ *    deleted, or moved to a different service) drops out SILENTLY. It is
+ *    stale, not a defect: the thing it decided about no longer exists to
+ *    have an opinion on, and the next agent to touch that area can clean it
+ *    up without that cleanup being a precondition for anyone else's gate to
+ *    pass. See `liveManifestEntries`/`findUndecidedRoutes` below, and the
+ *    'derived inventory' describe block, which tests this behaviour directly
+ *    against synthetic fixtures (not the real filesystem) so the property
+ *    holds independent of whatever routes happen to exist today.
  */
 
 const REPO_ROOT = join(__dirname, '..')
@@ -191,50 +218,72 @@ function loadManifest(): ManifestEntry[] {
   return parsed.routes ?? []
 }
 
+function manifestEntryKey(entry: ManifestEntry): string | undefined {
+  if (!entry.service || !entry.method || entry.path === undefined) return undefined
+  return routeKeyString({ service: entry.service, method: entry.method, path: entry.path })
+}
+
+/**
+ * Every actual route with no manifest decision — the ONLY way this gate
+ * fails on new code. Returns the route key strings directly so a failure
+ * names exactly which endpoints need a decision, not just a count.
+ */
+function findUndecidedRoutes(actual: RouteKey[], manifest: ManifestEntry[]): string[] {
+  const decided = new Set(manifest.map(manifestEntryKey).filter((k): k is string => k !== undefined))
+  return actual.filter((r) => !decided.has(routeKeyString(r))).map(routeKeyString)
+}
+
+/**
+ * Manifest entries whose route still exists in the actual inventory. Stale
+ * entries (renamed/deleted routes) are filtered out here, not flagged —
+ * that is the "drops out silently" half of the redesign. Only live entries
+ * go on to the structural checks below (screen-or-exempt shape, valid
+ * permission, non-empty reason): validating a decision about a route that
+ * no longer exists would just be more work someone has to do to delete a
+ * line, exactly the friction this redesign removes.
+ */
+function liveManifestEntries(actual: RouteKey[], manifest: ManifestEntry[]): ManifestEntry[] {
+  const actualKeys = new Set(actual.map(routeKeyString))
+  return manifest.filter((entry) => {
+    const key = manifestEntryKey(entry)
+    return key !== undefined && actualKeys.has(key)
+  })
+}
+
 describe('UI coverage gate', () => {
   const routes = actualRoutes()
   const manifest = loadManifest()
   const permissionCatalog = parsePermissionCatalog()
-
-  const routeSet = new Map<string, RouteKey>(routes.map((r) => [routeKeyString(r), r]))
-  const manifestByKey = new Map<string, ManifestEntry>()
-  for (const entry of manifest) {
-    if (entry.service && entry.method && entry.path !== undefined) {
-      manifestByKey.set(routeKeyString({ service: entry.service, method: entry.method, path: entry.path }), entry)
-    }
-  }
+  const live = liveManifestEntries(routes, manifest)
 
   it('found at least one real route to check (parser sanity)', () => {
     expect(routes.length).toBeGreaterThan(0)
   })
 
-  it('has a manifest entry for every route that exists in the code', () => {
-    const missing = routes.filter((r) => !manifestByKey.has(routeKeyString(r))).map(routeKeyString)
-    expect(missing).toEqual([])
-  })
-
-  it('has no manifest entry pointing at a route that does not exist in the code', () => {
-    const orphaned = manifest
-      .filter((entry) => {
-        if (!entry.service || !entry.method || entry.path === undefined) return true // malformed key, definitely orphaned
-        return !routeSet.has(routeKeyString({ service: entry.service, method: entry.method, path: entry.path }))
-      })
-      .map((entry) => `${entry.method ?? '?'} ${entry.service ?? '?'}:/${entry.path ?? '?'}`)
-    expect(orphaned).toEqual([])
+  it('has a manifest decision for every route that exists in the code', () => {
+    const missing = findUndecidedRoutes(routes, manifest)
+    if (missing.length > 0) {
+      throw new Error(
+        `web/ui-coverage.test.ts: ${missing.length} route(s) exist in the code with no decision in ` +
+          `web/ui-coverage.json. Add one entry per route below, each pointing at a screen or an ` +
+          `explicit exemption with a reason ("not needed yet" is not a reason):\n` +
+          missing.map((r) => `  - ${r}`).join('\n'),
+      )
+    }
   })
 
   it('has no route listed twice in the manifest', () => {
     const seen = new Map<string, number>()
     for (const entry of manifest) {
-      if (!entry.service || !entry.method || entry.path === undefined) continue
-      const key = routeKeyString({ service: entry.service, method: entry.method, path: entry.path })
+      const key = manifestEntryKey(entry)
+      if (key === undefined) continue
       seen.set(key, (seen.get(key) ?? 0) + 1)
     }
     const duplicates = [...seen.entries()].filter(([, count]) => count > 1).map(([key]) => key)
     expect(duplicates).toEqual([])
   })
 
-  describe.each(manifest.map((entry, i): [string, ManifestEntry] => [`#${i} ${entry.method ?? '?'} ${entry.service ?? '?'}:/${entry.path ?? '?'}`, entry]))(
+  describe.each(live.map((entry, i): [string, ManifestEntry] => [`#${i} ${entry.method ?? '?'} ${entry.service ?? '?'}:/${entry.path ?? '?'}`, entry]))(
     'manifest entry %s',
     (_label, entry) => {
       it('declares exactly one of screen or exempt, never both, never neither', () => {
@@ -263,4 +312,62 @@ describe('UI coverage gate', () => {
       }
     },
   )
+})
+
+/**
+ * Part Two, made real: the manifest carries decisions, not the route
+ * inventory. These run against synthetic fixtures — never the real
+ * filesystem — so the property they prove ("undecided routes fail loudly,
+ * named; stale entries drop out silently") holds regardless of what routes
+ * happen to exist in this repo today, and won't rot into a tautology as the
+ * real inventory grows across Phases 3–5.
+ */
+describe('derived inventory (Part Two: the manifest is a decision store, not a route list)', () => {
+  const A: RouteKey = { service: 'svc-example', method: 'GET', path: 'widgets' }
+  const B: RouteKey = { service: 'svc-example', method: 'POST', path: 'widgets' }
+  const decidedA: ManifestEntry = { service: A.service, method: A.method, path: A.path, exempt: 'operational', reason: 'test fixture' }
+
+  it('a route with no manifest entry at all is undecided', () => {
+    expect(findUndecidedRoutes([A], [])).toEqual(['GET svc-example:/widgets'])
+  })
+
+  it('names every undecided route, not just the first', () => {
+    expect(findUndecidedRoutes([A, B], []).sort()).toEqual(['GET svc-example:/widgets', 'POST svc-example:/widgets'].sort())
+  })
+
+  it('a route with a matching manifest entry is decided, regardless of what OTHER routes are undecided', () => {
+    expect(findUndecidedRoutes([A, B], [decidedA])).toEqual(['POST svc-example:/widgets'])
+  })
+
+  it('a manifest entry whose route no longer exists in the actual inventory is not reported as undecided (it simply has nothing to decide)', () => {
+    // B is not in the "actual" list at all — only A is — so there is nothing
+    // for B's entry to be a stale decision ABOUT from findUndecidedRoutes's
+    // point of view; the assertion that matters is the next one.
+    expect(findUndecidedRoutes([A], [decidedA])).toEqual([])
+  })
+
+  it('a stale manifest entry (route removed from the actual inventory) drops out of liveManifestEntries silently — no error, just absence', () => {
+    const staleEntry: ManifestEntry = { service: B.service, method: B.method, path: B.path, exempt: 'operational', reason: 'a route that used to exist' }
+    // Actual inventory no longer contains B (it was renamed/removed in code).
+    const live = liveManifestEntries([A], [decidedA, staleEntry])
+    expect(live).toEqual([decidedA])
+    expect(live.some((e) => e.path === 'widgets' && e.method === 'POST')).toBe(false)
+  })
+
+  it('the real repo: every actual route is genuinely parsed from *.controller.ts, never a hand-typed list — adding this fixture route and re-parsing would find it (parser is data-driven, not hard-coded)', () => {
+    const syntheticSource = `
+      import { Controller, Get } from '@nestjs/common'
+      @Controller('fixture-only')
+      class FixtureController {
+        @Get('never-really-shipped')
+        neverReallyShipped() {}
+      }
+    `
+    const parsed = parseControllerRoutes('svc-fixture', syntheticSource)
+    expect(parsed).toEqual([{ service: 'svc-fixture', method: 'GET', path: 'fixture-only/never-really-shipped' }])
+    // And, critically, this route is NOT in the real actualRoutes() output —
+    // proving the parser reads real files, not a list this test file (or
+    // any other) maintains by hand.
+    expect(actualRoutes().some((r) => r.service === 'svc-fixture')).toBe(false)
+  })
 })

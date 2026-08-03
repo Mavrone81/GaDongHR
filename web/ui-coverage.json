@@ -116,14 +116,14 @@
       "method": "GET",
       "path": "health",
       "exempt": "operational",
-      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. No business routes exist yet — Phase 4 adds them."
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser."
     },
     {
       "service": "svc-onboarding",
       "method": "GET",
       "path": "health",
       "exempt": "operational",
-      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. No business routes exist yet — Phase 2 adds them."
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser."
     },
     {
       "service": "svc-notify",
@@ -251,7 +251,407 @@
       "method": "GET",
       "path": "health",
       "exempt": "operational",
-      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. No business routes exist yet — Phase 4 adds them."
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "POST",
+      "path": "employees",
+      "permission": "employee.create",
+      "screen": "/hr/employees",
+      "notes": "Creates a new employee master record from the HR employee console."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "GET",
+      "path": "employees",
+      "permission": "employee.read",
+      "screen": "/hr/employees",
+      "notes": "Employee master list — the HR employee console's default view."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "GET",
+      "path": "employees/:id",
+      "permission": "employee.read",
+      "screen": "/hr/employees",
+      "notes": "Single employee record detail view on the same console."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "GET",
+      "path": "employees/:id/sensitive",
+      "permission": "employee.sensitive.read",
+      "screen": "/hr/employees",
+      "notes": "Reveals sensitive identity fields (national ID, bank account) inline on the employee detail view; requires a purpose and is individually audit-logged per field."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "PATCH",
+      "path": "employees/:id",
+      "permission": "employee.update",
+      "screen": "/hr/employees",
+      "notes": "Edits an employee record from the same detail view."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "POST",
+      "path": "employees/:id/transition",
+      "permission": "employee.lifecycle",
+      "screen": "/hr/employees",
+      "notes": "Employment status transitions (activate/suspend/terminate) from the employee record."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "GET",
+      "path": "employees/:id/checklist",
+      "permission": "onboarding.manage",
+      "screen": "/hr/onboarding",
+      "notes": "HR's onboarding checklist/task tracker for one employee (varies by employment type)."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "POST",
+      "path": "checklist/tasks/:taskId/complete",
+      "permission": "onboarding.manage",
+      "screen": "/hr/onboarding",
+      "notes": "Marks an onboarding checklist task complete from the same tracker."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "POST",
+      "path": "employees/:id/consents",
+      "permission": "consent.self",
+      "screen": "/ess/onboarding",
+      "notes": "Employee records PDPA consent (general HR processing, biometric enrolment) for their own record, as part of completing onboarding."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "DELETE",
+      "path": "employees/:id/consents/biometric",
+      "permission": "consent.self",
+      "screen": "/ess/onboarding",
+      "notes": "One-tap biometric consent withdrawal from the same onboarding/consent screen; flips clock-in method to the alternative method."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "POST",
+      "path": "employees/:id/contracts",
+      "permission": "document.generate",
+      "screen": "/hr/onboarding",
+      "notes": "Generates the employment contract as part of completing an employee's onboarding checklist."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "POST",
+      "path": "employees/:id/probation/decision",
+      "permission": "onboarding.manage",
+      "screen": "/hr/onboarding",
+      "notes": "Records a probation outcome (confirm/extend/terminate) from the onboarding tracker."
+    },
+    {
+      "service": "svc-onboarding",
+      "method": "POST",
+      "path": "self-service/:token",
+      "permission": "employee.update",
+      "screen": "/ess/onboarding",
+      "notes": "New hire's self-service intake form (personal data collection). Deviation: `token` is presently the employee id, not yet a signed pre-auth link — see M1 build report."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "POST",
+      "path": "shifts",
+      "permission": "roster.write",
+      "screen": "/team/schedule",
+      "notes": "Manager defines a named shift (start/end, breaks, differential) from the team scheduling console."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "GET",
+      "path": "shifts",
+      "permission": "roster.read",
+      "screen": "/team/schedule",
+      "notes": "Lists shift definitions on the same console."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "GET",
+      "path": "shifts/:id",
+      "permission": "roster.read",
+      "screen": "/team/schedule",
+      "notes": "Single shift definition detail."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "PATCH",
+      "path": "shifts/:id",
+      "permission": "roster.write",
+      "screen": "/team/schedule",
+      "notes": "Edits a shift definition from the same console."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "GET",
+      "path": "rosters",
+      "permission": "roster.read",
+      "screen": "/team/schedule",
+      "notes": "Team roster grid for a date range."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "POST",
+      "path": "rosters/entries",
+      "permission": "roster.write",
+      "screen": "/team/schedule",
+      "notes": "Assigns a shift to an employee on a day; blocks on double-booking, warns/requires override on leave collision."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "POST",
+      "path": "rosters/entries/:id/override",
+      "permission": "roster.write",
+      "screen": "/team/schedule",
+      "notes": "Reconciles a roster entry against a later leave approval, with an override reason."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "POST",
+      "path": "rosters/copy",
+      "permission": "roster.write",
+      "screen": "/team/schedule",
+      "notes": "Copies a roster pattern forward by an offset; non-fatal per-entry conflict skip list."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "POST",
+      "path": "rosters/publish",
+      "permission": "roster.publish",
+      "screen": "/team/schedule",
+      "notes": "Publishes the roster to affected employees."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "GET",
+      "path": "my/schedule",
+      "permission": "roster.read",
+      "screen": "/ess/schedule",
+      "notes": "Employee's own upcoming shifts; self-scoped off the authenticated caller's id, never a request param."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "POST",
+      "path": "ot-requests",
+      "permission": "ot.request",
+      "screen": "/ess/schedule",
+      "notes": "Requests pre-approved overtime with employee consent (LPA s.24). Either the employee requests their own, or a manager requests on a named employee's behalf (same route, same permission — see ot.controller.ts)."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "POST",
+      "path": "ot-requests/:id/decision",
+      "permission": "ot.approve",
+      "screen": "/team/schedule",
+      "notes": "Manager approves or rejects a pending OT request; re-checks the 36h/week ceiling on approval."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "GET",
+      "path": "holidays/:year",
+      "permission": "roster.read",
+      "screen": "/admin/holidays",
+      "notes": "Views the holiday calendar for a given year, including auto-generated substitutes."
+    },
+    {
+      "service": "svc-scheduler",
+      "method": "POST",
+      "path": "holidays/:year",
+      "permission": "holiday.manage",
+      "screen": "/admin/holidays",
+      "notes": "Sets/updates the holiday calendar for a year; the ≥13-day statutory floor is enforced with citation."
+    },
+    {
+      "service": "svc-leave",
+      "method": "GET",
+      "path": "types",
+      "permission": "leave.request",
+      "screen": "/ess/leave",
+      "notes": "Employee sees available leave types (with statutory floor/citation) when preparing a request."
+    },
+    {
+      "service": "svc-leave",
+      "method": "POST",
+      "path": "types",
+      "permission": "leave.admin",
+      "screen": "/hr/leave",
+      "notes": "HR adds a company leave type."
+    },
+    {
+      "service": "svc-leave",
+      "method": "PATCH",
+      "path": "types/:id",
+      "permission": "leave.admin",
+      "screen": "/hr/leave",
+      "notes": "HR edits a leave type's entitlement/certificate-trigger; lowering below the statutory floor is blocked with the citation."
+    },
+    {
+      "service": "svc-leave",
+      "method": "GET",
+      "path": "my/balances",
+      "permission": "leave.balance.read",
+      "screen": "/ess/leave",
+      "notes": "Employee's own current and (optionally) projected leave balance."
+    },
+    {
+      "service": "svc-leave",
+      "method": "GET",
+      "path": "balances/:employeeId",
+      "permission": "leave.balance.read",
+      "screen": "/hr/leave",
+      "notes": "HR/manager views a specific employee's leave balance."
+    },
+    {
+      "service": "svc-leave",
+      "method": "GET",
+      "path": "balances/:employeeId/ledger",
+      "permission": "leave.balance.read",
+      "screen": "/hr/leave",
+      "notes": "Full balance ledger (grants, takes, adjustments) for one employee."
+    },
+    {
+      "service": "svc-leave",
+      "method": "POST",
+      "path": "balances/:employeeId/adjust",
+      "permission": "leave.admin",
+      "screen": "/hr/leave",
+      "notes": "HR corrects an employee's leave balance."
+    },
+    {
+      "service": "svc-leave",
+      "method": "POST",
+      "path": "requests",
+      "permission": "leave.request",
+      "screen": "/ess/leave",
+      "notes": "Employee submits a leave request (half-day/hourly supported); medical-certificate demand only above the config-resolved threshold."
+    },
+    {
+      "service": "svc-leave",
+      "method": "POST",
+      "path": "requests/:id/cancel",
+      "permission": "leave.request",
+      "screen": "/ess/leave",
+      "notes": "Employee cancels their own pending/approved request."
+    },
+    {
+      "service": "svc-leave",
+      "method": "GET",
+      "path": "approvals",
+      "permission": "leave.approve",
+      "screen": "/team/leave",
+      "notes": "Manager's leave approval queue, including delegated approvals."
+    },
+    {
+      "service": "svc-leave",
+      "method": "POST",
+      "path": "approvals/:id/decision",
+      "permission": "leave.approve",
+      "screen": "/team/leave",
+      "notes": "Manager (or delegate) approves or rejects a leave request; final-level approval decrements the balance."
+    },
+    {
+      "service": "svc-claims",
+      "method": "GET",
+      "path": "types",
+      "permission": "claim.submit",
+      "screen": "/ess/claims",
+      "notes": "Employee sees available claim types, limits and receipt requirements when preparing a submission."
+    },
+    {
+      "service": "svc-claims",
+      "method": "GET",
+      "path": "types/:code",
+      "permission": "claim.submit",
+      "screen": "/ess/claims",
+      "notes": "Single claim type detail on the same screen."
+    },
+    {
+      "service": "svc-claims",
+      "method": "POST",
+      "path": "types",
+      "permission": "claim.admin",
+      "screen": "/hr/claims",
+      "notes": "HR configures a claim type (limits, receipt requirement, mileage rate)."
+    },
+    {
+      "service": "svc-claims",
+      "method": "PATCH",
+      "path": "types/:code",
+      "permission": "claim.admin",
+      "screen": "/hr/claims",
+      "notes": "HR edits a claim type from the same console."
+    },
+    {
+      "service": "svc-claims",
+      "method": "GET",
+      "path": "approval-bands",
+      "permission": "claim.admin",
+      "screen": "/hr/claims",
+      "notes": "Views the amount-banded approval configuration."
+    },
+    {
+      "service": "svc-claims",
+      "method": "PUT",
+      "path": "approval-bands",
+      "permission": "claim.admin",
+      "screen": "/hr/claims",
+      "notes": "Sets the amount-banded approval configuration (e.g. ≤2,000 THB manager only; above, manager + finance)."
+    },
+    {
+      "service": "svc-claims",
+      "method": "POST",
+      "path": "claims",
+      "permission": "claim.submit",
+      "screen": "/ess/claims",
+      "notes": "Employee submits an expense claim with receipts; mileage claims compute from distance × rate."
+    },
+    {
+      "service": "svc-claims",
+      "method": "GET",
+      "path": "my/claims",
+      "permission": "claim.submit",
+      "screen": "/ess/claims",
+      "notes": "Employee's own claim status end-to-end."
+    },
+    {
+      "service": "svc-claims",
+      "method": "POST",
+      "path": "claims/:id/resubmit",
+      "permission": "claim.submit",
+      "screen": "/ess/claims",
+      "notes": "Employee resubmits a rejected claim; re-validates and re-bands, opening a fresh approval round."
+    },
+    {
+      "service": "svc-claims",
+      "method": "POST",
+      "path": "claims/:id/decisions/manager",
+      "permission": "claim.approve",
+      "screen": "/team/claims",
+      "notes": "Manager-level (first-band) claim approval on the shared claims-approval console."
+    },
+    {
+      "service": "svc-claims",
+      "method": "POST",
+      "path": "claims/:id/decisions/finance",
+      "permission": "claim.approve.finance",
+      "screen": "/team/claims",
+      "notes": "Finance-level (second-band, >2,000 THB) claim approval on the same console — visible to whichever approval level the caller holds."
+    },
+    {
+      "service": "svc-claims",
+      "method": "POST",
+      "path": "claims/:id/route",
+      "permission": "claim.approve.finance",
+      "screen": "/team/claims",
+      "notes": "Routes an approved claim to the next payroll run or an off-cycle payment, from the same console."
     }
   ]
 }
