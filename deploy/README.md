@@ -245,43 +245,63 @@ direct load or hard refresh of a client-routed deep link (e.g.
 Traefik router above only has to get out of the way of that path (by
 sitting at the lowest priority), not implement the fallback itself.
 
-**The published `gadonghr-web:main` image cannot serve real users as
-pushed today.** `web`'s `VITE_OIDC_ISSUER`, `VITE_OIDC_CLIENT_ID`,
-`VITE_OIDC_REDIRECT_URI`, `VITE_OIDC_AUDIENCE`, `VITE_SVC_CONFIG_URL`, and
-`VITE_SVC_I18N_URL` are read via `import.meta.env` and baked in at `vite
-build` time (`web/src/env.ts`), not at container start — and CI's
-`build-images` matrix (`.github/workflows/ci.yml`) passes only
-`GADONG_BUILD_SHA` as a build-arg to `web/Dockerfile`, none of the six
-`VITE_*` vars. Pulling and inspecting the actual published image confirms
-this empirically: its bundled JS contains no `localhost` string at all
-(so it does not merely point at the wrong host, as `web/.env.local.example`'s
-dev defaults might suggest) — every `VITE_*` var is genuinely undefined in
-the built bundle, so `env.ts`'s `required()` throws `missing required env
-var VITE_OIDC_ISSUER` (the first one read, from `svcI18n.ts`'s top-level
-`loadConfig()` call) during module evaluation, before React ever mounts.
-The image loads a blank page and throws immediately — not a
-misconfigured backend call, a hard crash before any UI renders.
+**Closed by Task 15d: the published `gadonghr-web:main` image now bakes in
+its runtime configuration at build time.** `web`'s `VITE_OIDC_ISSUER`,
+`VITE_OIDC_CLIENT_ID`, `VITE_OIDC_REDIRECT_URI`, `VITE_OIDC_AUDIENCE`,
+`VITE_SVC_CONFIG_URL`, and `VITE_SVC_I18N_URL` are read via
+`import.meta.env` and baked in at `vite build` time (`web/src/env.ts`), not
+at container start. Before this task, CI's `build-images` matrix
+(`.github/workflows/ci.yml`) passed only `GADONG_BUILD_SHA` as a build-arg
+to `web/Dockerfile`, none of the six `VITE_*` vars. Pulling and inspecting
+the actual published image confirmed this empirically: its bundled JS
+contained no `localhost` string at all (so it did not merely point at the
+wrong host, as `web/.env.local.example`'s dev defaults might suggest) —
+every `VITE_*` var was genuinely undefined in the built bundle, so
+`env.ts`'s `required()` threw `missing required env var VITE_OIDC_ISSUER`
+(the first one read, from `svcI18n.ts`'s top-level `loadConfig()` call)
+during module evaluation, before React ever mounted. The image loaded a
+blank page and threw immediately — not a misconfigured backend call, a hard
+crash before any UI renders.
 
-**CI must pass six additional `--build-arg`s to `web/Dockerfile`** (a
-change to `.github/workflows/ci.yml`, out of scope for this task — this
-task owns `deploy/` only), using same-origin relative paths for the two
-service URLs so the browser always talks to Traefik on whatever host it
-loaded from, never a hardcoded dev host:
+**The fix:** `.github/workflows/ci.yml`'s `build-images` matrix now carries
+an optional `buildArgs` key on the `web` entry only (every `services/*` leg
+is unaffected), and `web/Dockerfile`'s build stage now declares a matching
+`ARG` for each of the six — an `ARG` with no matching `--build-arg` is
+silently empty, and a `--build-arg` with no matching `ARG` is silently
+discarded by Docker; both directions were checked, not assumed. The six
+values, using same-origin relative paths for the two service URLs so the
+browser always talks to Traefik on whatever host it loaded from, never a
+hardcoded dev host:
 
 ```
-VITE_OIDC_ISSUER=https://${PUBLIC_HOST}/auth/realms/gadonghr
+VITE_OIDC_ISSUER=https://hr.bevorasg.com/auth/realms/gadonghr
 VITE_OIDC_CLIENT_ID=web
-VITE_OIDC_REDIRECT_URI=https://${PUBLIC_HOST}/auth/callback
+VITE_OIDC_REDIRECT_URI=https://hr.bevorasg.com/auth/callback
 VITE_OIDC_AUDIENCE=gadonghr-services
 VITE_SVC_CONFIG_URL=/api/config
 VITE_SVC_I18N_URL=/api/i18n
 ```
 
-Until CI is updated to pass these and a fresh image is published, `web`
-should still be deployed (it is a strict improvement — Traefik answering
-`/` with a crashing SPA shell is diagnosable in a way a bare 404 is not),
-but the owner will see a blank page / console error, not a working login
-screen.
+Cross-checked against `deploy/keycloak/realm-gadonghr.json`: realm
+`"gadonghr"` matches the issuer path, the public client's `"clientId":
+"web"` matches `VITE_OIDC_CLIENT_ID`, the `gadonghr-services-audience`
+protocol mapper's `"included.custom.audience": "gadonghr-services"` matches
+`VITE_OIDC_AUDIENCE`, and the client's `"redirectUris":
+["https://hr.bevorasg.com/*"]` matches `VITE_OIDC_REDIRECT_URI`. All match
+— no mismatch found. `hr.bevorasg.com` itself matches `PUBLIC_HOST` in
+`.env.example`, not an independently-chosen value.
+
+**Real limitation, not an oversight: the hostname above is hardcoded into
+the built JS bundle.** A Vite SPA has no server process to read config from
+at request time — `import.meta.env.VITE_*` is a compile-time constant
+inlined by Rollup, not a runtime lookup — so changing the deployment domain
+(a new `PUBLIC_HOST`) requires rebuilding and republishing the `web` image,
+not just editing `.env` and restarting containers the way every other
+service on this host works. The alternative — a small runtime-config JSON
+(e.g. `/config.json`) fetched by `index.html` before the app boots, so the
+same built image works behind any hostname — is a deliberate future option
+for whenever that flexibility is actually needed, not something this task
+skipped by mistake.
 
 ## Validation
 

@@ -69,7 +69,32 @@ jobs:
           - { name: svc-scheduler, dockerfile: services/svc-scheduler/Dockerfile }
           - { name: svc-timesheet, dockerfile: services/svc-timesheet/Dockerfile }
           - { name: retention-job, dockerfile: services/retention-job/Dockerfile }
-          - { name: web, dockerfile: web/Dockerfile }
+          # `web` is a Vite SPA: config is baked into the JS bundle at
+          # `vite build` time, not read at container start (web/src/env.ts's
+          # `required()` throws during module evaluation, before React
+          # mounts, if any of these six is missing). `buildArgs` here is an
+          # extra key the other fifteen legs do not carry — the
+          # `build-images` step below appends `matrix.buildArgs` (empty for
+          # every non-`web` leg) after the shared `GADONG_BUILD_SHA` arg, so
+          # only this leg ever gets a `--build-arg VITE_*`. The two service
+          # URLs are deliberately same-origin relative paths (`/api/config`,
+          # `/api/i18n`), not absolute URLs: the browser calls them against
+          # whatever host it loaded the SPA from, which Traefik then routes
+          # to the right container (deploy/README.md's routing table) — an
+          # absolute URL would need CORS on every service and would break
+          # the moment the deployment domain changes. Values cross-checked
+          # against deploy/keycloak/realm-gadonghr.json (realm "gadonghr",
+          # client id "web", audience mapper "gadonghr-services") and
+          # deploy/.env.example's PUBLIC_HOST=hr.bevorasg.com.
+          - name: web
+            dockerfile: web/Dockerfile
+            buildArgs: |
+              VITE_OIDC_ISSUER=https://hr.bevorasg.com/auth/realms/gadonghr
+              VITE_OIDC_CLIENT_ID=web
+              VITE_OIDC_AUDIENCE=gadonghr-services
+              VITE_OIDC_REDIRECT_URI=https://hr.bevorasg.com/auth/callback
+              VITE_SVC_CONFIG_URL=/api/config
+              VITE_SVC_I18N_URL=/api/i18n
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -87,8 +112,14 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           push: true
+          # `matrix.buildArgs` is unset (empty string) for every leg except
+          # `web` — the trailing blank line that produces for those legs is
+          # dropped by build-push-action's own multiline-input parsing, so
+          # this is a no-op for the fifteen service legs and the only leg
+          # that ever receives a `--build-arg VITE_*` is `web`.
           build-args: |
             GADONG_BUILD_SHA=${{ github.sha }}
+            ${{ matrix.buildArgs }}
           tags: |
             ghcr.io/mavrone81/gadonghr-${{ matrix.name }}:${{ github.sha }}
             ghcr.io/mavrone81/gadonghr-${{ matrix.name }}:main

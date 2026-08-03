@@ -44,13 +44,31 @@ const SERVICES_DIR = join(REPO_ROOT, 'services')
  * `build-images` job. Deliberately narrow (not a general YAML parser) so
  * it can't accidentally pick up an unrelated `name:` key elsewhere in the
  * workflow (e.g. the top-level `name: ci`).
+ *
+ * Handles two entry styles, not just one: every `services/*` leg is still
+ * the original single-line flow mapping (`- { name: X, dockerfile: Y }`),
+ * but the `web` leg (Task 15d: baking `VITE_*` build args into the image)
+ * carries a `buildArgs` block scalar too big to fit on one flow-mapping
+ * line, so it's written as a block mapping (`- name: web\n  dockerfile:
+ * ...\n  buildArgs: |...`) instead. Rather than special-case that shape,
+ * `name:` and `dockerfile:` are matched independently and paired up
+ * positionally — every matrix entry has exactly one of each, in that
+ * order, regardless of which style it's written in, so the Nth `name:`
+ * always belongs with the Nth `dockerfile:`.
  */
 function parseCiMatrix(ciYml: string): Array<{ name: string; dockerfile: string }> {
+  const matrixStart = ciYml.indexOf('\n    strategy:\n')
+  const stepsStart = ciYml.indexOf('\n    steps:\n', matrixStart)
+  if (matrixStart === -1 || stepsStart === -1) return []
+  const section = ciYml.slice(matrixStart, stepsStart)
+
+  const names = [...section.matchAll(/-\s*\{?\s*name:\s*([\w-]+)/g)].map((m) => m[1])
+  const dockerfiles = [...section.matchAll(/dockerfile:\s*([\w./-]+)/g)].map((m) => m[1])
+
   const entries: Array<{ name: string; dockerfile: string }> = []
-  const pattern = /-\s*\{\s*name:\s*([\w-]+)\s*,\s*dockerfile:\s*([\w./-]+)\s*\}/g
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(ciYml)) !== null) {
-    const [, name, dockerfile] = match
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i]
+    const dockerfile = dockerfiles[i]
     if (name && dockerfile) entries.push({ name, dockerfile })
   }
   return entries

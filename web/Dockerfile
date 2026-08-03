@@ -61,6 +61,27 @@ COPY tsconfig.base.json ./
 COPY packages/kernel/tsconfig.json packages/kernel/tsconfig.json
 COPY packages/kernel/src packages/kernel/src
 COPY web web
+# A Vite SPA bakes its config into the JS bundle at `vite build` time — there
+# is no server process to read env vars at request time (see `web/src/env.ts`'s
+# `required()`, called at module-evaluation time by every caller of
+# `loadConfig()`). Vite's own default `envPrefix` ("VITE_") picks up any
+# matching var already present in `process.env` when `vite build` runs (see
+# https://vite.dev/guide/env-and-mode — process.env takes priority over
+# `.env` files and is exposed the same way), and Docker's ARG mechanism
+# exports each of these six as a `process.env` entry for the RUN instruction
+# below, without persisting them into the built image's metadata (unlike
+# ENV). Each ARG here MUST have a matching `--build-arg` in
+# `.github/workflows/ci.yml`'s `web` matrix leg — an ARG with no build-arg is
+# simply empty, and empty is exactly what `env.ts`'s `required()` rejects; a
+# build-arg with no matching ARG here is silently discarded by Docker, which
+# is the failure this comment exists to prevent from recurring silently a
+# second time.
+ARG VITE_OIDC_ISSUER
+ARG VITE_OIDC_CLIENT_ID
+ARG VITE_OIDC_AUDIENCE
+ARG VITE_OIDC_REDIRECT_URI
+ARG VITE_SVC_CONFIG_URL
+ARG VITE_SVC_I18N_URL
 RUN pnpm --filter @gadong/web build
 
 # ---------- runtime: static files behind unprivileged nginx ----------
