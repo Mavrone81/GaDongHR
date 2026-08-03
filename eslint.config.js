@@ -2,7 +2,21 @@ const js = require('@eslint/js')
 const ts = require('typescript-eslint')
 
 module.exports = [
-  { ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**'] },
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/coverage/**',
+      // `web`'s composite-project TS build output (tsc -b emits here so
+      // `pnpm typecheck` can include web in the root project-reference
+      // graph — see web/tsconfig.json's outDir) and its static `public/`
+      // assets (a service worker with `self`/`caches` globals, a webmanifest,
+      // fonts) are build artifacts / browser-served files, not source to
+      // lint, exactly like `dist/` above.
+      'web/.tsbuild/**',
+      'web/public/**',
+    ],
+  },
   js.configs.recommended,
   // typescript-eslint v8's flat `recommended` preset ships its rules-only
   // block with no `files` restriction, so it applies to every linted file,

@@ -1,0 +1,55 @@
+/* Label left, value right, hairline between (DESIGN.md "Layout"). No cards, no shadows, no rounded containers. */
+
+.rule-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.rule-row__key {
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+
+.citation-seal {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--seal);
+  border: 1px solid var(--seal);
+  padding: 0.1rem 0.5rem;
+  white-space: nowrap;
+}
+
+.floor-violation {
+  border-left: 3px solid var(--seal);
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  background: transparent;
+}
+
+.floor-violation__title {
+  color: var(--seal);
+  font-weight: 600;
+  margin: 0 0 0.35rem;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}

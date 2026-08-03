@@ -48,6 +48,9 @@
     },
     {
       "path": "./services/svc-timesheet"
+    },
+    {
+      "path": "./web"
     }
   ]
 }

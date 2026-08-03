@@ -1,0 +1,12 @@
+{
+  "name": "GaDongHR",
+  "short_name": "GaDongHR",
+  "description": "GaDongHR — statutory-compliant HR platform for Thailand",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fcfbf7",
+  "theme_color": "#1b4a3c",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

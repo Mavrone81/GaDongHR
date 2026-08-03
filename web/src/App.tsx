@@ -1,0 +1,102 @@
+import { useEffect, useRef } from 'react'
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { I18nProvider } from './i18n/I18nContext'
+import { AuthProvider, useAuth } from './auth/AuthContext'
+import { Shell } from './routes/Shell'
+import { LoginPage } from './routes/LoginPage'
+import { CallbackPage } from './routes/CallbackPage'
+import { ComingSoon } from './routes/ComingSoon'
+import { RequirePermission } from './routes/RequirePermission'
+import { StatutoryRulesPage } from './routes/admin/StatutoryRulesPage'
+import { DEFAULT_NAV_PATH } from './routes/navigation'
+
+/**
+ * "A 401 triggers re-auth, not a blank screen" (task brief). `AuthContext`'s
+ * `onUnauthorized` (wired into every API client via `AuthTokenSource`, see
+ * `api/httpClient.ts`) flips `status` back to `unauthenticated` the moment a
+ * 401 survives a refresh attempt. This layout route is what turns that
+ * state change into a visible screen: every authenticated route is nested
+ * under it, so losing auth anywhere immediately swaps the whole tree for
+ * `LoginPage` — never a blank `<Outlet/>`. `reason="expired"` distinguishes
+ * "you were signed in and got logged out" from a fresh, never-authenticated
+ * visit.
+ */
+export function AuthGate(): React.JSX.Element {
+  const { status } = useAuth()
+  const everAuthenticated = useRef(false)
+
+  useEffect(() => {
+    if (status === 'authenticated') everAuthenticated.current = true
+  }, [status])
+
+  if (status !== 'authenticated') {
+    return <LoginPage reason={everAuthenticated.current ? 'expired' : undefined} />
+  }
+  return <Outlet />
+}
+
+function ShellRoutes(): React.JSX.Element {
+  return (
+    <Routes>
+      <Route path="/auth/callback" element={<CallbackPage />} />
+      <Route element={<AuthGate />}>
+        <Route element={<Shell />}>
+          <Route index element={<Navigate to={DEFAULT_NAV_PATH} replace />} />
+          <Route
+            path="admin/statutory-rules"
+            element={
+              <RequirePermission permission="config.rule.read">
+                <StatutoryRulesPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="compliance/audit"
+            element={
+              <RequirePermission permission="audit.read">
+                <ComingSoon />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="documents"
+            element={
+              <RequirePermission permission="document.read">
+                <ComingSoon />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="admin/roles"
+            element={
+              <RequirePermission permission="authz.role.read">
+                <ComingSoon />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="notifications"
+            element={
+              <RequirePermission permission="notify.notification.read">
+                <ComingSoon />
+              </RequirePermission>
+            }
+          />
+          <Route path="*" element={<ComingSoon />} />
+        </Route>
+      </Route>
+    </Routes>
+  )
+}
+
+export function App(): React.JSX.Element {
+  return (
+    <I18nProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <ShellRoutes />
+        </BrowserRouter>
+      </AuthProvider>
+    </I18nProvider>
+  )
+}

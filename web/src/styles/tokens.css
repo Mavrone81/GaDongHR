@@ -1,0 +1,68 @@
+/*
+ * Design tokens, verbatim from web/DESIGN.md ("Direction 1, Official Record").
+ * `--seal` is reserved for statutory citations ONLY — see CitationSeal.tsx,
+ * the only component allowed to use it. Nothing else in this stylesheet or
+ * any component may reference `--seal` for a general accent.
+ */
+:root {
+  --paper: #fcfbf7;
+  --ink: #171614;
+  --rule: #dbd5c6;
+  --seal: #a8322a;
+  --carapace: #1b4a3c;
+  --brass: #c08a3e;
+  --muted: #6e685c;
+
+  /* Kiosk mode is deliberately dark (DESIGN.md, "Two deliberate departures"). */
+  --carapace-shadow: #102a22;
+
+  --font-body: 'Sarabun', 'Noto Sans', 'Noto Sans SC', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  /* Thai vowel/tone marks stack above and below the line — looser leading
+     than Latin needs (DESIGN.md, "Non-negotiables"). */
+  --leading-body: 1.7;
+  --leading-latin: 1.45;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  line-height: var(--leading-body);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+html[lang='en'] body,
+html[lang='zh'] body {
+  line-height: var(--leading-latin);
+}
+
+/* Ledger's numerics (DESIGN.md, "Two deliberate departures"): tabular
+   figures, right-aligned, everywhere a number appears. */
+.numeric {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+a {
+  color: var(--carapace);
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+}
