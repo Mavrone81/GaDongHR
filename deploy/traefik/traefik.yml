@@ -1,0 +1,96 @@
+# GaDongHR — Traefik STATIC configuration (Task 16f).
+#
+# Replaces the Docker provider. On this host (Docker 29.6) the Docker
+# provider could never work at all: Traefik's bundled Docker client pins
+# API version 1.24, the host daemon's minimum supported API version is
+# 1.40, and every `docker.ClientVersion` handshake failed before Traefik
+# ever listed a single container — proven across four live attempts
+# (`DOCKER_API_VERSION=1.44` on the container, Traefik v3.1 -> v3.5.6, and
+# both together; same "client version 1.24 is too old" error every time,
+# see task-16f-traefik-report.md). With zero containers ever discovered,
+# Traefik had zero routers — every request 404'd, including the domain
+# Traefik would otherwise have requested a certificate for, so ACME never
+# even got a hostname to challenge.
+#
+# The fix: this is a FIXED set of 15 services on ONE host, defined in a
+# compose file we already control — dynamic label discovery buys nothing
+# a static routing table doesn't already give us, and it costs the Docker
+# socket mount (`/var/run/docker.sock`), which is a real attack surface on
+# an edge-facing proxy (read access to the whole Docker API, including
+# every other container's config and every mounted secret path). Dropping
+# it is a security improvement on top of fixing the bug, not just a
+# workaround. See `dynamic/routes.yml` for the routers/services/middlewares
+# this now reads instead of container labels.
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+  websecure:
+    address: ":443"
+
+# ACME challenge type: TLS-ALPN-01 (`tlschallenge=true`, kept as a
+# `command:` flag in docker-compose.yml — see that file's comment on the
+# `traefik` service for why it lives there and not here). Chosen over
+# HTTP-01 for two reasons specific to this exact regression:
+#   1. TLS-ALPN-01 is answered entirely at the TLS handshake, on the same
+#      :443 entrypoint Traefik already owns — it needs no HTTP router to
+#      ever match `/.well-known/acme-challenge/*` at all. HTTP-01 would
+#      depend on that path reaching Traefik's (automatically-injected,
+#      high-priority) internal ACME router before `web`'s catch-all
+#      `Host()` router ever could — almost certainly fine, but it is one
+#      more router-priority interaction to reason about, in the same
+#      config surface that just caused a multi-day outage over exactly
+#      that kind of ordering. TLS-ALPN-01 has no such interaction: it
+#      never touches the file-provider router table.
+#   2. It was already this deployment's chosen resolver mode before the
+#      Docker-provider bug (see git history) — restoring it is the
+#      smallest change that fixes the actual defect (zero routers), not
+#      an opportunity to also change the ACME mechanism.
+#   Trade-off noted, not hidden: TLS-ALPN-01 requires the ACME CA to reach
+#   port 443 directly with no intervening TLS-terminating proxy/CDN in
+#   front of Traefik. That already matches this host's architecture
+#   (brief: "Traefik owns :80/:443 and terminates TLS itself... No host
+#   nginx, no loopback-port overlay") — if a CDN is ever placed in front
+#   of this box, HTTP-01 would need to replace it then, not before.
+#
+# The email below is committed as a literal value, NOT `${ACME_EMAIL}` —
+# verified empirically (docker-compose.yml's `traefik` service has the
+# full test) that once Traefik loads ANY static-configuration file, every
+# other CLI flag and `TRAEFIK_*` env var for static config is silently
+# ignored, not merged in: Traefik's static config is single-source, only
+# its DYNAMIC config (`dynamic/routes.yml`) supports the Go-template `env`
+# function `PUBLIC_HOST` relies on. So this can't be env-driven the same
+# way without an extra render step this task doesn't need — Let's
+# Encrypt's contact email is not secret (it is already the literal,
+# committed default in `.env.example`) and changes rarely; changing it
+# means editing this file, the same "edit the file" trade-off the brief
+# explicitly allows for `PUBLIC_HOST` if templating had turned out not to
+# be available at all.
+certificatesResolvers:
+  le:
+    acme:
+      email: "admin@bevorasg.com"
+      storage: /letsencrypt/acme.json
+      tlsChallenge: {}
+
+providers:
+  file:
+    # Traefik watches this directory (`watch: true`) for *.yml/*.toml
+    # dynamic-configuration files and reloads on change — no restart
+    # needed after editing `dynamic/routes.yml`. Every file in here is
+    # rendered as a Go template before being parsed as YAML, which is how
+    # `routes.yml` reads `PUBLIC_HOST` (see that file's header) — Traefik
+    # docs confirm this is a real, supported feature of the file
+    # provider ("Go Templating... {{ env \"MY_ENV_VAR\" }}"), not
+    # something invented for this task.
+    directory: /etc/traefik/dynamic
+    watch: true
+
+# Backs the `traefik healthcheck --ping` command docker-compose.yml's
+# `healthcheck:` already runs — previously enabled via a `--ping=true`
+# CLI flag; moved here because it needs no per-deploy value at all.
+ping: {}

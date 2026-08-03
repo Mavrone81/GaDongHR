@@ -18,6 +18,8 @@ cutover *from* the old droplet's IP, not a stale workaround.)
 |---|---|
 | `docker-compose.yml` | Base stack. All 15 containers (7 platform services + `web` + traefik/postgres/rabbitmq/redis/minio/vault/keycloak), each with a `build:` (local/dev/CI use). |
 | `docker-compose.prod.yml` | Production overlay: replaces every service's `build:` with a pinned `ghcr.io/mavrone81/gadonghr-<service>:<sha>` image and `pull_policy: always`. Never used alone — always `-f docker-compose.yml -f docker-compose.prod.yml`. |
+| `traefik/traefik.yml` | Task 16f: Traefik's STATIC config — entrypoints 80/443, HTTP→HTTPS redirect, the `le` ACME resolver (TLS-ALPN-01), and the file provider pointed at `traefik/dynamic/`. Mounted read-only into the `traefik` service. |
+| `traefik/dynamic/routes.yml` | Task 16f: Traefik's DYNAMIC config — every router/service/middleware, replacing the `traefik.*` Docker labels this repo used to carry. `Host()` rules read `PUBLIC_HOST` via Traefik's Go-template `env` function, never a literal domain. See "Traefik routing" below. |
 | `postgres/init/01-roles.sql` | Runs once, automatically, on a fresh `postgres` volume. Creates the 12 business-schema roles + `keycloak`, each owning exactly one schema. |
 | `vault/vault.hcl` | Vault server config (raft storage, no auto-unseal). **Read this file's header before doing anything else with Vault.** |
 | `keycloak/realm-gadonghr.json` | Task 15b: the `gadonghr` realm import — clients `web` (public PWA) and `seeder` (confidential service account). Imported automatically by the `keycloak` service's `--import-realm` flag. See `keycloak/README.md`. |
@@ -213,40 +215,97 @@ all — and the DB grant is the documented belt-and-suspenders on top of
 it, not the sole defence. See the long comment on `audit`'s block in
 `postgres/init/01-roles.sql` for the full detail.
 
-## Traefik routing (Task 15c: `web` wired in)
+## Traefik routing (Task 16f: file provider, not the Docker socket)
 
-Every one of the six externally-callable platform services now carries a
-router alongside `keycloak`; `svc-crypto` still does not (it has no route
-any browser is meant to call directly — Vault HTTP client only, called
-server-side by other services over the internal network). Routers are
-ordered by explicit `priority` label, not left to Traefik's default
-rule-length heuristic, because `compose-validation.test.ts` inspects the
-label values directly (`docker compose config` never invokes Traefik's
+**Traefik's Docker provider can never work on this host.** Traefik's
+bundled Docker client pins API version 1.24; the host daemon (Docker 29.6+)
+requires >=1.40. Every attempt to reconcile that (`DOCKER_API_VERSION=1.44`
+on the container, upgrading the image to v3.5.6, both together) hit the
+same `client version 1.24 is too old` error — verified live, not assumed.
+With the provider permanently failing, Traefik discovered zero containers
+and had zero routers: every request 404'd, including the ACME challenge,
+because there was no domain for any router to request a certificate for.
+
+**The fix:** routing moved from `traefik.*` Docker labels to Traefik's
+**file provider** — `traefik/traefik.yml` (static config: entrypoints,
+HTTP→HTTPS redirect, the `le` ACME resolver, and the file provider itself)
+plus `traefik/dynamic/routes.yml` (dynamic config: every router, backend,
+and middleware, watched for changes with no restart needed). This is a
+fixed set of 15 services on one host we already control — dynamic label
+discovery bought nothing a static table doesn't already give, and it cost
+`/var/run/docker.sock` on the `traefik` service: read access to the whole
+Docker API (every other container's config, every mounted secret path) on
+an edge-facing proxy, a real attack surface. That mount is gone; no
+compose service carries a `traefik.*` label anymore (both are asserted by
+`compose-validation.test.ts`'s `Traefik file-provider dynamic routing`
+suite — no docker socket, no dead labels, no router that doesn't resolve
+to a real compose service).
+
+**`PUBLIC_HOST` stays environment-driven, but not the way `${PUBLIC_HOST}`
+works elsewhere in this file.** Traefik's file provider does not perform
+`docker compose`-style `${VAR}` substitution on the files it reads — that
+is checked against the file-provider docs, not assumed. What it does
+support is Go templating of dynamic-configuration files, including a
+builtin `env` function, so `routes.yml`'s `Host()` rules read `{{ env
+"PUBLIC_HOST" }}` — the committed file never contains the literal domain,
+only the template. The actual value is supplied by
+`docker-compose.yml`'s `traefik` service: `environment: PUBLIC_HOST:
+${PUBLIC_HOST}` passes it into the container's own environment (from
+`.env`, same as every other `PUBLIC_HOST` use in this file), and Traefik's
+`env` function reads it there at dynamic-config load time. Change the
+domain by editing `.env` — never `routes.yml`.
+
+Traefik's **static** configuration does not work this way — Go templating
+is dynamic-config only, and Traefik treats static config as single-source
+(verified empirically: adding CLI flags or `TRAEFIK_*` env vars alongside
+`--configFile` had zero effect on the resolved config, even for flags as
+unrelated as `--api.insecure`). So the ACME resolver's contact email lives
+as a plain committed value in `traefik.yml` itself, not `${ACME_EMAIL}` —
+it is not secret (already a literal default in `.env.example`) and changes
+rarely; changing it means editing that file.
+
+Every one of the six externally-callable platform services carries a
+router alongside `keycloak` (`kc`) and `web`; `svc-crypto` still does not
+(it has no route any browser is meant to call directly — Vault HTTP client
+only, called server-side by other services over the internal network).
+Routers set an explicit `priority` in `routes.yml`, not left to Traefik's
+default rule-length heuristic, because `compose-validation.test.ts` parses
+that file directly (`docker compose config` never invokes Traefik's
 routing engine, so there is no other way to assert the ordering that
 keeps `/api/*` from being swallowed by the PWA).
 
 | Router | Rule | Priority | Forwards to |
 |---|---|---:|---|
-| `web` | `Host(\`${PUBLIC_HOST}\`)` | 1 | `web:8080` (catch-all — must lose every match it shares with a router below) |
-| `kc` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/auth\`)` | *(default)* | `keycloak:8080` |
-| `svc-config` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/api/config\`)` | 100 | `svc-config:3000` (prefix stripped) |
-| `svc-authz` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/api/authz\`)` | 100 | `svc-authz:3000` (prefix stripped) |
-| `svc-audit` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/api/audit\`)` | 100 | `svc-audit:3000` (prefix stripped) |
-| `svc-i18n` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/api/i18n\`)` | 100 | `svc-i18n:3000` (prefix stripped) |
-| `svc-notify` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/api/notify\`)` | 100 | `svc-notify:3000` (prefix stripped) |
-| `svc-docs` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/api/docs\`)` | 100 | `svc-docs:3000` (prefix stripped) |
+| `web` | `Host(\`{{ env "PUBLIC_HOST" }}\`)` | 1 | `web:8080` (catch-all — must lose every match it shares with a router below) |
+| `kc` | `Host(\`{{ env "PUBLIC_HOST" }}\`) && PathPrefix(\`/auth\`)` | *(default)* | `keycloak:8080` |
+| `svc-config` | `Host(\`{{ env "PUBLIC_HOST" }}\`) && PathPrefix(\`/api/config\`)` | 100 | `svc-config:3000` (prefix stripped) |
+| `svc-authz` | `Host(\`{{ env "PUBLIC_HOST" }}\`) && PathPrefix(\`/api/authz\`)` | 100 | `svc-authz:3000` (prefix stripped) |
+| `svc-audit` | `Host(\`{{ env "PUBLIC_HOST" }}\`) && PathPrefix(\`/api/audit\`)` | 100 | `svc-audit:3000` (prefix stripped) |
+| `svc-i18n` | `Host(\`{{ env "PUBLIC_HOST" }}\`) && PathPrefix(\`/api/i18n\`)` | 100 | `svc-i18n:3000` (prefix stripped) |
+| `svc-notify` | `Host(\`{{ env "PUBLIC_HOST" }}\`) && PathPrefix(\`/api/notify\`)` | 100 | `svc-notify:3000` (prefix stripped) |
+| `svc-docs` | `Host(\`{{ env "PUBLIC_HOST" }}\`) && PathPrefix(\`/api/docs\`)` | 100 | `svc-docs:3000` (prefix stripped) |
 
-Every `/api/*` router carries a `stripprefix` middleware (e.g.
-`traefik.http.middlewares.svc-config-strip.stripprefix.prefixes=/api/config`)
-because each service's own NestJS routes are unprefixed — `rules.controller.ts`
-exposes `GET /rules`, not `GET /api/config/rules` — so the browser's
-same-origin call to `/api/config/rules` needs the `/api/config` segment
-removed before Traefik forwards it. `kc` needs no such middleware:
-Keycloak's own `--http-relative-path=/auth` already expects requests to
-arrive with `/auth` still attached.
+Every `/api/*` router carries a `stripPrefix` middleware (e.g.
+`svc-config-strip` → `prefixes: ["/api/config"]`) because each service's
+own NestJS routes are unprefixed — `rules.controller.ts` exposes `GET
+/rules`, not `GET /api/config/rules` — so the browser's same-origin call
+to `/api/config/rules` needs the `/api/config` segment removed before
+Traefik forwards it. `kc` needs no such middleware: Keycloak's own
+`--http-relative-path=/auth` already expects requests to arrive with
+`/auth` still attached.
+
+**ACME challenge: TLS-ALPN-01**, not HTTP-01 (`traefik.yml`'s own comment
+has the full rationale). Summary: it is answered entirely at the TLS
+handshake on the same `:443` entrypoint Traefik already owns, so it never
+depends on any HTTP router — including `web`'s catch-all — getting out of
+the way of `/.well-known/acme-challenge/*` first. It was also this
+deployment's resolver mode before the Docker-provider regression, so
+keeping it is the smallest change that fixes the actual defect. Trade-off:
+it requires the ACME CA to reach `:443` directly with no TLS-terminating
+proxy/CDN in front of Traefik — already true of this host's architecture.
 
 `https://<PUBLIC_HOST>/` now reaches `web`'s `index.html` (previously
-Traefik's own 404 — there was no `web` router at all before this task).
+Traefik's own 404 — there was no `web` router at all before Task 15c).
 `web/nginx.conf`'s `try_files $uri $uri/ /index.html` is what makes a
 direct load or hard refresh of a client-routed deep link (e.g.
 `/admin/statutory-rules`) return the SPA shell instead of a 404 — the

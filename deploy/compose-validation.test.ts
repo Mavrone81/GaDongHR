@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import yaml from 'js-yaml'
 
 /**
  * Task 13: the deliverable here is configuration, not code, so this file
@@ -21,6 +22,12 @@ interface ComposeHealthcheck {
   test?: string[]
 }
 
+interface ComposeVolume {
+  type?: string
+  source?: string
+  target?: string
+}
+
 interface ComposeService {
   container_name?: string
   ports?: unknown[]
@@ -32,6 +39,7 @@ interface ComposeService {
   security_opt?: string[]
   cap_add?: string[]
   environment?: Record<string, string>
+  volumes?: ComposeVolume[]
 }
 
 interface ComposeFileSecret {
@@ -44,7 +52,106 @@ interface ComposeConfig {
   secrets?: Record<string, ComposeFileSecret>
 }
 
+/**
+ * Task 16f: shape of `traefik/dynamic/routes.yml`, the file-provider
+ * dynamic configuration that replaced every `traefik.*` Docker label.
+ * Parsed with `js-yaml`, not regex — the file's `Host(\`{{ env
+ * "PUBLIC_HOST" }}\`)` rules are plain string content as far as YAML is
+ * concerned (Traefik's own Go-templating happens after Traefik reads the
+ * file, never something `js-yaml` needs to understand), so a real parser
+ * is both correct and no harder than a hand-rolled one here.
+ */
+interface TraefikRouter {
+  rule?: string
+  priority?: number
+  service?: string
+  middlewares?: string[]
+  tls?: { certResolver?: string }
+}
+
+interface TraefikServiceBackend {
+  loadBalancer?: { servers?: { url?: string }[] }
+}
+
+interface TraefikDynamicConfig {
+  http?: {
+    routers?: Record<string, TraefikRouter>
+    services?: Record<string, TraefikServiceBackend>
+    middlewares?: Record<string, unknown>
+  }
+}
+
+interface UiCoverageRoute {
+  service: string
+  exempt?: string
+}
+
+interface UiCoverage {
+  routes: UiCoverageRoute[]
+}
+
 const DEPLOY_DIR = __dirname
+
+function loadTraefikDynamicConfig(): TraefikDynamicConfig {
+  const raw = readFileSync(join(DEPLOY_DIR, 'traefik', 'dynamic', 'routes.yml'), 'utf8')
+  return yaml.load(raw) as TraefikDynamicConfig
+}
+
+function loadUiCoverage(): UiCoverage {
+  const raw = readFileSync(join(DEPLOY_DIR, '..', 'web', 'ui-coverage.json'), 'utf8')
+  return JSON.parse(raw) as UiCoverage
+}
+
+/**
+ * Every compose-service hostname actually reachable by following a
+ * router's `service:` to its backend's `loadBalancer.servers[].url` — the
+ * thing `Host()`/`PathPrefix()` rules actually resolve to once Traefik
+ * matches a request. Used both to prove routers point at real compose
+ * services and, in reverse, to prove every service that NEEDS a public
+ * path has one.
+ */
+function routedBackendHosts(dynamicConfig: TraefikDynamicConfig): Set<string> {
+  const routers = dynamicConfig.http?.routers ?? {}
+  const services = dynamicConfig.http?.services ?? {}
+  const hosts = new Set<string>()
+  for (const router of Object.values(routers)) {
+    const backend = router.service ? services[router.service] : undefined
+    for (const server of backend?.loadBalancer?.servers ?? []) {
+      try {
+        hosts.add(new URL(server.url ?? '').hostname)
+      } catch {
+        // Malformed URL — deliberately not added, so a typo'd backend
+        // fails the "resolves to a real compose service" assertion
+        // below instead of silently vanishing here.
+      }
+    }
+  }
+  return hosts
+}
+
+/**
+ * A ui-coverage.json route is reachable from a browser only if it is a
+ * real screen (no `exempt` at all) or explicitly `consumed-not-displayed`
+ * (still fetched by the browser over HTTP, just not its own screen — e.g.
+ * `svc-i18n`'s `bundles/:locale`, fetched by the login screen before any
+ * screen has rendered). The other two `exempt` values are both
+ * explicitly NOT browser traffic, by their own `reason` text in
+ * ui-coverage.json: `service-to-service` (internal-only, called by
+ * `@gadong/kernel`'s `PermissionGuard`/`AuthzClient`/`CryptoClient` over
+ * the compose network) and `operational` ("consumed by compose, the
+ * deploy script and monitoring, not a browser" — every `/health` route).
+ * Getting this wrong in the permissive direction would have wrongly
+ * demanded a public router for `svc-crypto` (whose only routes are
+ * `service-to-service` `encrypt`/`decrypt`/`bidx` plus an `operational`
+ * `health` — none ever reach Traefik).
+ */
+function browserReachableServices(uiCoverage: UiCoverage): Set<string> {
+  return new Set(
+    uiCoverage.routes
+      .filter((r) => r.exempt === undefined || r.exempt === 'consumed-not-displayed')
+      .map((r) => r.service),
+  )
+}
 
 /** Total physical RAM of `gadonghr-prod` (Task 13 brief: "2 vCPU / 4 GB / 80 GB"). */
 const TOTAL_HOST_MB = 4096
@@ -184,38 +291,31 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
     expect(web?.healthcheck != null).toBe(true)
   })
 
-  /**
-   * Task 15c: the assertion that stops the PWA swallowing `/api/*`. `web`
-   * is the catch-all `Host(\`${PUBLIC_HOST}\`)` router at the domain
-   * root — if it were ever evaluated before an API service's own
-   * `PathPrefix(\`/api/...\`)` router, every API call the browser makes
-   * would be served the SPA's `index.html` instead of JSON. That failure
-   * mode is silent at the container level (every container reports
-   * healthy — `web` IS correctly serving the domain root) and only shows
-   * up as "the UI loads but nothing on it ever loads" — exactly the
-   * regression this test exists to catch before it reaches
-   * `hr.bevorasg.com`.
-   */
-  test('every API service has a router priority higher than web’s', () => {
-    const routerPriority = (svc: ComposeService | undefined, router: string): number => {
-      const raw = svc?.labels?.[`traefik.http.routers.${router}.priority`]
-      expect(raw).toBeDefined()
-      return Number(raw)
-    }
+  // Task 16f: the assertion that stops the PWA swallowing `/api/*` (`web`
+  // is the catch-all `Host()` router at the domain root — it must always
+  // sit at a lower priority than every `/api/*` router or the browser's
+  // API calls would be served `index.html` instead of JSON) used to live
+  // here, reading `traefik.*` Docker labels directly off these services.
+  // Routing moved to Traefik's file provider (`traefik/dynamic/routes.yml`)
+  // and the labels are gone — see the
+  // `Traefik file-provider dynamic routing (Task 16f)` describe block
+  // below, which asserts the same thing (and more) against that file
+  // instead.
 
-    const webPriority = routerPriority(config.services.web, 'web')
-
-    const apiServices = ['svc-config', 'svc-authz', 'svc-audit', 'svc-i18n', 'svc-notify', 'svc-docs']
-    for (const name of apiServices) {
-      const svc = config.services[name]
-      expect(svc).toBeDefined()
-      expect(svc?.labels?.['traefik.enable']).toBe('true')
-      const rule = svc?.labels?.[`traefik.http.routers.${name}.rule`]
-      expect(rule).toBeDefined()
-      expect(rule).toMatch(/PathPrefix/)
-      const priority = routerPriority(svc, name)
-      expect(priority).toBeGreaterThan(webPriority)
+  test('no compose service still carries a `traefik.*` Docker label (routing moved to the file provider — Task 16f)', () => {
+    for (const [name, svc] of Object.entries(config.services)) {
+      const traefikLabelKeys = Object.keys(svc.labels ?? {}).filter((k) => k.startsWith('traefik.'))
+      expect([name, traefikLabelKeys]).toEqual([name, []])
     }
+  })
+
+  test('traefik no longer mounts /var/run/docker.sock (Task 16f — the Docker provider that read it is gone)', () => {
+    const traefik = config.services.traefik
+    expect(traefik).toBeDefined()
+    const socketMounts = (traefik?.volumes ?? []).filter(
+      (v) => v.source?.includes('docker.sock') || v.target?.includes('docker.sock'),
+    )
+    expect(socketMounts).toEqual([])
   })
 
   /**
@@ -262,6 +362,146 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
     // true and the test would be worthless — `redis` is expected to
     // always be the (at least) one service exercising this path.
     expect(sawAtLeastOneReference).toBe(true)
+  })
+})
+
+/**
+ * Task 16f: Traefik's Docker provider can never work on this host (Docker
+ * 29.6's minimum API version is 1.40; Traefik's bundled client pins 1.24 —
+ * verified across four live attempts, see traefik/traefik.yml's header).
+ * With the provider permanently failing, Traefik discovered zero
+ * containers and had zero routers — every request 404'd. Fixed by
+ * replacing the Docker provider with the file provider
+ * (`traefik/dynamic/routes.yml`), which also lets `/var/run/docker.sock`
+ * come off the `traefik` service entirely (a real reduction in attack
+ * surface for an edge-facing proxy, not just a bug fix).
+ *
+ * This suite parses `routes.yml` for real (via `js-yaml`, not regex) and
+ * cross-checks it against the merged `docker compose config` output AND
+ * `web/ui-coverage.json` — nothing here is a hard-coded list of router
+ * names, so a future service added to one side without the other still
+ * fails loudly.
+ */
+describe('Traefik file-provider dynamic routing (Task 16f)', () => {
+  let composeConfig: ComposeConfig
+  let dynamicConfig: TraefikDynamicConfig
+  let uiCoverage: UiCoverage
+
+  beforeAll(() => {
+    composeConfig = runComposeConfig('docker-compose.yml', 'docker-compose.prod.yml')
+    dynamicConfig = loadTraefikDynamicConfig()
+    uiCoverage = loadUiCoverage()
+  })
+
+  test('routes.yml parses to at least one router, one service, and one middleware (otherwise this suite is vacuous)', () => {
+    expect(Object.keys(dynamicConfig.http?.routers ?? {}).length).toBeGreaterThan(0)
+    expect(Object.keys(dynamicConfig.http?.services ?? {}).length).toBeGreaterThan(0)
+    expect(Object.keys(dynamicConfig.http?.middlewares ?? {}).length).toBeGreaterThan(0)
+  })
+
+  /**
+   * The router-vs-backend assertion (brief: "Demonstrate at least the
+   * router-vs-backend assertion failing before it passes" — see
+   * task-16f-traefik-report.md for the RED run this produced against a
+   * deliberately broken `routes.yml`). Every router must name a `service:`
+   * that is actually defined in `routes.yml`'s own `http.services` map,
+   * and every one of THAT backend's server URLs must resolve — by
+   * hostname, not by name-matching the router — to a real compose service
+   * name. This is what actually catches "two sources of truth diverged":
+   * a router pointing at a backend that was renamed/removed, or a backend
+   * URL with a typo'd or stale compose service name, would both 404/502
+   * in production but parse "successfully" as YAML — neither is caught by
+   * anything that doesn't cross-reference `docker compose config`.
+   */
+  test('every router names a backend that exists in routes.yml, and every backend URL host resolves to a real compose service', () => {
+    const routers = dynamicConfig.http?.routers ?? {}
+    const services = dynamicConfig.http?.services ?? {}
+    const composeServiceNames = new Set(Object.keys(composeConfig.services))
+
+    expect(Object.keys(routers).length).toBeGreaterThan(0)
+
+    for (const [routerName, router] of Object.entries(routers)) {
+      expect([routerName, router.service]).toEqual([routerName, expect.any(String)])
+
+      const backend = router.service ? services[router.service] : undefined
+      expect([routerName, router.service, backend]).toEqual([routerName, router.service, expect.anything()])
+
+      const servers = backend?.loadBalancer?.servers ?? []
+      expect([routerName, servers.length > 0]).toEqual([routerName, true])
+
+      for (const server of servers) {
+        const url = server.url ?? ''
+        let host = ''
+        expect(() => {
+          host = new URL(url).hostname
+        }).not.toThrow()
+        expect([routerName, url, composeServiceNames.has(host)]).toEqual([routerName, url, true])
+      }
+    }
+  })
+
+  test('every API router (PathPrefix `/api/...`) has a priority strictly greater than the `web` catch-all router', () => {
+    const routers = dynamicConfig.http?.routers ?? {}
+    const webRouter = routers.web
+    expect(webRouter).toBeDefined()
+    expect(webRouter?.priority).toEqual(expect.any(Number))
+    const webPriority = Number(webRouter?.priority)
+
+    const apiRouterEntries = Object.entries(routers).filter(([, r]) => /PathPrefix\(`\/api\//.test(r.rule ?? ''))
+    // Not vacuous: this repo has six such services today.
+    expect(apiRouterEntries.length).toBeGreaterThan(0)
+
+    for (const [name, router] of apiRouterEntries) {
+      expect([name, router.priority]).toEqual([name, expect.any(Number)])
+      expect([name, Number(router.priority) > webPriority]).toEqual([name, true])
+    }
+  })
+
+  test('every compose platform service with a browser-reachable route in ui-coverage.json has a router routing to it', () => {
+    const reachable = browserReachableServices(uiCoverage)
+    const composeServiceNames = Object.keys(composeConfig.services)
+
+    // Derived from ui-coverage.json + docker-compose.yml, not hard-coded —
+    // ui-coverage.json also lists services from later phases
+    // (svc-attendance, svc-payroll, ...) that are not compose services
+    // yet; only the intersection is a real requirement today.
+    const platformServicesNeedingRouters = composeServiceNames.filter(
+      (name) => name.startsWith('svc-') && reachable.has(name),
+    )
+    expect(platformServicesNeedingRouters.length).toBeGreaterThan(0)
+
+    const hosts = routedBackendHosts(dynamicConfig)
+    for (const name of platformServicesNeedingRouters) {
+      expect([name, hosts.has(name)]).toEqual([name, true])
+    }
+
+    // `web` (the PWA itself) never appears in ui-coverage.json — that
+    // file enumerates API endpoints, not the SPA shell — but it is
+    // obviously browser-reachable and must not be skipped just because it
+    // has no ui-coverage.json entry to derive itself from.
+    expect(hosts.has('web')).toBe(true)
+  })
+
+  test('every platform service with NO browser-reachable ui-coverage.json route correctly has no router (no dead / unused routes)', () => {
+    const reachable = browserReachableServices(uiCoverage)
+    const composeServiceNames = Object.keys(composeConfig.services)
+    const platformServicesWithNoPublicRoute = composeServiceNames.filter(
+      (name) => name.startsWith('svc-') && !reachable.has(name),
+    )
+    // Not vacuous: svc-crypto is expected to land here today (Vault HTTP
+    // client only, called server-side over the internal network — see
+    // deploy/README.md's Traefik routing section).
+    expect(platformServicesWithNoPublicRoute.length).toBeGreaterThan(0)
+
+    const hosts = routedBackendHosts(dynamicConfig)
+    for (const name of platformServicesWithNoPublicRoute) {
+      expect([name, hosts.has(name)]).toEqual([name, false])
+    }
+  })
+
+  test('keycloak has a router (the `/auth` path, not derived from ui-coverage.json — Keycloak is not a @gadong service)', () => {
+    const hosts = routedBackendHosts(dynamicConfig)
+    expect(hosts.has('keycloak')).toBe(true)
   })
 })
 

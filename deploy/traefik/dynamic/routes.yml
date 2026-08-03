@@ -1,0 +1,170 @@
+# GaDongHR — Traefik DYNAMIC configuration (Task 16f).
+#
+# Replaces every `traefik.*` Docker label this repo used to carry on
+# `keycloak`, the seven platform services, and `web` — the Docker provider
+# that read those labels can never work on this host (docker-compose.yml's
+# `traefik` service comment / traefik.yml's header has the full story: API
+# version 1.24 vs the host's minimum-supported 1.40, four live experiments
+# ruled out, zero routers, every request 404s). Traefik's file provider
+# (enabled in `../traefik.yml`, watching this directory) reads this
+# instead — a static routing table for a static, one-host, fifteen-service
+# deployment, mirroring the labels that existed before this task
+# router-for-router.
+#
+# `PUBLIC_HOST` — env-driven, not hardcoded:
+# Traefik's file provider does NOT do the same `${VAR}` substitution
+# `docker compose` performs on its own YAML — that is a `docker compose`
+# feature of docker-compose.yml/docker-compose.prod.yml specifically, not
+# something Traefik applies to files it reads. What Traefik DOES support,
+# confirmed against the file-provider docs before assuming otherwise, is
+# Go templating of every dynamic-configuration file, including a builtin
+# `env` function: `{{ env "VAR_NAME" }}` reads an environment variable from
+# the Traefik PROCESS's own environment at file-load time. So every
+# `Host(...)` rule below reads `{{ env "PUBLIC_HOST" }}`, not a literal
+# domain — this file commits the TEMPLATE, never the hostname value itself.
+# The actual value comes from `docker-compose.yml`'s `traefik` service
+# `environment: PUBLIC_HOST: ${PUBLIC_HOST}` (compose-time substitution
+# from `.env`, same as every other `${PUBLIC_HOST}` use in that file) —
+# change the domain by editing `.env`, exactly like every other service
+# here, never by editing this file.
+#
+# Backends address containers by their compose SERVICE name on the
+# `gadong-internal` network (e.g. `http://svc-config:3000`) — Compose's
+# embedded DNS resolves that name to whichever container is currently
+# running it, the same implicit contract `AUTHZ_URL=http://svc-authz:3000`
+# etc. already rely on elsewhere in docker-compose.yml. There is no Docker
+# API lookup involved on this path at all, which is the whole point.
+#
+# Priorities are asserted by `compose-validation.test.ts`, not just by
+# comment: every `/api/*` router below sits at priority 100, strictly
+# above `web`'s catch-all `Host()` router at priority 1 — otherwise the
+# PWA's own router would swallow every `/api/*` call before it ever
+# reached the matching platform service (looks like "the UI loads but
+# nothing on it works", not a visible outage).
+http:
+  routers:
+    # Catch-all at the domain root. MUST stay the lowest priority in this
+    # file — see the header comment above.
+    web:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`)'
+      priority: 1
+      service: web
+      tls:
+        certResolver: le
+
+    # No explicit priority (Traefik's default rule-length heuristic ranks
+    # `Host() && PathPrefix()` above bare `Host()` on its own) — matches
+    # the label set this replaces, which never set one for `kc` either.
+    kc:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/auth`)'
+      service: kc
+      tls:
+        certResolver: le
+
+    svc-config:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/config`)'
+      priority: 100
+      service: svc-config
+      middlewares: [svc-config-strip]
+      tls:
+        certResolver: le
+
+    svc-authz:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/authz`)'
+      priority: 100
+      service: svc-authz
+      middlewares: [svc-authz-strip]
+      tls:
+        certResolver: le
+
+    svc-audit:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/audit`)'
+      priority: 100
+      service: svc-audit
+      middlewares: [svc-audit-strip]
+      tls:
+        certResolver: le
+
+    svc-i18n:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/i18n`)'
+      priority: 100
+      service: svc-i18n
+      middlewares: [svc-i18n-strip]
+      tls:
+        certResolver: le
+
+    svc-notify:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/notify`)'
+      priority: 100
+      service: svc-notify
+      middlewares: [svc-notify-strip]
+      tls:
+        certResolver: le
+
+    svc-docs:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/docs`)'
+      priority: 100
+      service: svc-docs
+      middlewares: [svc-docs-strip]
+      tls:
+        certResolver: le
+
+  # Every `/api/*` router strips its own prefix before forwarding — each
+  # service's own NestJS routes are unprefixed (e.g. svc-config's
+  # `rules.controller.ts` exposes `GET /rules`, not `GET /api/config/rules`)
+  # — same as the labels this replaces. `kc` needs no such middleware:
+  # Keycloak's own `--http-relative-path=/auth` already expects `/auth` to
+  # stay attached.
+  middlewares:
+    svc-config-strip:
+      stripPrefix:
+        prefixes: ["/api/config"]
+    svc-authz-strip:
+      stripPrefix:
+        prefixes: ["/api/authz"]
+    svc-audit-strip:
+      stripPrefix:
+        prefixes: ["/api/audit"]
+    svc-i18n-strip:
+      stripPrefix:
+        prefixes: ["/api/i18n"]
+    svc-notify-strip:
+      stripPrefix:
+        prefixes: ["/api/notify"]
+    svc-docs-strip:
+      stripPrefix:
+        prefixes: ["/api/docs"]
+
+  services:
+    web:
+      loadBalancer:
+        servers:
+          - url: "http://web:8080"
+    kc:
+      loadBalancer:
+        servers:
+          - url: "http://keycloak:8080"
+    svc-config:
+      loadBalancer:
+        servers:
+          - url: "http://svc-config:3000"
+    svc-authz:
+      loadBalancer:
+        servers:
+          - url: "http://svc-authz:3000"
+    svc-audit:
+      loadBalancer:
+        servers:
+          - url: "http://svc-audit:3000"
+    svc-i18n:
+      loadBalancer:
+        servers:
+          - url: "http://svc-i18n:3000"
+    svc-notify:
+      loadBalancer:
+        servers:
+          - url: "http://svc-notify:3000"
+    svc-docs:
+      loadBalancer:
+        servers:
+          - url: "http://svc-docs:3000"
