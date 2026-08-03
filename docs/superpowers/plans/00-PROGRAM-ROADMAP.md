@@ -61,6 +61,34 @@ throwaway demo someone later has to rewrite. Three rules make it real code inste
    Thai strings is precisely the thing that has to be rewritten, and it is the most common way this
    kind of shell rots.
 
+## Every endpoint has a front end — enforced, not intended
+
+Standing rule, set 2026-08-03 at Samuel's instruction: **no user-facing endpoint ships without a
+corresponding screen**, and the mapping is checked by CI rather than remembered.
+
+The mechanism is `web/ui-coverage.json`: a manifest listing every HTTP route in the system against
+either the screen route that surfaces it, or an explicit exemption with a reason. A test enumerates
+the actual `@Get`/`@Post`/`@Put`/`@Patch`/`@Delete` decorators across `services/**/*.controller.ts`
+and fails when a route appears in the code but not the manifest. Adding an endpoint therefore forces
+a deliberate decision about where a human sees it — the failure mode this prevents is a backend
+capability nobody can reach, discovered at a customer demo.
+
+**Legitimate exemptions, and only these categories:**
+
+| Category | Why no screen | Examples |
+|---|---|---|
+| Service-to-service | Never called by a browser | `svc-crypto` `/encrypt`, `/decrypt`, `/bidx`; `svc-authz` `POST /decide` |
+| Operational | Consumed by compose, the deploy script and monitoring | every `GET /health` |
+| Consumed, not displayed | The app reads it to render everything else | `svc-i18n` `GET /bundles/:locale` |
+
+An exemption needs a one-line reason in the manifest. "Not needed yet" is not a reason — that is a
+missing screen with better wording.
+
+**This expands Phase 1.5.** The PWA shell now also carries the admin and compliance console that
+covers the seven platform services' live endpoints, not only the ESS screens. That is the right
+scope anyway: the statutory-rules governance screen and the audit-chain verifier are where the
+compliance story becomes visible to a buyer, and they are the parts no competitor screenshot shows.
+
 ## Parallel execution
 
 Services are independent; the monorepo around them is not. Four agents in one tree collide on the
