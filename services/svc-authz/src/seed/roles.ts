@@ -18,11 +18,11 @@ export interface RoleTemplate {
 
 /**
  * The roadmap's "Permission catalog" (`docs/superpowers/plans/00-PROGRAM-ROADMAP.md`,
- * "Contracts every phase depends on"), 48 codes, verbatim — plus three
- * codes this task adds. Every addition is listed here, explicitly, because
- * the roadmap is the source of truth and these three are not yet reflected
- * there (Task 8 brief, carried-forward context: "list every added code
- * explicitly in your report — I will reconcile the roadmap"):
+ * "Contracts every phase depends on"), 48 codes, verbatim — plus six codes
+ * this task adds. Every addition is listed here, explicitly, because the
+ * roadmap is the source of truth and these six are not yet reflected there
+ * (Task 8 brief, carried-forward context: "list every added code explicitly
+ * in your report — I will reconcile the roadmap"):
  *
  *  - `config.rule.read` — `services/svc-config/src/rules.controller.ts`
  *    already declares `@RequirePermission('config.rule.read')` on
@@ -35,8 +35,19 @@ export interface RoleTemplate {
  *    (`GET /roles`, `POST /users/:id/roles`, `DELETE /users/:id/roles/:roleId`)
  *    needs permissions to guard itself with, and the roadmap's catalog
  *    (written before svc-authz existed) has none for its own admin routes.
+ *  - `document.read`, `notify.notification.read`, `notify.notification.update`
+ *    — Task 14c fix. These three were named in the roadmap's permission
+ *    catalog LIST (2026-08-03 addendum) but never reached this file's
+ *    `PERMISSION_CATALOG` at all — not merely ungranted, but genuinely
+ *    unknown to `/decide` (`AuthzService.decide` calls `findPermissionByCode`
+ *    before it ever looks at a grant, so a code missing here denies
+ *    unconditionally, before role membership is even consulted). Their
+ *    routes (`GET/POST /notifications*` in svc-notify, `GET /documents/:id`
+ *    in svc-docs) were live and correctly guarded, but 403'd for every
+ *    caller including hr-system-admin — the notification inbox and document
+ *    viewer were unreachable by design, not by bug, until this fix.
  *
- * Total: 51 (48 + 3). No other permission is invented here.
+ * Total: 54 (48 + 6). No other permission is invented here.
  */
 export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
   { code: 'employee.create', description: 'Create a new employee record' },
@@ -91,6 +102,9 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
   { code: 'config.rule.read', description: 'Read an effective-dated statutory config rule' },
   { code: 'authz.role.read', description: 'Read role and permission catalog data' },
   { code: 'authz.role.grant', description: 'Grant or revoke a role assignment' },
+  { code: 'document.read', description: 'Read/download a previously rendered document (contract, letter, payslip)' },
+  { code: 'notify.notification.read', description: "Read one's own in-app notifications" },
+  { code: 'notify.notification.update', description: "Mark one's own in-app notification read" },
 ]
 
 /**
@@ -119,6 +133,17 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'claim.submit',
       'payslip.read.self',
       'consent.self',
+      // Task 14c: notify.notification.* are self-scoped by construction —
+      // `NotifyController` derives the recipient solely from `req.userId`,
+      // never a request param, so every human role gets these two, not a
+      // subset (Security doc §4.1 "`self` scope powers ESS"). document.read
+      // guards `GET /documents/:id`, which has no per-document ownership
+      // check of its own — ESS needs it for "own payslips" (§4.2), and this
+      // is the one role for which that gap is an accepted, documented risk;
+      // see this task's report for why it is not extended to hr-officer.
+      'notify.notification.read',
+      'notify.notification.update',
+      'document.read',
     ],
   },
   {
@@ -135,6 +160,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'timesheet.correct',
       'leave.approve',
       'claim.approve',
+      // Task 14c: self-scoped notification inbox — see employee-ess comment.
+      'notify.notification.read',
+      'notify.notification.update',
     ],
   },
   {
@@ -156,6 +184,19 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'timesheet.correct',
       'holiday.manage',
       'config.rule.read',
+      // Task 14c: self-scoped notification inbox — see employee-ess comment.
+      // Deliberately NOT `document.read`: that permission guards
+      // `GET /documents/:id` for every document kind alike (contracts AND
+      // payslips — same route, same permission, no kind filter in
+      // `DocumentsController`), so granting it here would let HR read
+      // payroll amounts through the document viewer — exactly the side
+      // door Security doc §4.2's "HR Officer ... explicitly denied: payroll
+      // approve, statutory-config approve, biometric template access" (and
+      // hr-system-admin's "payroll amounts by default") exists to close.
+      // `document.generate` (already held) is enough for HR to produce a
+      // contract; reading it back is not a stated requirement.
+      'notify.notification.read',
+      'notify.notification.update',
     ],
   },
   {
@@ -170,6 +211,14 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'payroll.run.calculate',
       'payroll.export',
       'config.rule.read',
+      // Task 14c: self-scoped notification inbox — see employee-ess comment.
+      // `document.read` granted here too: this role already holds
+      // `payroll.profile.read` (full salary access), so the document
+      // viewer's lack of kind-filtering adds no new exposure for this role
+      // the way it would for hr-officer.
+      'notify.notification.read',
+      'notify.notification.update',
+      'document.read',
     ],
   },
   {
@@ -177,7 +226,18 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     nameI18n: { en: 'Payroll Approver', th: 'ผู้อนุมัติเงินเดือน' },
     isSystem: true,
     // No payroll.run.prepare/payroll.run.calculate (SoD inverse).
-    permissions: ['payroll.run.approve', 'payroll.run.commit', 'payroll.profile.read', 'timesheet.unlock', 'config.rule.read'],
+    permissions: [
+      'payroll.run.approve',
+      'payroll.run.commit',
+      'payroll.profile.read',
+      'timesheet.unlock',
+      'config.rule.read',
+      // Task 14c: notify self-scoped inbox, and document.read for the same
+      // reason as payroll-officer — already holds payroll.profile.read.
+      'notify.notification.read',
+      'notify.notification.update',
+      'document.read',
+    ],
   },
   {
     code: 'hr-system-admin',
@@ -193,6 +253,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'device.register',
       'device.approve',
       'enrolment.manage',
+      // Task 14c: self-scoped notification inbox — see employee-ess comment.
+      // Deliberately NOT `document.read`, for the same side-door reason as
+      // hr-officer — §4.2 denies this role "payroll amounts by default".
+      'notify.notification.read',
+      'notify.notification.update',
     ],
   },
   {
@@ -200,19 +265,46 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     nameI18n: { en: 'Compliance / Second Approver', th: 'ผู้อนุมัติลำดับที่สอง' },
     isSystem: true,
     // No config.rule.propose (SoD — cannot propose what it approves).
-    permissions: ['config.rule.approve', 'config.rule.read'],
+    permissions: [
+      'config.rule.approve',
+      'config.rule.read',
+      // Task 14c: self-scoped notification inbox — see employee-ess comment.
+      'notify.notification.read',
+      'notify.notification.update',
+    ],
   },
   {
     code: 'dpo',
     nameI18n: { en: 'Data Protection Officer', th: 'เจ้าหน้าที่คุ้มครองข้อมูลส่วนบุคคล' },
     isSystem: true,
-    permissions: ['dpo.console', 'dsr.manage', 'retention.approve'],
+    permissions: [
+      'dpo.console',
+      'dsr.manage',
+      'retention.approve',
+      // Task 14c: self-scoped notification inbox — see employee-ess comment.
+      'notify.notification.read',
+      'notify.notification.update',
+    ],
   },
   {
     code: 'auditor-readonly',
     nameI18n: { en: 'Auditor (read-only)', th: 'ผู้ตรวจสอบ (อ่านอย่างเดียว)' },
     isSystem: true,
-    permissions: ['audit.read'],
+    // Task 14c: document.read — §4.2's "read-only audit trail + reports,
+    // scoped" and this task's brief ("auditors read within scope") both
+    // name document review as part of this role's remit; auditor-readonly
+    // is already the role positioned to see sensitive records for
+    // compliance review, so the document viewer's lack of kind-filtering
+    // does not create a new class of exposure here.
+    //
+    // notify.notification.read only — NOT notify.notification.update.
+    // §4.2 is absolute for this role: "Auditor | ... | Explicitly denied:
+    // any write". Marking a notification read is a state mutation
+    // (`role.test.ts`'s "auditor-readonly holds no write-shaped
+    // permission" enforces this by verb, not by guessing at intent), so
+    // this role can see its inbox but not acknowledge it — a real, accepted
+    // product limitation, not an oversight; see this task's report.
+    permissions: ['audit.read', 'notify.notification.read', 'document.read'],
   },
   {
     code: 'kiosk-device',
