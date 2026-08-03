@@ -1,10 +1,18 @@
 import { Controller, Get, Inject } from '@nestjs/common'
-import { buildHealth } from '@gadong/kernel'
+import { Public, buildHealth } from '@gadong/kernel'
 import type { HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
+import { DB_POOL } from './employee.controller'
 
-/** DI token for the `onboarding` schema's connection pool — the same `Symbol` token pattern `svc-config`'s `DB_POOL` established. `app.module.ts` binds it to a real `pg.Pool` via kernel's `createPool`. */
-export const DB_POOL = Symbol('DB_POOL')
+/**
+ * Phase 2 (this task): re-exported from `employee.controller.ts` rather
+ * than declared as a second `Symbol` here — `AppModule` now wires ONE
+ * `onboarding` connection pool for the whole service (`EmployeeController`
+ * and this controller share it), not one pool per controller. Re-exported
+ * (not just imported) so nothing outside this module needs to know the
+ * token moved.
+ */
+export { DB_POOL }
 
 /** DI token for the crypto reachability probe. Injectable (rather than this controller calling `fetch` directly) so `health.controller.test.ts` can prove `ok`/`degraded` without touching the network — the same reason kernel's `OidcMiddleware` takes an injectable `JwksFetcher` instead of calling `fetch` inline. */
 export const CRYPTO_PROBE = Symbol('CRYPTO_PROBE')
@@ -22,13 +30,16 @@ export interface CryptoProbe {
 }
 
 /**
- * The HTTP boundary for `GET /health` only (Task 14 brief: "Business
- * logic comes in Phase 2 ... Do NOT implement business endpoints"). No
- * `@RequirePermission` here, matching every other service's `/health` —
- * it is the one route every service's `PermissionGuard` wiring explicitly
- * exempts (`svc-config`, `svc-docs`) — and this service does not yet mount
- * that guard at all (see `app.module.ts`'s header comment for why that is
- * deliberate for this task, not an oversight).
+ * The HTTP boundary for `GET /health` only. Phase 2 (this task) mounts
+ * `PermissionGuard` globally for the first time in this service (see
+ * `app.module.ts`) — deny-by-default is structural there, with no code
+ * path from "unannotated" to "allowed" (kernel `authz/guard.ts`), so
+ * `@Public()` on this handler is no longer optional the way the Task 14
+ * skeleton's comment (superseded below) once had it: without it, this
+ * service's own healthcheck would now be denied with `AUZ-403` by its own
+ * guard — exactly the Task 16e defect class `app.module.boot.test.ts`
+ * exists to catch, caught here for real during this task's own build
+ * rather than discovered on a live droplet.
  */
 @Controller()
 export class HealthController {
@@ -38,6 +49,7 @@ export class HealthController {
   ) {}
 
   @Get('health')
+  @Public()
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
     const crypto = await this.cryptoProbe.check()
