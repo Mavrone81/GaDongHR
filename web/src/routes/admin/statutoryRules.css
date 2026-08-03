@@ -1,11 +1,41 @@
-/* Label left, value right, hairline between (DESIGN.md "Layout"). No cards, no shadows, no rounded containers. */
+/*
+ * Domain-specific styling for the statutory-rules screen. The shared
+ * primitives (Field, Button, Eyebrow, Seal, Table — see `src/components/`)
+ * cover the generic ruled-row/eyebrow/button/seal treatment; what's left
+ * here is specific to this screen's layout: the page frame, the rule
+ * list's row grid and the floor/ceiling violation notice. Every color is a
+ * `var(--token)` — nothing here hard-codes a hex.
+ */
+
+.page {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-4);
+}
+
+.page__header {
+  margin-bottom: var(--space-6);
+}
+
+.page__title {
+  margin: var(--space-1) 0 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.rules-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 
 .rule-row {
   display: grid;
   grid-template-columns: 1fr auto auto auto;
   align-items: baseline;
-  gap: 1rem;
-  padding: 0.75rem 0;
+  column-gap: var(--space-4);
+  row-gap: var(--space-2);
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--rule);
 }
 
@@ -14,42 +44,52 @@
   color: var(--muted);
 }
 
-.citation-seal {
-  display: inline-block;
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  color: var(--seal);
-  border: 1px solid var(--seal);
-  padding: 0.1rem 0.5rem;
-  white-space: nowrap;
+.rule-row__detail {
+  grid-column: 1 / -1;
+  padding-top: var(--space-1);
 }
 
+.rule-row__status {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/*
+ * A floor/ceiling rejection is a validation notice, not a citation — it
+ * gets emphasis through ink and weight, never through `--seal`. `--seal`
+ * is reserved for the citation stamp alone (DESIGN.md: "Not for errors,
+ * not for destructive actions […] the moment it appears on something that
+ * is not a legal citation, the citation stops reading as special"). The
+ * `Seal` rendered inside this notice is what actually says "the law says
+ * no" — this wrapper stays neutral so that red mark keeps its weight.
+ */
 .floor-violation {
-  border-left: 3px solid var(--seal);
-  padding: 0.75rem 1rem;
-  margin: 1rem 0;
+  border-left: 3px solid var(--ink);
+  padding: var(--space-3) var(--space-4);
+  margin: var(--space-4) 0;
   background: transparent;
 }
 
 .floor-violation__title {
-  color: var(--seal);
-  font-weight: 600;
-  margin: 0 0 0.35rem;
+  color: var(--ink);
+  font-weight: 700;
+  margin: 0 0 var(--space-1);
 }
 
-.field-row {
-  display: grid;
-  grid-template-columns: 10rem 1fr;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--rule);
-}
-
-.eyebrow {
-  font-family: var(--font-mono);
+.empty-state {
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--rule);
   color: var(--muted);
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+}
+
+.propose-form {
+  margin: var(--space-4) 0 var(--space-6);
+  padding: var(--space-4);
+  border: 1px solid var(--rule);
+}
+
+.propose-form__actions {
+  margin-top: var(--space-4);
 }

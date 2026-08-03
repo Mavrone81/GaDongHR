@@ -6,7 +6,11 @@ import { useSvcConfig } from '../../api/svcConfig'
 import type { StatutoryRuleRow } from '../../api/svcConfig'
 import { ApiError } from '../../api/httpClient'
 import type { ApiErrorEnvelope } from '../../api/httpClient'
-import { CitationSeal } from './CitationSeal'
+import { Seal } from '../../components/Seal'
+import { Eyebrow } from '../../components/Eyebrow'
+import { Field } from '../../components/Field'
+import { Button } from '../../components/Button'
+import { Table, TableCell, TableHeaderCell } from '../../components/Table'
 import { FloorViolationNotice } from './FloorViolationNotice'
 import { ProposeRuleForm } from './ProposeRuleForm'
 import { DateText } from '../../components/DateText'
@@ -50,17 +54,32 @@ function AsOfDetail({ ruleKey }: { ruleKey: string }): React.JSX.Element {
   }, [on, ruleKey, svcConfig])
 
   return (
-    <div>
-      <label>
-        {t('admin.statutoryRules.asOfLabel')}
-        <input type="date" value={on} onChange={(e) => setOn(e.target.value)} aria-label={t('admin.statutoryRules.asOfLabel')} />
-      </label>
-      {loading && <span>{t('common.loading')}</span>}
+    <div className="rule-row__detail">
+      <Field label={t('admin.statutoryRules.asOfLabel')} htmlFor={`as-of-${ruleKey}`}>
+        <input id={`as-of-${ruleKey}`} type="date" value={on} onChange={(e) => setOn(e.target.value)} />
+      </Field>
+      {loading && <p>{t('common.loading')}</p>}
       {row && (
-        <div>
-          <span className="numeric">{String(row.value)}</span> <CitationSeal citation={row.citation} floor={row.statutoryFloor} ceiling={row.statutoryCeiling} />{' '}
-          <DateText iso={row.effectiveFrom} />
-        </div>
+        <Table caption={t('admin.statutoryRules.asOfLabel')}>
+          <thead>
+            <tr>
+              <TableHeaderCell numeric>{t('admin.statutoryRules.propose.value')}</TableHeaderCell>
+              <TableHeaderCell>{t('admin.statutoryRules.propose.citation')}</TableHeaderCell>
+              <TableHeaderCell>{t('admin.statutoryRules.propose.effectiveFrom')}</TableHeaderCell>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <TableCell numeric>{String(row.value)}</TableCell>
+              <TableCell>
+                <Seal citation={row.citation} floor={row.statutoryFloor} ceiling={row.statutoryCeiling} />
+              </TableCell>
+              <TableCell>
+                <DateText iso={row.effectiveFrom} />
+              </TableCell>
+            </tr>
+          </tbody>
+        </Table>
       )}
       {envelope && <FloorViolationNotice envelope={envelope} />}
     </div>
@@ -99,26 +118,26 @@ export function RuleRow({
 
   return (
     <li className="rule-row">
-      <div>
-        <div className="rule-row__key">{row.ruleKey}</div>
-        <button type="button" onClick={() => setShowAsOf((v) => !v)}>
-          {t('common.view')}
-        </button>
-        {showAsOf && <AsOfDetail ruleKey={row.ruleKey} />}
-        {envelope && <FloorViolationNotice envelope={envelope} />}
-      </div>
+      <div className="rule-row__key">{row.ruleKey}</div>
       <span className="numeric">{String(row.value)}</span>
-      <CitationSeal citation={row.citation} floor={row.statutoryFloor} ceiling={row.statutoryCeiling} />
-      <div>
+      <Seal citation={row.citation} floor={row.statutoryFloor} ceiling={row.statutoryCeiling} />
+      <div className="rule-row__status">
         <span>{t(`admin.statutoryRules.status.${row.status}`)}</span>
         {row.status === 'draft' &&
           (canApprove && !isProposer ? (
-            <button type="button" onClick={handleApprove} disabled={approving}>
+            <Button variant="primary" onClick={handleApprove} disabled={approving}>
               {t('admin.statutoryRules.approve.cta')}
-            </button>
+            </Button>
           ) : canApprove && isProposer ? (
             <p>{t('admin.statutoryRules.approve.selfProposed')}</p>
           ) : null)}
+      </div>
+      <div className="rule-row__detail">
+        <Button variant="quiet" onClick={() => setShowAsOf((v) => !v)}>
+          {t('common.view')}
+        </Button>
+        {showAsOf && <AsOfDetail ruleKey={row.ruleKey} />}
+        {envelope && <FloorViolationNotice envelope={envelope} />}
       </div>
     </li>
   )
@@ -128,7 +147,7 @@ export function RuleRow({
  * The compliance showcase (`web/ui-coverage.json`'s `/admin/statutory-rules`
  * screen — `config.rule.read`, `config.rule.propose`, `config.rule.approve`,
  * `config.pack.import` all surface here). Every figure the law sets carries
- * its `CitationSeal`; a proposal rejected below the statutory floor renders
+ * its `Seal`; a proposal rejected below the statutory floor renders
  * `FloorViolationNotice` inline (the task's "entire compliance argument
  * made visible"); Approve is unreachable for the row's own proposer
  * (`RuleRow`'s `isProposer` check — mirrors the exact segregation-of-duties
@@ -158,14 +177,17 @@ export function StatutoryRulesPage(): React.JSX.Element {
   }, [reload])
 
   return (
-    <section>
-      <p className="eyebrow">{t('admin.statutoryRules.title')}</p>
+    <section className="page">
+      <header className="page__header">
+        <Eyebrow>{t('shell.brand')}</Eyebrow>
+        <h1 className="page__title">{t('admin.statutoryRules.title')}</h1>
+      </header>
 
       {canPropose && (
         <p>
-          <button type="button" onClick={() => setShowPropose((v) => !v)}>
+          <Button variant="primary" onClick={() => setShowPropose((v) => !v)}>
             {t('admin.statutoryRules.propose.cta')}
-          </button>
+          </Button>
         </p>
       )}
 
@@ -180,9 +202,9 @@ export function StatutoryRulesPage(): React.JSX.Element {
 
       {loading && <p>{t('common.loading')}</p>}
 
-      {!loading && rules.length === 0 && <p>{t('admin.statutoryRules.emptyState')}</p>}
+      {!loading && rules.length === 0 && <p className="empty-state">{t('admin.statutoryRules.emptyState')}</p>}
 
-      <ul>
+      <ul className="rules-list">
         {rules.map((row) => (
           <RuleRow key={row.id} row={row} onApproved={reload} />
         ))}

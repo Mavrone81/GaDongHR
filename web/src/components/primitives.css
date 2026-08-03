@@ -1,0 +1,164 @@
+/*
+ * Styles for the shared primitives (Eyebrow, Field, Button, Seal, Table —
+ * see the sibling .tsx files). DESIGN.md's layout rule applies throughout:
+ * label left, value right, hairline between; no cards, no shadows, no
+ * rounded containers. Every color here is a `var(--token)` from
+ * `styles/tokens.css` — nothing in this file hard-codes a hex
+ * (`src/styles/noHardcodedHex.test.ts` enforces that mechanically).
+ *
+ * `--brass` deliberately does not appear below: at ~2.7:1 against
+ * `--paper` it fails WCAG AA for text and even the 3:1 non-text/large-text
+ * floor (see tokens.css's header for the measured ratios), so none of
+ * these primitives use it for anything a user needs to read or click.
+ */
+
+/* ---- Eyebrow ---- */
+
+.eyebrow {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ---- Field: label-left / value-right ruled row ---- */
+
+.field {
+  display: grid;
+  grid-template-columns: minmax(9rem, 14rem) 1fr;
+  align-items: baseline;
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.field__label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.field__value {
+  min-width: 0;
+}
+
+.field__value--numeric {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+/* Narrow viewports: stack label above value rather than compressing the
+   value column — a ruled field should stay readable, not truncate. */
+@media (max-width: 32rem) {
+  .field {
+    grid-template-columns: 1fr;
+  }
+  .field__value--numeric {
+    text-align: left;
+  }
+}
+
+/* ---- Button: primary (carapace), secondary (outline), quiet (text) ---- */
+
+.btn {
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0.55rem 1.1rem;
+  border-radius: 0;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.btn--primary {
+  background: var(--carapace);
+  color: var(--paper);
+  border: 1px solid var(--carapace);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--carapace-shadow);
+  border-color: var(--carapace-shadow);
+}
+
+.btn--secondary {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--ink);
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.btn--quiet {
+  background: transparent;
+  color: var(--carapace);
+  border: 1px solid transparent;
+  padding: 0.55rem 0.6rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.btn--quiet:hover:not(:disabled) {
+  background: transparent;
+  text-decoration-thickness: 2px;
+}
+
+/* ---- Table: hairline rules, tabular numerics ---- */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table caption {
+  text-align: left;
+  margin-bottom: var(--space-2);
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--rule);
+  vertical-align: baseline;
+}
+
+.table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.table td:first-child,
+.table th:first-child {
+  padding-left: 0;
+}
+
+.table td:last-child,
+.table th:last-child {
+  padding-right: 0;
+}
+
+/* Right-aligned tabular numerics reuse the app-wide `.numeric` utility
+   (`styles/tokens.css`) rather than redefining it here — one definition
+   for "Ledger's numerics […] applies everywhere" (DESIGN.md). */
+.table td.numeric,
+.table th.numeric {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}

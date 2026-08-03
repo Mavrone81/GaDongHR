@@ -1,8 +1,9 @@
 /*
  * Design tokens, verbatim from web/DESIGN.md ("Direction 1, Official Record").
- * `--seal` is reserved for statutory citations ONLY — see CitationSeal.tsx,
+ * `--seal` is reserved for statutory citations ONLY — see components/Seal.tsx,
  * the only component allowed to use it. Nothing else in this stylesheet or
- * any component may reference `--seal` for a general accent.
+ * any component may reference `--seal` for a general accent
+ * (`src/styles/noSealOutsideSeal.test.ts` enforces this mechanically).
  */
 :root {
   --paper: #fcfbf7;
@@ -23,6 +24,41 @@
      than Latin needs (DESIGN.md, "Non-negotiables"). */
   --leading-body: 1.7;
   --leading-latin: 1.45;
+
+  /* Spacing scale — so primitives share a rhythm instead of scattering ad
+     hoc rem values across component stylesheets. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2.5rem;
+
+  /* `--carapace` on `--paper` measures ~8.9:1 — safe for a visible focus
+     ring at any element size. `--brass` on `--paper` measures ~2.7:1 and
+     FAILS WCAG AA even at large-text/non-text thresholds (3:1), so brass is
+     never used for text or focus/interactive states here — see
+     `primitives.css`'s header for where it is still allowed (decorative
+     only). */
+  --focus-ring: 2px solid var(--carapace);
+  --focus-ring-offset: 2px;
+
+  --transition-fast: 120ms ease;
+}
+
+/* "prefers-reduced-motion respected if you add any transition" (task
+   brief) — collapses every transition/animation in the app to effectively
+   instant for anyone who has asked the OS for reduced motion, without
+   components needing to know about the preference individually. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 * {
@@ -65,4 +101,14 @@ a {
 button {
   font-family: inherit;
   font-size: inherit;
+}
+
+/* Real focus rings everywhere (task brief: "Real focus rings, not the
+   browser default"), keyed off :focus-visible so a mouse click doesn't
+   leave a ring behind — only keyboard/AT navigation does. No rounded
+   corners: this is a document, not a dashboard. */
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: 0;
 }

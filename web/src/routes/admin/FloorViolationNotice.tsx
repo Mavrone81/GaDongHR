@@ -1,5 +1,5 @@
 import { useI18n } from '../../i18n/I18nContext'
-import { CitationSeal } from './CitationSeal'
+import { Seal } from '../../components/Seal'
 import type { ApiErrorEnvelope } from '../../api/httpClient'
 import './statutoryRules.css'
 
@@ -27,7 +27,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * Renders `CFG-422` (`config.error.below_statutory_floor` /
  * `config.error.above_statutory_ceiling` — `services/svc-config/src/rules.service.ts`'s
  * `statutoryFloorViolation`/`statutoryCeilingViolation`) with the same
- * `CitationSeal` used everywhere else a statutory figure appears, so a
+ * `Seal` used everywhere else a statutory figure appears, so a
  * rejection reads as "the law says no", not a generic form-validation
  * error.
  */
@@ -42,7 +42,7 @@ export function FloorViolationNotice({ envelope }: { envelope: ApiErrorEnvelope 
       <div className="floor-violation">
         <p className="floor-violation__title">{t('admin.statutoryRules.floorViolation.title')}</p>
         <p>{t('admin.statutoryRules.floorViolation.body', { value: String(d.value ?? ''), floor: String(d.statutoryFloor ?? '') })}</p>
-        <CitationSeal citation={citation} floor={d.statutoryFloor} />
+        <Seal citation={citation} floor={d.statutoryFloor} />
       </div>
     )
   }
@@ -56,7 +56,7 @@ export function FloorViolationNotice({ envelope }: { envelope: ApiErrorEnvelope 
         <p>
           {t('admin.statutoryRules.ceilingViolation.body', { value: String(d.value ?? ''), ceiling: String(d.statutoryCeiling ?? '') })}
         </p>
-        <CitationSeal citation={citation} ceiling={d.statutoryCeiling} />
+        <Seal citation={citation} ceiling={d.statutoryCeiling} />
       </div>
     )
   }

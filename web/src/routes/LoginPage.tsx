@@ -1,5 +1,8 @@
 import { useI18n } from '../i18n/I18nContext'
 import { useAuth } from '../auth/AuthContext'
+import { Eyebrow } from '../components/Eyebrow'
+import { Button } from '../components/Button'
+import './loginPage.css'
 
 /**
  * Real login: clicking through here redirects to Keycloak's own hosted
@@ -15,12 +18,14 @@ export function LoginPage({ reason }: { reason?: 'expired' }): React.JSX.Element
   const { login, status } = useAuth()
 
   return (
-    <div>
-      <p className="eyebrow">{t('shell.brand')}</p>
-      <h1>{reason === 'expired' ? t('auth.session.expired') : t('auth.login.title')}</h1>
-      <button type="button" onClick={login} disabled={status === 'authenticating'}>
-        {status === 'authenticating' ? t('common.loading') : t('auth.login.submit')}
-      </button>
+    <div className="login-page">
+      <div className="login-page__sheet">
+        <Eyebrow>{t('shell.brand')}</Eyebrow>
+        <h1 className="login-page__title">{reason === 'expired' ? t('auth.session.expired') : t('auth.login.title')}</h1>
+        <Button variant="primary" onClick={login} disabled={status === 'authenticating'}>
+          {status === 'authenticating' ? t('common.loading') : t('auth.login.submit')}
+        </Button>
+      </div>
     </div>
   )
 }

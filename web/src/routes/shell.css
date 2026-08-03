@@ -1,0 +1,96 @@
+/*
+ * The app frame: header (brand, nav, locale switcher, sign-out) and the
+ * main content region below it. DESIGN.md's layout rule applies here too —
+ * a hairline separates the header from the page body, not a shadow.
+ */
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--rule);
+}
+
+.shell-header .eyebrow {
+  margin-right: var(--space-2);
+}
+
+.shell-nav {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.shell-nav__item {
+  border-right: 1px solid var(--rule);
+}
+
+.shell-nav__item:last-child {
+  border-right: none;
+}
+
+.shell-nav__link {
+  display: inline-block;
+  padding: var(--space-1) var(--space-3);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.shell-nav__link:hover {
+  color: var(--carapace);
+}
+
+/* `NavLink`'s `.active` class (react-router) marks the current page — "a
+   clear current-page state" (task brief). Weight + a carapace underline,
+   not color alone, so the state doesn't depend on color perception. */
+.shell-nav__link.active {
+  font-weight: 700;
+  color: var(--carapace);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+  text-decoration-thickness: 2px;
+}
+
+.shell-locale {
+  display: flex;
+  gap: var(--space-1);
+  border-left: 1px solid var(--rule);
+  padding-left: var(--space-4);
+  margin-left: auto;
+}
+
+/*
+ * `.btn--quiet` (primitives.css) is carapace + underline by default — right
+ * for a dismissive text action like "Sign out", wrong for a toggle where
+ * only the CURRENT locale should read as selected. `.shell-locale
+ * .shell-locale__btn` (two classes) deliberately outranks `.btn--quiet`
+ * (one class) so this reset wins regardless of stylesheet import order,
+ * rather than relying on source-order alone.
+ */
+.shell-locale .shell-locale__btn {
+  color: var(--muted);
+  font-weight: 400;
+  text-decoration: none;
+}
+
+.shell-locale .shell-locale__btn:hover {
+  color: var(--ink);
+}
+
+.shell-locale .shell-locale__btn[aria-pressed='true'] {
+  color: var(--carapace);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+
+.shell-main {
+  min-height: 0;
+}

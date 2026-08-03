@@ -5,6 +5,9 @@ import { ApiError } from '../../api/httpClient'
 import type { ApiErrorEnvelope } from '../../api/httpClient'
 import type { GovernanceClass, ProposeRuleInput, StatutoryRuleRow } from '../../api/svcConfig'
 import { FloorViolationNotice } from './FloorViolationNotice'
+import { Eyebrow } from '../../components/Eyebrow'
+import { Field } from '../../components/Field'
+import { Button } from '../../components/Button'
 import './statutoryRules.css'
 
 const GOVERNANCE_CLASSES: GovernanceClass[] = ['STATUTORY_FLOOR', 'STATUTORY_FIXED', 'COMPANY_POLICY']
@@ -67,34 +70,29 @@ export function ProposeRuleForm({
   }
 
   return (
-    <form onSubmit={(e) => void handleSubmit(e)}>
-      <p className="eyebrow">{t('admin.statutoryRules.propose.title')}</p>
+    <form className="propose-form" onSubmit={(e) => void handleSubmit(e)}>
+      <Eyebrow>{t('admin.statutoryRules.propose.title')}</Eyebrow>
 
       {envelope && <FloorViolationNotice envelope={envelope} />}
       {success && <p>{t('admin.statutoryRules.propose.success')}</p>}
 
-      <div className="field-row">
-        <label htmlFor="propose-rule-key">{t('admin.statutoryRules.propose.ruleKey')}</label>
+      <Field label={t('admin.statutoryRules.propose.ruleKey')} htmlFor="propose-rule-key">
         <input id="propose-rule-key" value={ruleKey} onChange={(e) => setRuleKey(e.target.value)} required />
-      </div>
+      </Field>
 
-      <div className="field-row">
-        <label htmlFor="propose-value">{t('admin.statutoryRules.propose.value')}</label>
+      <Field label={t('admin.statutoryRules.propose.value')} htmlFor="propose-value" numeric>
         <input id="propose-value" className="numeric" value={value} onChange={(e) => setValue(e.target.value)} required />
-      </div>
+      </Field>
 
-      <div className="field-row">
-        <label htmlFor="propose-unit">{t('admin.statutoryRules.propose.unit')}</label>
+      <Field label={t('admin.statutoryRules.propose.unit')} htmlFor="propose-unit">
         <input id="propose-unit" value={unit} onChange={(e) => setUnit(e.target.value)} required />
-      </div>
+      </Field>
 
-      <div className="field-row">
-        <label htmlFor="propose-citation">{t('admin.statutoryRules.propose.citation')}</label>
+      <Field label={t('admin.statutoryRules.propose.citation')} htmlFor="propose-citation">
         <input id="propose-citation" value={citation} onChange={(e) => setCitation(e.target.value)} required />
-      </div>
+      </Field>
 
-      <div className="field-row">
-        <label htmlFor="propose-governance-class">{t('admin.statutoryRules.propose.governanceClass')}</label>
+      <Field label={t('admin.statutoryRules.propose.governanceClass')} htmlFor="propose-governance-class">
         <select
           id="propose-governance-class"
           value={governanceClass}
@@ -106,22 +104,20 @@ export function ProposeRuleForm({
             </option>
           ))}
         </select>
-      </div>
+      </Field>
 
       {governanceClass === 'STATUTORY_FLOOR' && (
-        <div className="field-row">
-          <label htmlFor="propose-floor">{t('admin.statutoryRules.propose.statutoryFloor')}</label>
+        <Field label={t('admin.statutoryRules.propose.statutoryFloor')} htmlFor="propose-floor" numeric>
           <input
             id="propose-floor"
             className="numeric"
             value={statutoryFloor}
             onChange={(e) => setStatutoryFloor(e.target.value)}
           />
-        </div>
+        </Field>
       )}
 
-      <div className="field-row">
-        <label htmlFor="propose-effective-from">{t('admin.statutoryRules.propose.effectiveFrom')}</label>
+      <Field label={t('admin.statutoryRules.propose.effectiveFrom')} htmlFor="propose-effective-from">
         <input
           id="propose-effective-from"
           type="date"
@@ -129,20 +125,19 @@ export function ProposeRuleForm({
           onChange={(e) => setEffectiveFrom(e.target.value)}
           required
         />
-      </div>
+      </Field>
 
-      <div className="field-row">
-        <label htmlFor="propose-reason">{t('admin.statutoryRules.propose.reason')}</label>
+      <Field label={t('admin.statutoryRules.propose.reason')} htmlFor="propose-reason">
         <input id="propose-reason" value={reason} onChange={(e) => setReason(e.target.value)} required />
-      </div>
+      </Field>
 
-      <p>
-        <button type="submit" disabled={submitting}>
+      <p className="propose-form__actions">
+        <Button type="submit" variant="primary" disabled={submitting}>
           {t('admin.statutoryRules.propose.submit')}
-        </button>{' '}
-        <button type="button" onClick={onCancel}>
+        </Button>{' '}
+        <Button type="button" variant="quiet" onClick={onCancel}>
           {t('common.cancel')}
-        </button>
+        </Button>
       </p>
     </form>
   )

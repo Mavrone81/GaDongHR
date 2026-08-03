@@ -1,0 +1,27 @@
+/*
+ * The sign-in screen. No card, no shadow: the "sheet" here is a ruled
+ * block (a top hairline plus generous whitespace), the same documentary
+ * language as the rest of the app, just centered because there is nothing
+ * else on the page yet.
+ */
+
+.login-page {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+}
+
+.login-page__sheet {
+  width: 100%;
+  max-width: 26rem;
+  padding-top: var(--space-6);
+  border-top: 3px solid var(--carapace);
+}
+
+.login-page__title {
+  margin: var(--space-2) 0 var(--space-6);
+  font-size: 1.5rem;
+  font-weight: 700;
+}
