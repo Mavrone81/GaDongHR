@@ -1,7 +1,8 @@
 import 'reflect-metadata'
 import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
-import { AuthzClient, OidcMiddleware, PermissionGuard, createPool } from '@gadong/kernel'
+import { AuthzClient, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
+import type { OidcMiddlewareHandler } from '@gadong/kernel'
 import type { AuthzTransport, Queryable } from '@gadong/kernel'
 import { DB_POOL, AuthzController } from './authz.controller'
 import { AuthzService } from './authz.service'
@@ -63,8 +64,8 @@ function requiredEnv(name: string): string {
  * is fine: this middleware never throws and `/decide`'s handler never reads
  * `request.userId`, so its presence there is a harmless no-op, not a guard.
  */
-function createOidcMiddleware(): OidcMiddleware {
-  return new OidcMiddleware({
+function createOidcMiddleware(): OidcMiddlewareHandler {
+  return createOidcMiddlewareHandler({
     issuer: requiredEnv('OIDC_ISSUER'),
     audience: requiredEnv('OIDC_AUDIENCE'),
     jwksUri: requiredEnv('OIDC_JWKS_URI'),
@@ -75,7 +76,6 @@ function createOidcMiddleware(): OidcMiddleware {
   controllers: [AuthzController],
   providers: [
     PermissionGuard,
-    { provide: OidcMiddleware, useFactory: createOidcMiddleware },
     {
       provide: AuthzClient,
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://127.0.0.1:3000')),
@@ -102,7 +102,15 @@ function createOidcMiddleware(): OidcMiddleware {
   ],
 })
 export class AppModule implements NestModule {
+  // `createOidcMiddleware()` returns a plain function ("functional
+  // middleware" — see kernel `authz/oidc.middleware.ts`'s
+  // `createOidcMiddlewareHandler` doc), never the `OidcMiddleware` class
+  // itself: `consumer.apply(SomeClass)` makes Nest construct that class
+  // through its own DI container using constructor reflection, which
+  // ignores any `useFactory` provider registered under that token and
+  // fails with `UnknownDependenciesException` for a constructor that takes
+  // a plain runtime-config object (Task 16d incident).
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(OidcMiddleware).forRoutes('*')
+    consumer.apply(createOidcMiddleware()).forRoutes('*')
   }
 }

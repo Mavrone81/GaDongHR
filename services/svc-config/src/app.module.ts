@@ -2,7 +2,8 @@ import 'reflect-metadata'
 import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_GUARD } from '@nestjs/core'
-import { AuthzClient, OidcMiddleware, PermissionGuard, createPool } from '@gadong/kernel'
+import { AuthzClient, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
+import type { OidcMiddlewareHandler } from '@gadong/kernel'
 import type { AuthzTransport, Queryable } from '@gadong/kernel'
 import { DB_POOL, RulesController } from './rules.controller'
 import { RulesService } from './rules.service'
@@ -45,8 +46,8 @@ function requiredEnv(name: string): string {
  * come from config, matching `AUTHZ_URL`/`DATABASE_URL` below, never
  * hard-coded.
  */
-function createOidcMiddleware(): OidcMiddleware {
-  return new OidcMiddleware({
+function createOidcMiddleware(): OidcMiddlewareHandler {
+  return createOidcMiddlewareHandler({
     issuer: requiredEnv('OIDC_ISSUER'),
     audience: requiredEnv('OIDC_AUDIENCE'),
     jwksUri: requiredEnv('OIDC_JWKS_URI'),
@@ -66,7 +67,6 @@ function createOidcMiddleware(): OidcMiddleware {
   controllers: [RulesController],
   providers: [
     { provide: APP_GUARD, useClass: PermissionGuard },
-    { provide: OidcMiddleware, useFactory: createOidcMiddleware },
     {
       provide: AuthzClient,
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
@@ -105,7 +105,13 @@ export class AppModule implements NestModule {
   // ordering — `OidcMiddleware` populates `request.userId`, then
   // `PermissionGuard` (registered above as `APP_GUARD`) reads it — is
   // automatic; there is no separate "run before the guard" wiring needed.
+  //
+  // `createOidcMiddleware()` returns functional middleware (a plain
+  // function), not the `OidcMiddleware` class — see kernel
+  // `authz/oidc.middleware.ts`'s `createOidcMiddlewareHandler` doc for why
+  // `consumer.apply(OidcMiddleware)` fails with
+  // `UnknownDependenciesException` (Task 16d incident).
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(OidcMiddleware).forRoutes('*')
+    consumer.apply(createOidcMiddleware()).forRoutes('*')
   }
 }

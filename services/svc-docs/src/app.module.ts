@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_GUARD } from '@nestjs/core'
-import { AuthzClient, CryptoClient, OidcMiddleware, PermissionGuard, createPool } from '@gadong/kernel'
+import { AuthzClient, CryptoClient, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
+import type { OidcMiddlewareHandler } from '@gadong/kernel'
 import type { AuthzTransport, CryptoTransport, Queryable } from '@gadong/kernel'
 import { DB_POOL, DocumentsController } from './documents.controller'
 import { DocumentsService } from './documents.service'
@@ -61,8 +62,8 @@ function requiredEnv(name: string): string {
  * but nothing ever set it — see `services/svc-config/src/app.module.ts`'s
  * `createOidcMiddleware` comment for the full story; identical wiring here.
  */
-function createOidcMiddleware(): OidcMiddleware {
-  return new OidcMiddleware({
+function createOidcMiddleware(): OidcMiddlewareHandler {
+  return createOidcMiddlewareHandler({
     issuer: requiredEnv('OIDC_ISSUER'),
     audience: requiredEnv('OIDC_AUDIENCE'),
     jwksUri: requiredEnv('OIDC_JWKS_URI'),
@@ -93,7 +94,6 @@ void EXPECTED_FONT_FAMILIES // documents the contract FONT_DESCRIPTORS above mus
   controllers: [DocumentsController],
   providers: [
     { provide: APP_GUARD, useClass: PermissionGuard },
-    { provide: OidcMiddleware, useFactory: createOidcMiddleware },
     {
       provide: AuthzClient,
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
@@ -153,7 +153,11 @@ void EXPECTED_FONT_FAMILIES // documents the contract FONT_DESCRIPTORS above mus
   ],
 })
 export class AppModule implements NestModule {
+  // Functional middleware, not the `OidcMiddleware` class — see kernel
+  // `authz/oidc.middleware.ts`'s `createOidcMiddlewareHandler` doc for why
+  // `consumer.apply(OidcMiddleware)` fails with
+  // `UnknownDependenciesException` (Task 16d incident).
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(OidcMiddleware).forRoutes('*')
+    consumer.apply(createOidcMiddleware()).forRoutes('*')
   }
 }

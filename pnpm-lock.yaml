@@ -144,6 +144,9 @@ importers:
         specifier: ^7.8.1
         version: 7.8.2
     devDependencies:
+      '@nestjs/testing':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)(@nestjs/platform-express@11.1.28)
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.3
@@ -175,6 +178,9 @@ importers:
         specifier: ^7.8.1
         version: 7.8.2
     devDependencies:
+      '@nestjs/testing':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)(@nestjs/platform-express@11.1.28)
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.3
@@ -237,6 +243,9 @@ importers:
         specifier: ^7.8.1
         version: 7.8.2
     devDependencies:
+      '@nestjs/testing':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)(@nestjs/platform-express@11.1.28)
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.3
@@ -295,6 +304,9 @@ importers:
         specifier: ^7.8.1
         version: 7.8.2
     devDependencies:
+      '@nestjs/testing':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)(@nestjs/platform-express@11.1.28)
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.3
@@ -381,6 +393,9 @@ importers:
         specifier: ^7.8.1
         version: 7.8.2
     devDependencies:
+      '@nestjs/testing':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)(@nestjs/platform-express@11.1.28)
       '@types/nodemailer':
         specifier: ^6.4.16
         version: 6.4.24
@@ -508,6 +523,9 @@ importers:
         specifier: ^7.8.1
         version: 7.8.2
     devDependencies:
+      '@nestjs/testing':
+        specifier: ^11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)(@nestjs/platform-express@11.1.28)
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.3
@@ -1114,6 +1132,19 @@ packages:
     peerDependencies:
       '@nestjs/common': ^11.0.0
       '@nestjs/core': ^11.0.0
+
+  '@nestjs/testing@11.1.28':
+    resolution: {integrity: sha512-B+VgRxeLaH7jkOMgAyUP3N3rpFlisQ7JRxixRbgHvG6a0VgKbbkNSofKExexCgKmQQak80undb3+2kE1lUBmRQ==}
+    peerDependencies:
+      '@nestjs/common': ^11.0.0
+      '@nestjs/core': ^11.0.0
+      '@nestjs/microservices': ^11.0.0
+      '@nestjs/platform-express': ^11.0.0
+    peerDependenciesMeta:
+      '@nestjs/microservices':
+        optional: true
+      '@nestjs/platform-express':
+        optional: true
 
   '@nodable/entities@3.0.0':
     resolution: {integrity: sha512-8L9xFeTYKhm49xfIypoe2W5wV1m/3Z58kT+7kR9A8OyFxcPduI4VmxaUMQyKYrRjUoLLSXv6EKKID5Tvj9cUVw==}
@@ -4052,6 +4083,14 @@ snapshots:
       tslib: 2.8.1
     transitivePeerDependencies:
       - supports-color
+
+  '@nestjs/testing@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)(@nestjs/platform-express@11.1.28)':
+    dependencies:
+      '@nestjs/common': 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core': 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.28)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      tslib: 2.8.1
+    optionalDependencies:
+      '@nestjs/platform-express': 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
 
   '@nodable/entities@3.0.0': {}
 

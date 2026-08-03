@@ -20,6 +20,7 @@
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
+    "@nestjs/testing": "^11.1.28",
     "@types/nodemailer": "^6.4.16",
     "@types/pg": "^8.11.10"
   }

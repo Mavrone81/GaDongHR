@@ -2,7 +2,8 @@ import 'reflect-metadata'
 import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_GUARD } from '@nestjs/core'
-import { AuthzClient, OidcMiddleware, PermissionGuard, createPool } from '@gadong/kernel'
+import { AuthzClient, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
+import type { OidcMiddlewareHandler } from '@gadong/kernel'
 import type { AuthzTransport } from '@gadong/kernel'
 import { DB_POOL, TimesheetController } from './timesheet.controller'
 
@@ -40,8 +41,8 @@ function requiredEnv(name: string): string {
  * for the full story behind why this exists (Task 13c: a guard reading a
  * field nothing ever set makes every guarded route unreachable).
  */
-function createOidcMiddleware(): OidcMiddleware {
-  return new OidcMiddleware({
+function createOidcMiddleware(): OidcMiddlewareHandler {
+  return createOidcMiddlewareHandler({
     issuer: requiredEnv('OIDC_ISSUER'),
     audience: requiredEnv('OIDC_AUDIENCE'),
     jwksUri: requiredEnv('OIDC_JWKS_URI'),
@@ -65,7 +66,6 @@ function createOidcMiddleware(): OidcMiddleware {
   controllers: [TimesheetController],
   providers: [
     { provide: APP_GUARD, useClass: PermissionGuard },
-    { provide: OidcMiddleware, useFactory: createOidcMiddleware },
     {
       provide: AuthzClient,
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
@@ -81,7 +81,11 @@ function createOidcMiddleware(): OidcMiddleware {
   ],
 })
 export class AppModule implements NestModule {
+  // Functional middleware, not the `OidcMiddleware` class — see kernel
+  // `authz/oidc.middleware.ts`'s `createOidcMiddlewareHandler` doc for why
+  // `consumer.apply(OidcMiddleware)` fails with
+  // `UnknownDependenciesException` (Task 16d incident).
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(OidcMiddleware).forRoutes('*')
+    consumer.apply(createOidcMiddleware()).forRoutes('*')
   }
 }

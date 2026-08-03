@@ -399,3 +399,49 @@ export class OidcMiddleware implements NestMiddleware<OidcAuthenticatedRequest, 
     this.cache = { jwks: bounded, fetchedAt: now }
   }
 }
+
+/** The shape Nest's `MiddlewareConsumer.apply()` expects from a "functional middleware" — see `createOidcMiddlewareHandler`'s doc for why every service must register this, never the `OidcMiddleware` class itself. */
+export type OidcMiddlewareHandler = (req: OidcAuthenticatedRequest, res: unknown, next: () => void) => Promise<void>
+
+/**
+ * Root cause of the Task 16d incident (six services crash-looping with
+ * `UnknownDependenciesException [Error]: Nest can't resolve dependencies of
+ * the OidcMiddleware (?)`), confirmed by reading the installed
+ * `@nestjs/core@11.1.28` source rather than guessing:
+ *
+ * `MiddlewareConsumer.apply(OidcMiddleware)` (see `@nestjs/core`'s
+ * `middleware/builder.js`) hands the class itself to
+ * `MiddlewareContainer.insertConfig` (`middleware/container.js`), which
+ * builds a BRAND NEW `InstanceWrapper` from that metatype — `token:
+ * OidcMiddleware, metatype: OidcMiddleware` — with no `inject`/factory
+ * metadata at all. It never looks at the module's own `providers` array, so
+ * the `{ provide: OidcMiddleware, useFactory: createOidcMiddleware }`
+ * binding every affected `app.module.ts` registered was never consulted for
+ * middleware resolution — it only satisfies `OidcMiddleware` being injected
+ * as an ordinary constructor dependency elsewhere, which nothing here does.
+ * `Injector.loadMiddleware` (`injector/injector.js`) then resolves that
+ * wrapper's constructor dependencies from its class's design-time metadata
+ * — a single plain options object with no injectable type — and Nest can't
+ * resolve an argument it has no provider for, hence the exception.
+ *
+ * The fix is NestJS's own documented escape hatch: "functional middleware"
+ * — a plain function handed to `consumer.apply()` instead of a class. Nest
+ * recognises this (`middleware/utils.js`'s `isMiddlewareClass` returns
+ * `false` for it) and wraps it in a throwaway class with a NO-ARGUMENT
+ * constructor, so `Injector` never needs to resolve anything for it — the
+ * container is sidestepped entirely, which is exactly right for a
+ * dependency that is runtime configuration (`OIDC_ISSUER`/`OIDC_AUDIENCE`/
+ * `OIDC_JWKS_URI`), not a service the container should own the lifecycle
+ * of.
+ *
+ * `createOidcMiddlewareHandler` builds one `OidcMiddleware` instance up
+ * front from `options` (read from environment variables by each service's
+ * own `createOidcMiddleware()`, never hard-coded here) and returns its
+ * bound `use` method. Every security property of `OidcMiddleware.use` is
+ * unchanged — same instance, same method, just invoked without ever passing
+ * through Nest's DI container.
+ */
+export function createOidcMiddlewareHandler(options: OidcMiddlewareOptions): OidcMiddlewareHandler {
+  const middleware = new OidcMiddleware(options)
+  return (req, res, next) => middleware.use(req, res, next)
+}

@@ -2,7 +2,8 @@ import 'reflect-metadata'
 import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_GUARD } from '@nestjs/core'
-import { AuthzClient, OidcMiddleware, PermissionGuard, createPool } from '@gadong/kernel'
+import { AuthzClient, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
+import type { OidcMiddlewareHandler } from '@gadong/kernel'
 import type { AuthzTransport, Queryable } from '@gadong/kernel'
 import { DB_POOL, EntriesController } from './entries.controller'
 import { EntriesService } from './entries.service'
@@ -39,8 +40,8 @@ function requiredEnv(name: string): string {
  * but nothing ever set it — see `services/svc-config/src/app.module.ts`'s
  * `createOidcMiddleware` comment for the full story; identical wiring here.
  */
-function createOidcMiddleware(): OidcMiddleware {
-  return new OidcMiddleware({
+function createOidcMiddleware(): OidcMiddlewareHandler {
+  return createOidcMiddlewareHandler({
     issuer: requiredEnv('OIDC_ISSUER'),
     audience: requiredEnv('OIDC_AUDIENCE'),
     jwksUri: requiredEnv('OIDC_JWKS_URI'),
@@ -63,7 +64,6 @@ function createOidcMiddleware(): OidcMiddleware {
   controllers: [EntriesController],
   providers: [
     { provide: APP_GUARD, useClass: PermissionGuard },
-    { provide: OidcMiddleware, useFactory: createOidcMiddleware },
     {
       provide: AuthzClient,
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
@@ -88,7 +88,11 @@ function createOidcMiddleware(): OidcMiddleware {
   ],
 })
 export class AppModule implements NestModule {
+  // Functional middleware, not the `OidcMiddleware` class — see kernel
+  // `authz/oidc.middleware.ts`'s `createOidcMiddlewareHandler` doc for why
+  // `consumer.apply(OidcMiddleware)` fails with
+  // `UnknownDependenciesException` (Task 16d incident).
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(OidcMiddleware).forRoutes('*')
+    consumer.apply(createOidcMiddleware()).forRoutes('*')
   }
 }

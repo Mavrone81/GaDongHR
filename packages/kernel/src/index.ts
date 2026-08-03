@@ -24,9 +24,16 @@ export type { Decision, AuthzTransport, AuthzClientOptions } from './authz/clien
 export { AuthzClient, DECISION_CACHE_TTL_MS, DECISION_CACHE_MAX_ENTRIES, AUTHZ_DECIDE_TIMEOUT_MS } from './authz/client'
 export type { AuthenticatedRequest } from './authz/guard'
 export { RequirePermission, PermissionGuard, PERMISSION_METADATA_KEY } from './authz/guard'
-export type { OidcAuthenticatedRequest, OidcMiddlewareOptions, JwksFetcher, DebugLogger } from './authz/oidc.middleware'
+export type {
+  OidcAuthenticatedRequest,
+  OidcMiddlewareOptions,
+  OidcMiddlewareHandler,
+  JwksFetcher,
+  DebugLogger,
+} from './authz/oidc.middleware'
 export {
   OidcMiddleware,
+  createOidcMiddlewareHandler,
   createHttpJwksFetcher,
   OIDC_JWKS_CACHE_TTL_MS,
   OIDC_JWKS_REFRESH_DEBOUNCE_MS,
