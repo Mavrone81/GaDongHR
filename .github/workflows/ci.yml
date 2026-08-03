@@ -23,4 +23,105 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm test -- --ci
+      # Fixed (Task 15, pre-existing bug found while touching this file):
+      # was `pnpm test -- --ci`. The root `test` script is a chained
+      # command (`jest && pnpm --filter @gadong/web test:run`) — pnpm's
+      # extra-args mechanism appends `-- <args>` to the END of the whole
+      # resolved command line, not to each command in the chain, so `--ci`
+      # only ever reached the final `test:run`, never `jest`. That was
+      # always a no-op for Jest and, on the vitest version currently
+      # pinned, is a hard `CACError: Unknown option --ci` for vitest
+      # (vitest's CLI has no `--ci` flag). Plain `pnpm test` runs both
+      # suites correctly and is exactly what `pnpm test` does locally.
+      - run: pnpm test
+
+  # Task 15: build every service image (all fifteen services/* Dockerfiles)
+  # plus `web`, tag each with the commit sha and `main`, and push to GHCR.
+  # Only runs on a real push to main/phase-* (the top-level `on:` already
+  # restricts push's `branches:`, but `pull_request:` has no branch filter
+  # of its own, so this job's `if:` excludes pull_request events
+  # explicitly — nothing here may ever push an image built from
+  # unreviewed/unmerged PR code). Gated on `verify` passing first: no
+  # image is worth publishing from code that doesn't build, lint or test.
+  build-images:
+    needs: verify
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: svc-crypto, dockerfile: services/svc-crypto/Dockerfile }
+          - { name: svc-config, dockerfile: services/svc-config/Dockerfile }
+          - { name: svc-authz, dockerfile: services/svc-authz/Dockerfile }
+          - { name: svc-audit, dockerfile: services/svc-audit/Dockerfile }
+          - { name: svc-i18n, dockerfile: services/svc-i18n/Dockerfile }
+          - { name: svc-notify, dockerfile: services/svc-notify/Dockerfile }
+          - { name: svc-docs, dockerfile: services/svc-docs/Dockerfile }
+          - { name: svc-attendance, dockerfile: services/svc-attendance/Dockerfile }
+          - { name: svc-claims, dockerfile: services/svc-claims/Dockerfile }
+          - { name: svc-leave, dockerfile: services/svc-leave/Dockerfile }
+          - { name: svc-onboarding, dockerfile: services/svc-onboarding/Dockerfile }
+          - { name: svc-payroll, dockerfile: services/svc-payroll/Dockerfile }
+          - { name: svc-scheduler, dockerfile: services/svc-scheduler/Dockerfile }
+          - { name: svc-timesheet, dockerfile: services/svc-timesheet/Dockerfile }
+          - { name: retention-job, dockerfile: services/retention-job/Dockerfile }
+          - { name: web, dockerfile: web/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Build context is always the repo root — every Dockerfile above (the
+      # existing services/* pattern and the new web/Dockerfile) depends on
+      # the sibling `packages/kernel` workspace package and expects to be
+      # invoked exactly this way; see each Dockerfile's own header comment.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          build-args: |
+            GADONG_BUILD_SHA=${{ github.sha }}
+          tags: |
+            ghcr.io/mavrone81/gadonghr-${{ matrix.name }}:${{ github.sha }}
+            ghcr.io/mavrone81/gadonghr-${{ matrix.name }}:main
+          # Scoped per image — sixteen images from one pnpm monorepo share
+          # a lot of `pnpm install` layers, but a single unscoped cache key
+          # would let the last matrix leg to finish evict every other
+          # leg's cache. GitHub Actions cache (not registry cache), so no
+          # extra credentials beyond GITHUB_TOKEN are needed.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # Task 15: the marker whose existence IS the proof that every image
+  # `auto-deploy-gadonghr.sh` is about to pull actually exists in GHCR.
+  # `needs: [verify, build-images]` is what guarantees the ordering:
+  # `build-images` is a 16-leg matrix, and a `needs:` on the matrix job
+  # name only resolves to success once EVERY leg has succeeded (fail-fast
+  # is off precisely so a single failing leg doesn't hide the others, but
+  # it still means the whole `build-images` job — and therefore this
+  # job's dependency — fails if even one image failed to push). If any
+  # leg fails, this job does not run at all, so `refs/ci-pass/<sha>` is
+  # never written for a commit that is missing an image — which is
+  # exactly the failure auto-deploy-gadonghr.sh's `refs/ci-pass/<sha>`
+  # gate exists to prevent: it must never be possible for the marker to
+  # exist while a tag it implies is still missing from the registry.
+  mark-ci-pass:
+    needs: [verify, build-images]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write refs/ci-pass/<sha>
+        run: |
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
+            "${{ github.sha }}:refs/ci-pass/${{ github.sha }}"
