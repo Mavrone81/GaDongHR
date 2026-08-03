@@ -64,3 +64,21 @@ services:
     build: !reset null
     image: ghcr.io/mavrone81/gadonghr-svc-docs:${GADONG_BUILD_SHA:-latest}
     pull_policy: always
+
+  # Task 15c: deliberately its OWN `GADONG_VERSION` var, not
+  # `GADONG_BUILD_SHA` — the seven platform services above are pinned to
+  # the exact sha `auto-deploy-gadonghr.sh` just verified CI-passed
+  # (`export GADONG_BUILD_SHA="$remote_sha"` before `compose pull`), and
+  # that script's own `/health`-polling verification step
+  # (`VERIFY_SERVICES`) only checks those seven — `web` carries no such
+  # sha-in-`/health` proof to poll (web/Dockerfile's own header: "nothing
+  # asserts on it the way auto-deploy-gadonghr.sh does for the seven
+  # platform services"), so pinning it to `GADONG_BUILD_SHA` would imply a
+  # verification guarantee that does not exist for this image. Defaults to
+  # the floating `:main` tag, which CI's `build-images` matrix publishes on
+  # every push alongside the sha tag — confirmed pullable (task situation:
+  # "gadonghr-web:main returns HTTP 200").
+  web:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-web:${GADONG_VERSION:-main}
+    pull_policy: always

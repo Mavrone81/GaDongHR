@@ -16,7 +16,7 @@ cutover *from* the old droplet's IP, not a stale workaround.)
 
 | File | What |
 |---|---|
-| `docker-compose.yml` | Base stack. All 14 containers (7 platform services + traefik/postgres/rabbitmq/redis/minio/vault/keycloak), each with a `build:` (local/dev/CI use). |
+| `docker-compose.yml` | Base stack. All 15 containers (7 platform services + `web` + traefik/postgres/rabbitmq/redis/minio/vault/keycloak), each with a `build:` (local/dev/CI use). |
 | `docker-compose.prod.yml` | Production overlay: replaces every service's `build:` with a pinned `ghcr.io/mavrone81/gadonghr-<service>:<sha>` image and `pull_policy: always`. Never used alone — always `-f docker-compose.yml -f docker-compose.prod.yml`. |
 | `postgres/init/01-roles.sql` | Runs once, automatically, on a fresh `postgres` volume. Creates the 12 business-schema roles + `keycloak`, each owning exactly one schema. |
 | `vault/vault.hcl` | Vault server config (raft storage, no auto-unseal). **Read this file's header before doing anything else with Vault.** |
@@ -99,7 +99,7 @@ Task 15b delivered it.)
 
 ## Memory budget — the binding constraint
 
-4 GB total RAM. `mem_limit` is set explicitly on every one of the 14
+4 GB total RAM. `mem_limit` is set explicitly on every one of the 15
 containers (`compose-validation.test.ts` asserts this, plus that the sum
 leaves >= 512 MB for the OS — brief §1/§5). Actual committed total below
 leaves considerably more than the 512 MB floor, deliberately: 4 GB is
@@ -122,8 +122,9 @@ razor-thin even before Phase 3, and OOM-killing Postgres on a host with
 | `svc-audit` | 96 MB | Node/Nest + Postgres pool, append-only, low traffic. |
 | `svc-i18n` | 96 MB | Node/Nest, no DB — bundles held in memory but small (th/en/zh JSON). |
 | `redis` | 80 MB | `--maxmemory 64mb` caps Redis's own working set below this ceiling; provisioned ahead of use (see below). |
-| **Total committed** | **3,376 MB** | |
-| **OS headroom** | **4,096 − 3,376 = 720 MB** | Comfortably above the 512 MB floor. |
+| `web` | 64 MB | Task 15c: unprivileged nginx serving a static Vite bundle — no Node runtime, no DB pool, no in-memory cache. 64 MB is generous headroom over nginx's actual working set for this. |
+| **Total committed** | **3,440 MB** | 3,376 MB (Task 13) + 64 MB (`web`, Task 15c). |
+| **OS headroom** | **4,096 − 3,440 = 656 MB** | Still comfortably above the 512 MB floor. |
 
 `rabbitmq` and `redis` are provisioned because the brief requires them as
 standing infra, **not because any of the seven services currently use
@@ -137,9 +138,9 @@ lands, not tuned for load they don't yet carry.
 ### Before CompreFace arrives (Phase 3)
 
 CompreFace needs 2–3 GB by itself (roadmap's own "Open items" table).
-**This does not fit.** 3,376 MB already committed + a 2,000–3,000 MB
-CompreFace footprint is 5,376–6,376 MB against a 4,096 MB host — there is
-no trimming of the current 14 containers that closes a gap that size
+**This does not fit.** 3,440 MB already committed + a 2,000–3,000 MB
+CompreFace footprint is 5,440–6,440 MB against a 4,096 MB host — there is
+no trimming of the current 15 containers that closes a gap that size
 without cutting into Postgres or Keycloak, which is precisely what this
 budget exists to avoid. Two real options, to be decided before Phase 3
 starts (already flagged as an open item in
@@ -204,15 +205,83 @@ all — and the DB grant is the documented belt-and-suspenders on top of
 it, not the sole defence. See the long comment on `audit`'s block in
 `postgres/init/01-roles.sql` for the full detail.
 
-## Traefik routing in Phase 1
+## Traefik routing (Task 15c: `web` wired in)
 
-Only `keycloak` carries `traefik.enable=true` in this compose — the seven
-platform services are internal-only. There is no `web` PWA yet (Phase
-1.5) and Module services M1–M7 don't exist (this task's brief: "do not
-add them"), so nothing else in Phase 1 has an end-user-facing route to
-publish. `https://<PUBLIC_HOST>/` with no path prefix returns Traefik's
-own 404 until the web shell exists; `https://<PUBLIC_HOST>/auth` reaches
-Keycloak.
+Every one of the six externally-callable platform services now carries a
+router alongside `keycloak`; `svc-crypto` still does not (it has no route
+any browser is meant to call directly — Vault HTTP client only, called
+server-side by other services over the internal network). Routers are
+ordered by explicit `priority` label, not left to Traefik's default
+rule-length heuristic, because `compose-validation.test.ts` inspects the
+label values directly (`docker compose config` never invokes Traefik's
+routing engine, so there is no other way to assert the ordering that
+keeps `/api/*` from being swallowed by the PWA).
+
+| Router | Rule | Priority | Forwards to |
+|---|---|---:|---|
+| `web` | `Host(\`${PUBLIC_HOST}\`)` | 1 | `web:8080` (catch-all — must lose every match it shares with a router below) |
+| `kc` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/auth\`)` | *(default)* | `keycloak:8080` |
+| `svc-config` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/api/config\`)` | 100 | `svc-config:3000` (prefix stripped) |
+| `svc-authz` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/api/authz\`)` | 100 | `svc-authz:3000` (prefix stripped) |
+| `svc-audit` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/api/audit\`)` | 100 | `svc-audit:3000` (prefix stripped) |
+| `svc-i18n` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/api/i18n\`)` | 100 | `svc-i18n:3000` (prefix stripped) |
+| `svc-notify` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/api/notify\`)` | 100 | `svc-notify:3000` (prefix stripped) |
+| `svc-docs` | `Host(\`${PUBLIC_HOST}\`) && PathPrefix(\`/api/docs\`)` | 100 | `svc-docs:3000` (prefix stripped) |
+
+Every `/api/*` router carries a `stripprefix` middleware (e.g.
+`traefik.http.middlewares.svc-config-strip.stripprefix.prefixes=/api/config`)
+because each service's own NestJS routes are unprefixed — `rules.controller.ts`
+exposes `GET /rules`, not `GET /api/config/rules` — so the browser's
+same-origin call to `/api/config/rules` needs the `/api/config` segment
+removed before Traefik forwards it. `kc` needs no such middleware:
+Keycloak's own `--http-relative-path=/auth` already expects requests to
+arrive with `/auth` still attached.
+
+`https://<PUBLIC_HOST>/` now reaches `web`'s `index.html` (previously
+Traefik's own 404 — there was no `web` router at all before this task).
+`web/nginx.conf`'s `try_files $uri $uri/ /index.html` is what makes a
+direct load or hard refresh of a client-routed deep link (e.g.
+`/admin/statutory-rules`) return the SPA shell instead of a 404 — the
+Traefik router above only has to get out of the way of that path (by
+sitting at the lowest priority), not implement the fallback itself.
+
+**The published `gadonghr-web:main` image cannot serve real users as
+pushed today.** `web`'s `VITE_OIDC_ISSUER`, `VITE_OIDC_CLIENT_ID`,
+`VITE_OIDC_REDIRECT_URI`, `VITE_OIDC_AUDIENCE`, `VITE_SVC_CONFIG_URL`, and
+`VITE_SVC_I18N_URL` are read via `import.meta.env` and baked in at `vite
+build` time (`web/src/env.ts`), not at container start — and CI's
+`build-images` matrix (`.github/workflows/ci.yml`) passes only
+`GADONG_BUILD_SHA` as a build-arg to `web/Dockerfile`, none of the six
+`VITE_*` vars. Pulling and inspecting the actual published image confirms
+this empirically: its bundled JS contains no `localhost` string at all
+(so it does not merely point at the wrong host, as `web/.env.local.example`'s
+dev defaults might suggest) — every `VITE_*` var is genuinely undefined in
+the built bundle, so `env.ts`'s `required()` throws `missing required env
+var VITE_OIDC_ISSUER` (the first one read, from `svcI18n.ts`'s top-level
+`loadConfig()` call) during module evaluation, before React ever mounts.
+The image loads a blank page and throws immediately — not a
+misconfigured backend call, a hard crash before any UI renders.
+
+**CI must pass six additional `--build-arg`s to `web/Dockerfile`** (a
+change to `.github/workflows/ci.yml`, out of scope for this task — this
+task owns `deploy/` only), using same-origin relative paths for the two
+service URLs so the browser always talks to Traefik on whatever host it
+loaded from, never a hardcoded dev host:
+
+```
+VITE_OIDC_ISSUER=https://${PUBLIC_HOST}/auth/realms/gadonghr
+VITE_OIDC_CLIENT_ID=web
+VITE_OIDC_REDIRECT_URI=https://${PUBLIC_HOST}/auth/callback
+VITE_OIDC_AUDIENCE=gadonghr-services
+VITE_SVC_CONFIG_URL=/api/config
+VITE_SVC_I18N_URL=/api/i18n
+```
+
+Until CI is updated to pass these and a fresh image is published, `web`
+should still be deployed (it is a strict improvement — Traefik answering
+`/` with a crashing SPA shell is diagnosable in a way a bare 404 is not),
+but the owner will see a blank page / console error, not a working login
+screen.
 
 ## Validation
 

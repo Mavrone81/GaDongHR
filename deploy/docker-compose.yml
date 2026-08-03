@@ -294,6 +294,22 @@ services:
       svc-authz: { condition: service_healthy }
       keycloak: { condition: service_healthy }
     healthcheck: *http-health
+    # Task 15c: svc-config's own routes (rules.controller.ts) are
+    # unprefixed (`GET /rules`, not `GET /api/config/rules`) — the
+    # `-strip` middleware removes `/api/config` before Traefik forwards,
+    # so the browser's same-origin `/api/config/rules` call reaches this
+    # service's real `/rules` path unchanged. Priority 100 > `web`'s 1
+    # (docker-compose.yml's `web` service, below) so this PathPrefix rule
+    # is never shadowed by the PWA's catch-all Host() rule at the domain
+    # root — this is the ordering `compose-validation.test.ts` asserts.
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.svc-config.rule=Host(`${PUBLIC_HOST}`) && PathPrefix(`/api/config`)
+      - traefik.http.routers.svc-config.priority=100
+      - traefik.http.routers.svc-config.tls.certresolver=le
+      - traefik.http.routers.svc-config.middlewares=svc-config-strip
+      - traefik.http.middlewares.svc-config-strip.stripprefix.prefixes=/api/config
+      - traefik.http.services.svc-config.loadbalancer.server.port=3000
 
   svc-authz:
     build: { context: .., dockerfile: services/svc-authz/Dockerfile }
@@ -313,6 +329,15 @@ services:
       postgres: { condition: service_healthy }
       keycloak: { condition: service_healthy }
     healthcheck: *http-health
+    # Task 15c: same shape as svc-config above — see that block's comment.
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.svc-authz.rule=Host(`${PUBLIC_HOST}`) && PathPrefix(`/api/authz`)
+      - traefik.http.routers.svc-authz.priority=100
+      - traefik.http.routers.svc-authz.tls.certresolver=le
+      - traefik.http.routers.svc-authz.middlewares=svc-authz-strip
+      - traefik.http.middlewares.svc-authz-strip.stripprefix.prefixes=/api/authz
+      - traefik.http.services.svc-authz.loadbalancer.server.port=3000
 
   svc-audit:
     build: { context: .., dockerfile: services/svc-audit/Dockerfile }
@@ -329,6 +354,15 @@ services:
       svc-authz: { condition: service_healthy }
       keycloak: { condition: service_healthy }
     healthcheck: *http-health
+    # Task 15c: same shape as svc-config above — see that block's comment.
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.svc-audit.rule=Host(`${PUBLIC_HOST}`) && PathPrefix(`/api/audit`)
+      - traefik.http.routers.svc-audit.priority=100
+      - traefik.http.routers.svc-audit.tls.certresolver=le
+      - traefik.http.routers.svc-audit.middlewares=svc-audit-strip
+      - traefik.http.middlewares.svc-audit-strip.stripprefix.prefixes=/api/audit
+      - traefik.http.services.svc-audit.loadbalancer.server.port=3000
 
   svc-i18n:
     build: { context: .., dockerfile: services/svc-i18n/Dockerfile }
@@ -342,6 +376,18 @@ services:
     # design") — bundles are read off disk at boot, so this service has
     # no dependency to wait on.
     healthcheck: *http-health
+    # Task 15c: same shape as svc-config above — see that block's comment.
+    # `web`'s login screen fetches `/api/i18n/bundles/:locale` before any
+    # principal exists (bundles.controller.ts's own header), which is
+    # exactly why this router must resolve with no auth in front of it.
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.svc-i18n.rule=Host(`${PUBLIC_HOST}`) && PathPrefix(`/api/i18n`)
+      - traefik.http.routers.svc-i18n.priority=100
+      - traefik.http.routers.svc-i18n.tls.certresolver=le
+      - traefik.http.routers.svc-i18n.middlewares=svc-i18n-strip
+      - traefik.http.middlewares.svc-i18n-strip.stripprefix.prefixes=/api/i18n
+      - traefik.http.services.svc-i18n.loadbalancer.server.port=3000
 
   svc-notify:
     build: { context: .., dockerfile: services/svc-notify/Dockerfile }
@@ -365,6 +411,15 @@ services:
       svc-authz: { condition: service_healthy }
       keycloak: { condition: service_healthy }
     healthcheck: *http-health
+    # Task 15c: same shape as svc-config above — see that block's comment.
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.svc-notify.rule=Host(`${PUBLIC_HOST}`) && PathPrefix(`/api/notify`)
+      - traefik.http.routers.svc-notify.priority=100
+      - traefik.http.routers.svc-notify.tls.certresolver=le
+      - traefik.http.routers.svc-notify.middlewares=svc-notify-strip
+      - traefik.http.middlewares.svc-notify-strip.stripprefix.prefixes=/api/notify
+      - traefik.http.services.svc-notify.loadbalancer.server.port=3000
 
   svc-docs:
     build: { context: .., dockerfile: services/svc-docs/Dockerfile }
@@ -393,6 +448,52 @@ services:
       minio: { condition: service_healthy }
       keycloak: { condition: service_healthy }
     healthcheck: *http-health
+    # Task 15c: same shape as svc-config above — see that block's comment.
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.svc-docs.rule=Host(`${PUBLIC_HOST}`) && PathPrefix(`/api/docs`)
+      - traefik.http.routers.svc-docs.priority=100
+      - traefik.http.routers.svc-docs.tls.certresolver=le
+      - traefik.http.routers.svc-docs.middlewares=svc-docs-strip
+      - traefik.http.middlewares.svc-docs-strip.stripprefix.prefixes=/api/docs
+      - traefik.http.services.svc-docs.loadbalancer.server.port=3000
+
+  # ==================== PWA (Task 15c) ====================
+  # Static bundle served by unprivileged nginx on :8080 (web/Dockerfile,
+  # web/nginx.conf) — no `/health` endpoint (nothing to poll but the
+  # index page), no runtime env (VITE_* is baked in at `vite build` time,
+  # see web/src/env.ts). `Host(\`${PUBLIC_HOST}\`)` with NO PathPrefix is
+  # the catch-all at the domain root, so it MUST sit at a lower Traefik
+  # priority than every `/api/*` router above — priority 1 here vs 100 on
+  # every svc-* router — or the PWA's own router would swallow
+  # `/api/config`, `/api/authz`, etc. before they ever reach Traefik's
+  # `/api/*` routers (`compose-validation.test.ts` asserts this ordering
+  # explicitly, because that failure mode looks like "the UI loads but
+  # nothing on it works", not a visible outage). `web/nginx.conf`'s own
+  # `try_files $uri $uri/ /index.html` is what makes a direct/refreshed
+  # deep link like `/admin/statutory-rules` return the SPA shell instead
+  # of a 404 — this router only decides that Traefik hands the request to
+  # nginx at all; nginx's own `try_files` is what actually resolves the
+  # deep path once it gets there.
+  web:
+    build: { context: .., dockerfile: web/Dockerfile }
+    <<: *node-defaults
+    # nginx serving a static bundle — no Node runtime, no DB pool, no
+    # in-memory cache. 64m is generous headroom over nginx's actual
+    # working set for this.
+    mem_limit: 64m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.web.rule=Host(`${PUBLIC_HOST}`)
+      - traefik.http.routers.web.priority=1
+      - traefik.http.routers.web.tls.certresolver=le
+      - traefik.http.services.web.loadbalancer.server.port=8080
 
 networks:
   internal:

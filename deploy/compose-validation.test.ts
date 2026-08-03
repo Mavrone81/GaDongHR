@@ -23,6 +23,7 @@ interface ComposeService {
   healthcheck?: unknown
   build?: unknown
   image?: string
+  labels?: Record<string, string>
 }
 
 interface ComposeConfig {
@@ -56,12 +57,14 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
     config = runComposeConfig('docker-compose.yml', 'docker-compose.prod.yml')
   })
 
-  test('parses cleanly and defines at least the fourteen expected services', () => {
+  test('parses cleanly and defines at least the fifteen expected services', () => {
     const names = Object.keys(config.services).sort()
     // The seven platform services that actually exist (brief §1) plus the
     // seven required infra containers (brief: "Also required: traefik,
     // postgres:16, rabbitmq:3.13-management, redis:7, minio, vault:1.17,
-    // keycloak:26"). Module services M1-M7 must NOT appear.
+    // keycloak:26"), plus `web` (Task 15c: the PWA is now wired in so
+    // `hr.bevorasg.com` actually serves a UI). Module services M1-M7 must
+    // still NOT appear.
     const expected = [
       'keycloak',
       'minio',
@@ -77,6 +80,7 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
       'svc-notify',
       'traefik',
       'vault',
+      'web',
     ]
     expect(names).toEqual(expected)
   })
@@ -96,6 +100,18 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
         expect([name, ports]).toEqual([name, []])
       }
     }
+  })
+
+  // Task 15c: `web` is reachable only through Traefik, same as every
+  // other service in this file — it must NOT publish its own host port,
+  // and exactly one service (traefik) may publish any at all. This is a
+  // narrower, explicit restatement of the loop above, specifically so a
+  // future service (including `web`) that accidentally adds `ports:` is
+  // caught by name, not just by the generic loop.
+  test('exactly one service (traefik) publishes ports, and web does not', () => {
+    const publishers = Object.entries(config.services).filter(([, svc]) => (svc.ports ?? []).length > 0)
+    expect(publishers.map(([name]) => name)).toEqual(['traefik'])
+    expect(config.services.web?.ports ?? []).toEqual([])
   })
 
   test('every service declares a healthcheck', () => {
@@ -134,6 +150,59 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
       expect(svc?.build).toBeUndefined()
     }
   })
+
+  // Task 15c: `web` is the PWA that makes `hr.bevorasg.com` serve an
+  // actual UI. It must resolve to a real ghcr.io image (never `build:` in
+  // the prod merge, same contract as the seven platform services above),
+  // carry an explicit `mem_limit` (already proven non-zero by the
+  // memory-total test above, but asserted by name here so a future
+  // refactor of that loop can't silently stop covering `web`), and
+  // declare a healthcheck (it has no `/health` endpoint — see
+  // web/Dockerfile's header — so this is necessarily a plain HTTP probe
+  // of the index page, not the `x-http-health` anchor the Node services
+  // share, but it must still exist).
+  test('web resolves to a ghcr.io image, with an explicit mem_limit and a healthcheck', () => {
+    const web = config.services.web
+    expect(web).toBeDefined()
+    expect(web?.image).toMatch(/^ghcr\.io\/mavrone81\/gadonghr-web:/)
+    expect(web?.build).toBeUndefined()
+    expect(Number(web?.mem_limit ?? 0)).toBeGreaterThan(0)
+    expect(web?.healthcheck != null).toBe(true)
+  })
+
+  /**
+   * Task 15c: the assertion that stops the PWA swallowing `/api/*`. `web`
+   * is the catch-all `Host(\`${PUBLIC_HOST}\`)` router at the domain
+   * root — if it were ever evaluated before an API service's own
+   * `PathPrefix(\`/api/...\`)` router, every API call the browser makes
+   * would be served the SPA's `index.html` instead of JSON. That failure
+   * mode is silent at the container level (every container reports
+   * healthy — `web` IS correctly serving the domain root) and only shows
+   * up as "the UI loads but nothing on it ever loads" — exactly the
+   * regression this test exists to catch before it reaches
+   * `hr.bevorasg.com`.
+   */
+  test('every API service has a router priority higher than web’s', () => {
+    const routerPriority = (svc: ComposeService | undefined, router: string): number => {
+      const raw = svc?.labels?.[`traefik.http.routers.${router}.priority`]
+      expect(raw).toBeDefined()
+      return Number(raw)
+    }
+
+    const webPriority = routerPriority(config.services.web, 'web')
+
+    const apiServices = ['svc-config', 'svc-authz', 'svc-audit', 'svc-i18n', 'svc-notify', 'svc-docs']
+    for (const name of apiServices) {
+      const svc = config.services[name]
+      expect(svc).toBeDefined()
+      expect(svc?.labels?.['traefik.enable']).toBe('true')
+      const rule = svc?.labels?.[`traefik.http.routers.${name}.rule`]
+      expect(rule).toBeDefined()
+      expect(rule).toMatch(/PathPrefix/)
+      const priority = routerPriority(svc, name)
+      expect(priority).toBeGreaterThan(webPriority)
+    }
+  })
 })
 
 describe('deploy/docker-compose.yml alone (local/dev/CI-build shape)', () => {
@@ -154,6 +223,15 @@ describe('deploy/docker-compose.yml alone (local/dev/CI-build shape)', () => {
       expect(svc?.build).toBeDefined()
       expect(svc?.image).toBeUndefined()
     }
+  })
+
+  // Task 15c: web/Dockerfile, same local/dev/CI-build contract as the
+  // seven platform services above — never `image:` here, only in the
+  // prod overlay.
+  test('web builds from its own Dockerfile', () => {
+    const svc = config.services.web
+    expect(svc?.build).toBeDefined()
+    expect(svc?.image).toBeUndefined()
   })
 })
 
