@@ -98,14 +98,28 @@ exports.up = (pgm) => {
       // deletion SLA was met for this employee's template.
       template_deleted_at: { type: 'timestamptz' },
     },
-    {
-      constraints: {
-        enrollment_employee_id_key: { unique: ['employee_id'] },
-        enrollment_method_check: { check: "method IN ('face', 'pin', 'qr', 'badge')" },
-        enrollment_status_check: { check: "status IN ('active', 'suspended', 'deleted')" },
-      },
-    },
   )
+  // Task 16c fix: node-pg-migrate's `createTable` `constraints` option is
+  // keyed by CONSTRAINT KIND (`unique`/`check`/`primaryKey`/`foreignKeys`/
+  // `exclude`), not by a chosen name — `{ constraints: { enrollment_employee_id_key:
+  // { unique: [...] } } }` nests the name one level too deep, so
+  // node-pg-migrate's `parseConstraints` finds no recognised kind and
+  // silently creates nothing (Task 16c; confirmed live for the identical
+  // pattern in `svc-authz`). This service has never been deployed (not in
+  // `deploy/docker-compose.yml`/`docker-compose.prod.yml` — Phase 2/M4, not
+  // yet shipped), so the fix is an in-place edit here, not a new migration.
+  // `pgm.addConstraint` is used (rather than the valid inline `constraints:`
+  // shape) so the exact constraint names below match this file's own prior
+  // comments/tests/docs verbatim.
+  pgm.addConstraint({ schema: 'attendance', name: 'enrollment' }, 'enrollment_employee_id_key', {
+    unique: ['employee_id'],
+  })
+  pgm.addConstraint({ schema: 'attendance', name: 'enrollment' }, 'enrollment_method_check', {
+    check: "method IN ('face', 'pin', 'qr', 'badge')",
+  })
+  pgm.addConstraint({ schema: 'attendance', name: 'enrollment' }, 'enrollment_status_check', {
+    check: "status IN ('active', 'suspended', 'deleted')",
+  })
 
   pgm.sql(`COMMENT ON COLUMN attendance.enrollment.face_subject_ref IS
     'Opaque CompreFace subject id ONLY. This column must remain text and must NEVER become bytea or otherwise hold a face embedding -- GaDongHR never stores biometric templates (PDPA s.26; DATABASE-DESIGN.md section 2.2). The embedding itself lives only inside CompreFace''s own storage, referenced by this id.'`)
@@ -122,12 +136,10 @@ exports.up = (pgm) => {
       device_secret: { type: 'bytea', notNull: true },
       status: { type: 'text', notNull: true, default: 'active' },
     },
-    {
-      constraints: {
-        device_kind_check: { check: "kind IN ('kiosk', 'mobile')" },
-      },
-    },
   )
+  pgm.addConstraint({ schema: 'attendance', name: 'device' }, 'device_kind_check', {
+    check: "kind IN ('kiosk', 'mobile')",
+  })
   pgm.createIndex({ schema: 'attendance', name: 'device' }, ['site_code'])
 
   pgm.sql(`COMMENT ON COLUMN attendance.device.device_secret IS
@@ -162,14 +174,16 @@ exports.up = (pgm) => {
       // most punches (kiosk) never populate it.
       geo: { type: 'jsonb' },
     },
-    {
-      constraints: {
-        punch_event_idem_key_key: { unique: ['idem_key'] },
-        punch_event_direction_check: { check: "direction IN ('in', 'out')" },
-        punch_event_method_check: { check: "method IN ('face', 'pin', 'qr', 'badge', 'manual')" },
-      },
-    },
   )
+  pgm.addConstraint({ schema: 'attendance', name: 'punch_event' }, 'punch_event_idem_key_key', {
+    unique: ['idem_key'],
+  })
+  pgm.addConstraint({ schema: 'attendance', name: 'punch_event' }, 'punch_event_direction_check', {
+    check: "direction IN ('in', 'out')",
+  })
+  pgm.addConstraint({ schema: 'attendance', name: 'punch_event' }, 'punch_event_method_check', {
+    check: "method IN ('face', 'pin', 'qr', 'badge', 'manual')",
+  })
   pgm.createIndex({ schema: 'attendance', name: 'punch_event' }, ['employee_id', 'punched_at'])
   pgm.createIndex({ schema: 'attendance', name: 'punch_event' }, ['device_id'])
 

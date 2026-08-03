@@ -130,35 +130,59 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      // Deliberately NO foreign key to any other schema — `employee_id` is
-      // a plain uuid replicated via `employee.*` events, not a
-      // cross-schema `REFERENCES` (roadmap "Database conventions": "No
-      // foreign keys across schemas. No cross-schema queries."). Nor is
-      // there a `period_id` FK: DATABASE-DESIGN §2.3's `DAY_RECORD }o--||
-      // PERIOD : in` relationship is resolved by `work_date` falling
-      // inside `period.range`, not by a stored key — the ERD's own
-      // `DAY_RECORD` attribute block lists no `period_id` column.
-      constraints: {
-        // "One daily record per employee" (Task 14 brief, "WHY THIS
-        // SERVICE MATTERS") — the merge engine's whole job is to produce
-        // exactly one row per employee-day from punches+roster+leave.
-        day_record_employee_id_work_date_key: { unique: ['employee_id', 'work_date'] },
-        day_record_status_check: { check: "status IN ('ok', 'exception', 'corrected')" },
-        day_record_worked_hours_check: { check: 'worked_hours >= 0' },
-        day_record_late_min_check: { check: 'late_min >= 0' },
-        day_record_ot_15x_check: { check: 'ot_15x >= 0' },
-        day_record_ot_2x_check: { check: 'ot_2x >= 0' },
-        day_record_ot_3x_check: { check: 'ot_3x >= 0' },
-        // Physical invariant, not business logic: a punch-out cannot
-        // precede its punch-in. Both are full `timestamptz`, so this holds
-        // across a midnight-crossing shift without any date-only special
-        // case.
-        day_record_actual_out_after_in_check: {
-          check: 'actual_in IS NULL OR actual_out IS NULL OR actual_out > actual_in',
-        },
-      },
-    },
+  )
+  // Deliberately NO foreign key to any other schema — `employee_id` is a
+  // plain uuid replicated via `employee.*` events, not a cross-schema
+  // `REFERENCES` (roadmap "Database conventions": "No foreign keys across
+  // schemas. No cross-schema queries."). Nor is there a `period_id` FK:
+  // DATABASE-DESIGN §2.3's `DAY_RECORD }o--|| PERIOD : in` relationship is
+  // resolved by `work_date` falling inside `period.range`, not by a stored
+  // key — the ERD's own `DAY_RECORD` attribute block lists no `period_id`
+  // column.
+  //
+  // Task 16c fix: node-pg-migrate's `createTable` `constraints` option is
+  // keyed by CONSTRAINT KIND, not by a chosen name — the previous shape
+  // nested each name one level too deep, so node-pg-migrate's
+  // `parseConstraints` found no recognised kind and silently created
+  // nothing. This service has never been deployed, so the fix is an
+  // in-place edit; `pgm.addConstraint` is used so each name matches this
+  // file's own prior comments/tests verbatim.
+  //
+  // "One daily record per employee" (Task 14 brief, "WHY THIS SERVICE
+  // MATTERS") — the merge engine's whole job is to produce exactly one row
+  // per employee-day from punches+roster+leave.
+  pgm.addConstraint(
+    { schema: 'timesheet', name: 'day_record' },
+    'day_record_employee_id_work_date_key',
+    { unique: ['employee_id', 'work_date'] },
+  )
+  pgm.addConstraint({ schema: 'timesheet', name: 'day_record' }, 'day_record_status_check', {
+    check: "status IN ('ok', 'exception', 'corrected')",
+  })
+  pgm.addConstraint(
+    { schema: 'timesheet', name: 'day_record' },
+    'day_record_worked_hours_check',
+    { check: 'worked_hours >= 0' },
+  )
+  pgm.addConstraint({ schema: 'timesheet', name: 'day_record' }, 'day_record_late_min_check', {
+    check: 'late_min >= 0',
+  })
+  pgm.addConstraint({ schema: 'timesheet', name: 'day_record' }, 'day_record_ot_15x_check', {
+    check: 'ot_15x >= 0',
+  })
+  pgm.addConstraint({ schema: 'timesheet', name: 'day_record' }, 'day_record_ot_2x_check', {
+    check: 'ot_2x >= 0',
+  })
+  pgm.addConstraint({ schema: 'timesheet', name: 'day_record' }, 'day_record_ot_3x_check', {
+    check: 'ot_3x >= 0',
+  })
+  // Physical invariant, not business logic: a punch-out cannot precede its
+  // punch-in. Both are full `timestamptz`, so this holds across a
+  // midnight-crossing shift without any date-only special case.
+  pgm.addConstraint(
+    { schema: 'timesheet', name: 'day_record' },
+    'day_record_actual_out_after_in_check',
+    { check: 'actual_in IS NULL OR actual_out IS NULL OR actual_out > actual_in' },
   )
   // Backs `GET /my/days?from&to`, `GET /teams/{orgUnit}/days?from&to` and
   // `GET /days/{employeeId}?from&to` (M3-TIMESHEET.md API #1-3) and the
@@ -190,15 +214,11 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        // M3-TIMESHEET.md §1.1's anomaly list.
-        time_exception_kind_check: {
-          check: "kind IN ('missed_punch', 'late', 'absence', 'unapproved_ot')",
-        },
-      },
-    },
   )
+  // M3-TIMESHEET.md §1.1's anomaly list.
+  pgm.addConstraint({ schema: 'timesheet', name: 'time_exception' }, 'time_exception_kind_check', {
+    check: "kind IN ('missed_punch', 'late', 'absence', 'unapproved_ot')",
+  })
   // Backs `GET /exceptions?status&org_unit` (M3-TIMESHEET.md API #4).
   pgm.createIndex({ schema: 'timesheet', name: 'time_exception' }, ['day_record_id'])
 
@@ -214,13 +234,13 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        period_status_check: { check: "status IN ('open', 'locked')" },
-        period_lock_version_check: { check: 'lock_version >= 0' },
-      },
-    },
   )
+  pgm.addConstraint({ schema: 'timesheet', name: 'period' }, 'period_status_check', {
+    check: "status IN ('open', 'locked')",
+  })
+  pgm.addConstraint({ schema: 'timesheet', name: 'period' }, 'period_lock_version_check', {
+    check: 'lock_version >= 0',
+  })
   pgm.createIndex({ schema: 'timesheet', name: 'period' }, ['status'])
 
   // Fix round 1 (coordinator review, 2026-08-02): a plain `UNIQUE (range)`
@@ -271,16 +291,16 @@ exports.up = (pgm) => {
       status: { type: 'text', notNull: true },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        timesheet_employee_ref_employment_type_check: {
-          check: "employment_type IN ('monthly', 'daily', 'hourly', 'contract')",
-        },
-        timesheet_employee_ref_status_check: {
-          check: "status IN ('onboarding', 'active', 'terminated')",
-        },
-      },
-    },
+  )
+  pgm.addConstraint(
+    { schema: 'timesheet', name: 'timesheet_employee_ref' },
+    'timesheet_employee_ref_employment_type_check',
+    { check: "employment_type IN ('monthly', 'daily', 'hourly', 'contract')" },
+  )
+  pgm.addConstraint(
+    { schema: 'timesheet', name: 'timesheet_employee_ref' },
+    'timesheet_employee_ref_status_check',
+    { check: "status IN ('onboarding', 'active', 'terminated')" },
   )
 
   pgm.createTable(

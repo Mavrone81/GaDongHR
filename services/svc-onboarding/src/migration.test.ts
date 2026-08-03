@@ -1,5 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import RealMigrationBuilderImpl from 'node-pg-migrate/dist/migrationBuilder'
+import type { DB, Logger, MigrationBuilder } from 'node-pg-migrate/dist/types'
 
 /**
  * Proves the migration's real shape directly — no database available in
@@ -58,6 +60,21 @@ interface RecordedTable {
 }
 
 /**
+ * (Task 16c) A `pgm.addConstraint(table, constraintName, spec)` call — the
+ * migration's fix for node-pg-migrate silently ignoring a name-keyed
+ * `constraints:` option passed to `createTable` itself. Recorded separately
+ * from `RecordedTable.options.constraints` (which node-pg-migrate's
+ * `createTable` no longer receives at all post-fix) so tests can assert a
+ * constraint was actually declared the way the migration now declares it.
+ */
+interface RecordedConstraint {
+  schema: string
+  name: string
+  constraintName: string
+  spec: ConstraintDef
+}
+
+/**
  * The subset of node-pg-migrate's real `MigrationBuilder` API this
  * migration actually calls (`up`'s only calls are `createSchema`,
  * `createTable`, `createIndex`, `func`, and `dropSchema` in `down`) —
@@ -70,6 +87,7 @@ interface FakePgm {
   dropSchema(name: string, opts?: { cascade?: boolean; ifExists?: boolean }): void
   createTable(nameSpec: TableNameSpec | string, columns: Columns, opts?: CreateTableOptions): void
   createIndex(nameSpec: TableNameSpec | string, columns: string[] | string, opts?: unknown): void
+  addConstraint(nameSpec: TableNameSpec | string, constraintName: string, spec: ConstraintDef): void
   func(expr: string): { __pgmFunc: string }
   sql(query: string): void
 }
@@ -96,9 +114,15 @@ function loadMigrationModule(): MigrationModule {
   return mod as MigrationModule
 }
 
-function recordingPgm(): { pgm: FakePgm; tables: RecordedTable[]; schemasCreated: Array<{ name: string; opts?: { ifNotExists?: boolean } }> } {
+function recordingPgm(): {
+  pgm: FakePgm
+  tables: RecordedTable[]
+  schemasCreated: Array<{ name: string; opts?: { ifNotExists?: boolean } }>
+  constraints: RecordedConstraint[]
+} {
   const tables: RecordedTable[] = []
   const schemasCreated: Array<{ name: string; opts?: { ifNotExists?: boolean } }> = []
+  const constraints: RecordedConstraint[] = []
   const pgm: FakePgm = {
     createSchema: (name, opts) => {
       schemasCreated.push({ name, opts })
@@ -109,10 +133,14 @@ function recordingPgm(): { pgm: FakePgm; tables: RecordedTable[]; schemasCreated
       tables.push({ schema, name, columns, options: opts })
     },
     createIndex: () => undefined,
+    addConstraint: (nameSpec, constraintName, spec) => {
+      const { schema, name } = typeof nameSpec === 'string' ? { schema: 'public', name: nameSpec } : nameSpec
+      constraints.push({ schema, name, constraintName, spec })
+    },
     func: (expr) => ({ __pgmFunc: expr }),
     sql: () => undefined,
   }
-  return { pgm, tables, schemasCreated }
+  return { pgm, tables, schemasCreated, constraints }
 }
 
 function findTable(tables: RecordedTable[], name: string): RecordedTable {
@@ -130,10 +158,14 @@ function column(table: RecordedTable, name: string): ColumnDef {
 describe('onboarding schema migration', () => {
   const migration = loadMigrationModule()
 
-  function run(): { tables: RecordedTable[]; schemasCreated: Array<{ name: string; opts?: { ifNotExists?: boolean } }> } {
-    const { pgm, tables, schemasCreated } = recordingPgm()
+  function run(): {
+    tables: RecordedTable[]
+    schemasCreated: Array<{ name: string; opts?: { ifNotExists?: boolean } }>
+    constraints: RecordedConstraint[]
+  } {
+    const { pgm, tables, schemasCreated, constraints } = recordingPgm()
     migration.up(pgm)
-    return { tables, schemasCreated }
+    return { tables, schemasCreated, constraints }
   }
 
   it('applies cleanly against a recording fake — up() runs with no exception', () => {
@@ -222,12 +254,26 @@ describe('onboarding schema migration', () => {
     })
   })
 
+  /**
+   * Task 16c: this used to read `employee.options?.constraints` directly —
+   * the raw `createTable` options object — and scan `Object.values()` for
+   * one whose `.unique` array includes `national_id_bidx`. That check
+   * would have PASSED even against the original bug: the migration used to
+   * declare `{ constraints: { employee_national_id_bidx_key: { unique: [...] } } }`,
+   * and `Object.values()` finds the `{ unique: [...] }` value regardless of
+   * what key it's nested under — even though node-pg-migrate's own
+   * `parseConstraints` only recognises `unique` as a TOP-LEVEL key of
+   * `constraints`, not nested one level deeper. The fix moves this
+   * constraint out of `createTable`'s options entirely into a
+   * `pgm.addConstraint` call, which this test now checks directly.
+   */
   it('national_id_bidx is bytea and UNIQUE — the actual mechanism behind ONB-002 (duplicate national ID blocked)', () => {
-    const { tables } = run()
+    const { tables, constraints } = run()
     const employee = findTable(tables, 'employee')
     expect(column(employee, 'national_id_bidx').type).toBe('bytea')
-    const constraints = employee.options?.constraints ?? {}
-    const uniqueOnBidx = Object.values(constraints).some((c) => c.unique?.includes('national_id_bidx'))
+    const uniqueOnBidx = constraints.some(
+      (c) => c.name === 'employee' && c.constraintName === 'employee_national_id_bidx_key' && c.spec.unique?.includes('national_id_bidx'),
+    )
     expect(uniqueOnBidx).toBe(true)
   })
 
@@ -282,5 +328,98 @@ describe('onboarding schema migration', () => {
     expect(column(doc, 'id').primaryKey).toBe(true)
     expect(column(doc, 'id').type).toBe('uuid')
     expect(column(doc, 'uploaded_at').type).toBe('timestamptz')
+  })
+})
+
+describe('onboarding schema migration — every remaining constraint is actually created by node-pg-migrate (Task 16c)', () => {
+  /**
+   * Goes one step further than the recording `FakePgm` above: runs the
+   * migration through node-pg-migrate's REAL `MigrationBuilderImpl` (the
+   * same class `Migration.apply()` constructs internally) and confirms the
+   * `addConstraint` calls actually produce the SQL Postgres would run.
+   */
+  const unreachableDb: DB = {
+    query: () => {
+      throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+    },
+    select: () => {
+      throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+    },
+  }
+  const silentLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} }
+
+  function buildRealSql(): string {
+    const pgm = new RealMigrationBuilderImpl(unreachableDb, undefined, false, silentLogger)
+    const migration = loadMigrationModule()
+    ;(migration.up as unknown as (pgm: MigrationBuilder) => void)(pgm)
+    return pgm.getSql()
+  }
+
+  it('position_code_key: UNIQUE (code)', () => {
+    const sql = buildRealSql()
+    expect(sql).toMatch(/ADD CONSTRAINT "position_code_key" UNIQUE \("code"\);/)
+  })
+
+  it('employee_emp_code_key, employee_employment_type_check, employee_status_check, employee_preferred_lang_check', () => {
+    const sql = buildRealSql()
+    expect(sql).toMatch(/ADD CONSTRAINT "employee_emp_code_key" UNIQUE \("emp_code"\);/)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "employee_employment_type_check" CHECK \(employment_type IN \('monthly', 'daily', 'hourly', 'contract'\)\);/,
+    )
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "employee_status_check" CHECK \(status IN \('draft', 'onboarding', 'active', 'cancelled', 'terminated'\)\);/,
+    )
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "employee_preferred_lang_check" CHECK \(preferred_lang IN \('th', 'en', 'zh'\)\);/,
+    )
+  })
+
+  it('employee_document_status_check', () => {
+    const sql = buildRealSql()
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "employee_document_status_check" CHECK \(status IN \('pending', 'verified', 'rejected'\)\);/,
+    )
+  })
+
+  it('consent_form_purpose_lang_version_key, consent_form_lang_check', () => {
+    const sql = buildRealSql()
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "consent_form_purpose_lang_version_key" UNIQUE \("purpose", "lang", "version"\);/,
+    )
+    expect(sql).toMatch(/ADD CONSTRAINT "consent_form_lang_check" CHECK \(lang IN \('th', 'en', 'zh'\)\);/)
+  })
+
+  it('consent_record_state_check', () => {
+    const sql = buildRealSql()
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "consent_record_state_check" CHECK \(state IN \('granted', 'refused', 'withdrawn'\)\);/,
+    )
+  })
+
+  it('probation_employee_id_key, probation_outcome_check', () => {
+    const sql = buildRealSql()
+    expect(sql).toMatch(/ADD CONSTRAINT "probation_employee_id_key" UNIQUE \("employee_id"\);/)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "probation_outcome_check" CHECK \(outcome IS NULL OR outcome IN \('confirm', 'extend', 'terminate'\)\);/,
+    )
+  })
+
+  /**
+   * Regression proof, kept executable: reconstructs the exact broken
+   * options object every one of onboarding's twelve constraints (Task 16c)
+   * used to be declared with, and proves node-pg-migrate's real
+   * `parseConstraints` produces nothing from it.
+   */
+  it('the OLD { constraints: { <name>: { unique/check: ... } } } shape produces no constraint at all', () => {
+    const pgm = new RealMigrationBuilderImpl(unreachableDb, undefined, false, silentLogger)
+    pgm.createTable(
+      { schema: 'onboarding', name: 'position_regression_check' },
+      { code: { type: 'text', notNull: true } },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberately reconstructing the exact malformed (not TableOptions-shaped) options object the original defect used.
+      { constraints: { position_code_key: { unique: ['code'] } } } as any,
+    )
+    const sql = pgm.getSql()
+    expect(sql).not.toMatch(/UNIQUE/)
+    expect(sql).not.toMatch(/position_code_key/)
   })
 })

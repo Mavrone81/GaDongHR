@@ -80,15 +80,24 @@ exports.up = (pgm) => {
       effective_from: { type: 'date', notNull: true },
       effective_to: { type: 'date' },
     },
-    {
-      constraints: {
-        // Effective-dated like every other rule in this system (Task 14
-        // brief) — mirrors `config.statutory_rule`'s UNIQUE(rule_key,
-        // effective_from): a data class can be re-legislated with a new
-        // effective_from row, never silently overwritten in place.
-        policy_data_class_effective_from_key: { unique: ['data_class', 'effective_from'] },
-      },
-    },
+  )
+  // Task 16c fix: node-pg-migrate's `createTable` `constraints` option is
+  // keyed by CONSTRAINT KIND, not by a chosen name — the previous
+  // `{ constraints: { policy_data_class_effective_from_key: { unique: [...] } } }`
+  // nested the name one level too deep, so node-pg-migrate's
+  // `parseConstraints` found no recognised kind and silently created
+  // nothing. This service has never been deployed, so the fix is an
+  // in-place edit; `pgm.addConstraint` is used so the name matches this
+  // file's own prior comments/tests verbatim.
+  //
+  // Effective-dated like every other rule in this system (Task 14 brief) —
+  // mirrors `config.statutory_rule`'s UNIQUE(rule_key, effective_from): a
+  // data class can be re-legislated with a new effective_from row, never
+  // silently overwritten in place.
+  pgm.addConstraint(
+    { schema: 'retention', name: 'policy' },
+    'policy_data_class_effective_from_key',
+    { unique: ['data_class', 'effective_from'] },
   )
   pgm.createIndex({ schema: 'retention', name: 'policy' }, ['data_class'])
 
@@ -122,20 +131,20 @@ exports.up = (pgm) => {
       // Why a candidate was skipped, never silent (Task 14 brief, rule 1).
       legal_hold_reason: { type: 'text' },
     },
+  )
+  pgm.addConstraint({ schema: 'retention', name: 'candidate' }, 'candidate_status_check', {
+    check:
+      "status IN ('identified', 'awaiting_review', 'approved', 'erased', 'blocked_legal_hold', 'blocked_conflict')",
+  })
+  // The DPO-approval gate as a DB-level guarantee, not just an application
+  // convention (Task 14 brief, rule 2 — "must never move to erased without
+  // passing through review").
+  pgm.addConstraint(
+    { schema: 'retention', name: 'candidate' },
+    'candidate_erased_requires_review_check',
     {
-      constraints: {
-        candidate_status_check: {
-          check:
-            "status IN ('identified', 'awaiting_review', 'approved', 'erased', 'blocked_legal_hold', 'blocked_conflict')",
-        },
-        // The DPO-approval gate as a DB-level guarantee, not just an
-        // application convention (Task 14 brief, rule 2 — "must never move
-        // to erased without passing through review").
-        candidate_erased_requires_review_check: {
-          check:
-            "status <> 'erased' OR (reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL AND erased_at IS NOT NULL)",
-        },
-      },
+      check:
+        "status <> 'erased' OR (reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL AND erased_at IS NOT NULL)",
     },
   )
   pgm.createIndex({ schema: 'retention', name: 'candidate' }, ['policy_id'])
@@ -152,12 +161,10 @@ exports.up = (pgm) => {
       candidates_erased: { type: 'integer', notNull: true, default: 0 },
       status: { type: 'text', notNull: true, default: 'running' },
     },
-    {
-      constraints: {
-        run_status_check: { check: "status IN ('running', 'completed', 'failed')" },
-      },
-    },
   )
+  pgm.addConstraint({ schema: 'retention', name: 'run' }, 'run_status_check', {
+    check: "status IN ('running', 'completed', 'failed')",
+  })
   pgm.createIndex({ schema: 'retention', name: 'run' }, ['started_at'])
 
   // `event_id PK` — without it dedupe silently degrades to a no-op (roadmap "Database conventions").

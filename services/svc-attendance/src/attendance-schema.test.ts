@@ -1,15 +1,17 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import MigrationBuilderImpl from 'node-pg-migrate/dist/migrationBuilder'
+import type { DB, Logger, MigrationBuilder } from 'node-pg-migrate/dist/types'
 
 /**
  * Proves the migration's SQL shape directly — no database available in
  * this environment (Task 14 brief CONSTRAINTS, matching Tasks 7/8/9's
- * precedent). Two assertion strategies are used, matching the brief's
- * "assert against the migration's generated SQL or a fake":
+ * precedent). Three assertion strategies are used:
  *
  *  1. Regex assertions against the migration file's own source text
  *     (`migrationSource()`), the same technique `services/svc-audit`'s
- *     `migration.test.ts` established.
+ *     `migration.test.ts` established — used only for column-shape
+ *     assertions (types, presence), never for constraint existence (see 3).
  *  2. A structural run of `exports.up` against a minimal fake
  *     `MigrationBuilder` (`FakePgm`) that records every builder call it
  *     receives — this proves the migration function is a deterministic,
@@ -17,6 +19,22 @@ import { join } from 'node:path'
  *     re-running it safe; real re-run idempotency for an *already applied*
  *     migration is `node-pg-migrate`'s job via its `pgmigrations` ledger,
  *     which `src/main.ts` wires exactly as `services/svc-config` does).
+ *  3. (Task 16c) Constraint-existence assertions run the migration against
+ *     node-pg-migrate's REAL `MigrationBuilderImpl` — the same class
+ *     `Migration.apply()` constructs internally
+ *     (`node_modules/node-pg-migrate/dist/migration.js`) — and inspect the
+ *     actual generated SQL. This is the test-gap fix Task 16c's brief
+ *     requires: a regex against source text cannot distinguish
+ *     node-pg-migrate's valid `constraints: { unique: [...] }` shape from
+ *     the invalid `constraints: { someName: { unique: [...] } } }` shape
+ *     that silently creates nothing — both "look like" a constraint
+ *     declaration to a text scanner. Only running the options object
+ *     through node-pg-migrate's own `parseConstraints`
+ *     (`dist/operations/tables/shared.js`) reveals the difference. Every
+ *     `unique`/`check` constraint assertion in this file uses strategy 3, not
+ *     1 — this file used to assert against source text alone (regex 1) for
+ *     these, which is exactly how the original `{ constraints: { <name>: {
+ *     unique: [...] } } }` bug shipped undetected.
  *
  * The single most important suite here is "no column in this schema can
  * hold a face embedding" — it is the test that keeps a biometric template
@@ -83,9 +101,50 @@ class FakePgm {
     this.calls.push({ method: 'dropSchema', args })
   }
 
+  addConstraint(...args: unknown[]): void {
+    this.calls.push({ method: 'addConstraint', args })
+  }
+
   /** node-pg-migrate's `pgm.func(expr)` wraps a raw SQL expression (e.g. `now()`) so it isn't quoted as a string literal default — here it's just an identity tag, sufficient for structural comparison. */
   func(expr: string): { __rawSqlFunc: string } {
     return { __rawSqlFunc: expr }
+  }
+}
+
+/**
+ * `MigrationBuilderImpl`'s constructor only touches `db` to hand
+ * `pgm.db.query`/`pgm.db.select` through to a migration that calls them
+ * directly — this migration never does, so a `db` that throws if ever
+ * actually invoked is a safe, honest stand-in for "no Postgres in this
+ * environment".
+ */
+const unreachableDb: DB = {
+  query: () => {
+    throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+  },
+  select: () => {
+    throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+  },
+}
+
+const silentLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} }
+
+/** Runs `action` against a real node-pg-migrate `MigrationBuilder` and returns the exact SQL it would emit — see file header, strategy 3. */
+function buildSql(action: (pgm: MigrationBuilder) => void): string {
+  const pgm = new MigrationBuilderImpl(unreachableDb, undefined, false, silentLogger)
+  action(pgm)
+  return pgm.getSql()
+}
+
+/** Loads the migration typed against the real `MigrationBuilder`, for use with `buildSql`. */
+function loadRealMigration(): { up: (pgm: MigrationBuilder) => void; down: (pgm: MigrationBuilder) => void } {
+  const files = migrationFiles()
+  const attendanceSchemaFile = files.find((f) => f.includes('attendance-schema'))
+  if (attendanceSchemaFile === undefined) throw new Error('no *attendance-schema*.js migration file found')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- node-pg-migrate migrations are CommonJS files loaded by the runner the same way; this test loads the same artifact.
+  return require(join(MIGRATIONS_DIR, attendanceSchemaFile)) as {
+    up: (pgm: MigrationBuilder) => void
+    down: (pgm: MigrationBuilder) => void
   }
 }
 
@@ -164,43 +223,59 @@ describe('attendance schema migration — no column can hold a face embedding', 
 })
 
 describe('attendance schema migration — idem_key uniqueness (offline kiosk replay protection)', () => {
-  it('punch_event has a UNIQUE constraint on idem_key', () => {
-    const source = migrationSource()
-    expect(source).toMatch(/punch_event_idem_key_key:\s*\{\s*unique:\s*\['idem_key'\]\s*\}/)
+  /**
+   * Task 16c: runs the migration through node-pg-migrate's REAL
+   * `MigrationBuilder` (not a source-text regex — see file header, strategy
+   * 3) and asserts the generated SQL actually contains the constraint. This
+   * is the assertion that would have caught the original
+   * `{ constraints: { punch_event_idem_key_key: { unique: [...] } } } }` bug
+   * — that shape passed the old source-regex test (it "looks like" a
+   * constraint) while node-pg-migrate silently created nothing from it.
+   */
+  it('punch_event has a UNIQUE constraint on idem_key, actually created by node-pg-migrate', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(/ADD CONSTRAINT "punch_event_idem_key_key" UNIQUE \("idem_key"\);/)
   })
 
   /**
-   * Demonstrates the assertion above is load-bearing, not decorative: with
-   * the constraint text removed from the source, the same regex fails.
-   * This is the "fails when removed" proof the Task 14 brief asks for,
-   * run inline against a mutated copy of the real source rather than the
-   * file on disk (so a stray CI run can never see a mutated migration).
+   * Regression proof, kept executable rather than a one-off manual run:
+   * reconstructs the exact broken options object this file used before
+   * Task 16c's fix and proves it produces no UNIQUE constraint at all —
+   * demonstrating the assertion above really is load-bearing.
    */
-  it('the same assertion FAILS if the idem_key UNIQUE constraint is removed from the source', () => {
-    const source = migrationSource()
-    const withConstraintRemoved = source.replace(
-      /punch_event_idem_key_key:\s*\{\s*unique:\s*\['idem_key'\]\s*\},?\n?/,
-      '',
-    )
-    expect(withConstraintRemoved).not.toEqual(source) // the replace actually matched something
-    expect(withConstraintRemoved).not.toMatch(/punch_event_idem_key_key:\s*\{\s*unique:\s*\['idem_key'\]\s*\}/)
+  it('the OLD { constraints: { punch_event_idem_key_key: { unique: [...] } } } shape produces no UNIQUE constraint', () => {
+    const sql = buildSql((pgm) => {
+      pgm.createTable(
+        { schema: 'attendance', name: 'punch_event_regression_check' },
+        { idem_key: { type: 'text', notNull: true } },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberately reconstructing the exact malformed (not TableOptions-shaped) options object the original defect used.
+        { constraints: { punch_event_idem_key_key: { unique: ['idem_key'] } } } as any,
+      )
+    })
+    expect(sql).not.toMatch(/UNIQUE/)
+    expect(sql).not.toMatch(/punch_event_idem_key_key/)
   })
 })
 
 describe('attendance schema migration — enrollment.employee_id UNIQUE (one enrolment per person)', () => {
-  it('enrollment has a UNIQUE constraint on employee_id', () => {
-    const source = migrationSource()
-    expect(source).toMatch(/enrollment_employee_id_key:\s*\{\s*unique:\s*\['employee_id'\]\s*\}/)
+  it('enrollment has a UNIQUE constraint on employee_id, actually created by node-pg-migrate', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(/ADD CONSTRAINT "enrollment_employee_id_key" UNIQUE \("employee_id"\);/)
   })
 
-  it('the same assertion FAILS if the employee_id UNIQUE constraint is removed from the source', () => {
-    const source = migrationSource()
-    const withConstraintRemoved = source.replace(
-      /enrollment_employee_id_key:\s*\{\s*unique:\s*\['employee_id'\]\s*\},?\n?/,
-      '',
-    )
-    expect(withConstraintRemoved).not.toEqual(source)
-    expect(withConstraintRemoved).not.toMatch(/enrollment_employee_id_key:\s*\{\s*unique:\s*\['employee_id'\]\s*\}/)
+  it('the OLD { constraints: { enrollment_employee_id_key: { unique: [...] } } } shape produces no UNIQUE constraint', () => {
+    const sql = buildSql((pgm) => {
+      pgm.createTable(
+        { schema: 'attendance', name: 'enrollment_regression_check' },
+        { employee_id: { type: 'uuid', notNull: true } },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberately reconstructing the exact malformed (not TableOptions-shaped) options object the original defect used.
+        { constraints: { enrollment_employee_id_key: { unique: ['employee_id'] } } } as any,
+      )
+    })
+    expect(sql).not.toMatch(/UNIQUE/)
+    expect(sql).not.toMatch(/enrollment_employee_id_key/)
   })
 })
 

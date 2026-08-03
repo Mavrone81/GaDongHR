@@ -90,16 +90,23 @@ exports.up = (pgm) => {
       // no statutory floor in `config.statutory_rule` to bind to.
       statutory_rule_key: { type: 'text' },
     },
-    {
-      constraints: {
-        leave_type_code_key: { unique: ['code'] },
-        leave_type_pay_mode_check: { check: "pay_mode IN ('full', 'half', 'unpaid', 'per_rule')" },
-        leave_type_accrual_mode_check: {
-          check: "accrual_mode IN ('annual_grant', 'monthly', 'anniversary')",
-        },
-      },
-    },
   )
+  // Task 16c fix: node-pg-migrate's `createTable` `constraints` option is
+  // keyed by CONSTRAINT KIND, not by a chosen name — the previous shape
+  // nested each name one level too deep, so node-pg-migrate's
+  // `parseConstraints` found no recognised kind and silently created
+  // nothing. This service has never been deployed, so the fix is an
+  // in-place edit; `pgm.addConstraint` is used so each name matches this
+  // file's own prior comments verbatim.
+  pgm.addConstraint({ schema: 'leave', name: 'leave_type' }, 'leave_type_code_key', {
+    unique: ['code'],
+  })
+  pgm.addConstraint({ schema: 'leave', name: 'leave_type' }, 'leave_type_pay_mode_check', {
+    check: "pay_mode IN ('full', 'half', 'unpaid', 'per_rule')",
+  })
+  pgm.addConstraint({ schema: 'leave', name: 'leave_type' }, 'leave_type_accrual_mode_check', {
+    check: "accrual_mode IN ('annual_grant', 'monthly', 'anniversary')",
+  })
 
   pgm.sql(`COMMENT ON COLUMN leave.leave_type.statutory_rule_key IS
     'Binds this leave type to its floor in config.statutory_rule(rule_key). NULLABLE ON PURPOSE, not an oversight: company-defined leave types (e.g. a bespoke study_leave) have no statutory floor to bind to and must be creatable with this column left null.'`)
@@ -123,14 +130,14 @@ exports.up = (pgm) => {
       carried_over: { type: 'numeric', notNull: true, default: 0 },
       year: { type: 'integer', notNull: true },
     },
-    {
-      constraints: {
-        // One balance row per employee/type/year — the natural key this
-        // table models (DATABASE-DESIGN.md §2.4's `LEAVE_TYPE ||--o{
-        // LEAVE_BALANCE : accrues`, one balance per accrual period).
-        leave_balance_employee_type_year_key: { unique: ['employee_id', 'leave_type_id', 'year'] },
-      },
-    },
+  )
+  // One balance row per employee/type/year — the natural key this table
+  // models (DATABASE-DESIGN.md §2.4's `LEAVE_TYPE ||--o{ LEAVE_BALANCE :
+  // accrues`, one balance per accrual period).
+  pgm.addConstraint(
+    { schema: 'leave', name: 'leave_balance' },
+    'leave_balance_employee_type_year_key',
+    { unique: ['employee_id', 'leave_type_id', 'year'] },
   )
   pgm.createIndex({ schema: 'leave', name: 'leave_balance' }, ['employee_id', 'year'])
 
@@ -159,14 +166,10 @@ exports.up = (pgm) => {
       attachment_ref: { type: 'bytea' },
       status: { type: 'text', notNull: true, default: 'pending' },
     },
-    {
-      constraints: {
-        leave_request_status_check: {
-          check: "status IN ('pending', 'approved', 'rejected', 'cancelled')",
-        },
-      },
-    },
   )
+  pgm.addConstraint({ schema: 'leave', name: 'leave_request' }, 'leave_request_status_check', {
+    check: "status IN ('pending', 'approved', 'rejected', 'cancelled')",
+  })
   pgm.createIndex({ schema: 'leave', name: 'leave_request' }, ['employee_id'])
   pgm.createIndex({ schema: 'leave', name: 'leave_request' }, ['leave_type_id'])
 
@@ -188,14 +191,10 @@ exports.up = (pgm) => {
       decision: { type: 'text' },
       comment: { type: 'text' },
     },
-    {
-      constraints: {
-        approval_step_decision_check: {
-          check: "decision IS NULL OR decision IN ('approved', 'rejected')",
-        },
-      },
-    },
   )
+  pgm.addConstraint({ schema: 'leave', name: 'approval_step' }, 'approval_step_decision_check', {
+    check: "decision IS NULL OR decision IN ('approved', 'rejected')",
+  })
   pgm.createIndex({ schema: 'leave', name: 'approval_step' }, ['subject_id', 'level'])
 
   // Read model fed by `employee.*` events (DATABASE-DESIGN.md §1) — no

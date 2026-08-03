@@ -1,15 +1,18 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import MigrationBuilderImpl from 'node-pg-migrate/dist/migrationBuilder'
+import type { DB, Logger, MigrationBuilder } from 'node-pg-migrate/dist/types'
 
 /**
  * Proves the migration's SQL shape directly — no database available in
  * this environment (Task 14 brief CONSTRAINTS, matching Tasks 7/8/9/14's
- * precedent). Two assertion strategies, matching the brief's "assert
- * against the migration's generated SQL or a fake":
+ * precedent). Three assertion strategies:
  *
  *  1. Regex assertions against the migration file's own source text
  *     (`migrationSource()`), the same technique
- *     `services/svc-attendance/src/attendance-schema.test.ts` established.
+ *     `services/svc-attendance/src/attendance-schema.test.ts` established —
+ *     used only for column-shape assertions, never for constraint
+ *     existence (see 3).
  *  2. A structural run of `exports.up` against a minimal fake
  *     `MigrationBuilder` (`FakePgm`) that records every builder call it
  *     receives — proves the migration function is a deterministic,
@@ -17,10 +20,20 @@ import { join } from 'node:path'
  *     re-running it safe; real re-run idempotency for an *already applied*
  *     migration is `node-pg-migrate`'s job via its `pgmigrations` ledger,
  *     which `src/main.ts` wires exactly as `services/svc-config` does).
+ *  3. (Task 16c) Constraint-existence assertions run the migration against
+ *     node-pg-migrate's REAL `MigrationBuilderImpl` — the same class
+ *     `Migration.apply()` constructs internally — and inspect the actual
+ *     generated SQL. `payroll_run_sod_check` used to be asserted by a
+ *     source-text regex, which cannot tell the difference between
+ *     node-pg-migrate's valid `constraints: { check: ... }` shape and the
+ *     invalid `constraints: { payroll_run_sod_check: { check: ... } } }`
+ *     shape this migration actually used (Task 16c) — both "look like" a
+ *     constraint to a text scanner, but only the former is ever created.
  *
  * The two most important suites here are the ones proving the schema's two
  * legal controls: segregation of duties (`payroll_run_sod_check`) and
- * committed-run immutability (the two `BEFORE UPDATE OR DELETE` triggers).
+ * committed-run immutability (the two `BEFORE UPDATE OR DELETE` triggers,
+ * raw SQL via `pgm.sql(...)` and never affected by the constraints bug).
  * Both are demonstrated failing when their source is removed — the brief's
  * "demonstrate it fails when removed".
  */
@@ -50,6 +63,35 @@ function loadMigration(): PayrollMigrationModule {
   if (payrollSchemaFile === undefined) throw new Error('no *payroll-schema*.js migration file found')
   // eslint-disable-next-line @typescript-eslint/no-require-imports -- node-pg-migrate migrations are CommonJS files loaded by the runner the same way; this test loads the same artifact.
   return require(join(MIGRATIONS_DIR, payrollSchemaFile)) as PayrollMigrationModule
+}
+
+function loadRealMigration(): { up: (pgm: MigrationBuilder) => void; down: (pgm: MigrationBuilder) => void } {
+  const files = migrationFiles()
+  const payrollSchemaFile = files.find((f) => f.includes('payroll-schema'))
+  if (payrollSchemaFile === undefined) throw new Error('no *payroll-schema*.js migration file found')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- node-pg-migrate migrations are CommonJS files loaded by the runner the same way; this test loads the same artifact.
+  return require(join(MIGRATIONS_DIR, payrollSchemaFile)) as {
+    up: (pgm: MigrationBuilder) => void
+    down: (pgm: MigrationBuilder) => void
+  }
+}
+
+const unreachableDb: DB = {
+  query: () => {
+    throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+  },
+  select: () => {
+    throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+  },
+}
+
+const silentLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} }
+
+/** Runs `action` against a real node-pg-migrate `MigrationBuilder` and returns the exact SQL it would emit — see file header, strategy 3. */
+function buildSql(action: (pgm: MigrationBuilder) => void): string {
+  const pgm = new MigrationBuilderImpl(unreachableDb, undefined, false, silentLogger)
+  action(pgm)
+  return pgm.getSql()
 }
 
 /** Every builder call `exports.up`/`exports.down` in this migration actually issues, recorded in call order. */
@@ -84,6 +126,10 @@ class FakePgm {
 
   dropSchema(...args: unknown[]): void {
     this.calls.push({ method: 'dropSchema', args })
+  }
+
+  addConstraint(...args: unknown[]): void {
+    this.calls.push({ method: 'addConstraint', args })
   }
 
   /** node-pg-migrate's `pgm.func(expr)` wraps a raw SQL expression (e.g. `now()`) so it isn't quoted as a string literal default — here it's just an identity tag, sufficient for structural comparison. */
@@ -236,10 +282,21 @@ describe('payroll schema migration — every money column is bytea, enumerated e
 })
 
 describe('payroll schema migration — segregation of duties (payroll_run_sod_check)', () => {
-  it('the CHECK constraint exists, matching the Task 14 brief verbatim', () => {
-    const source = migrationSource()
-    expect(source).toMatch(
-      /payroll_run_sod_check:\s*\{\s*check:\s*'approved_by IS NULL OR approved_by <> prepared_by',?\s*\}/,
+  /**
+   * Task 16c: this used to be a source-text regex against
+   * `payroll_run_sod_check:\s*\{\s*check:...` — the exact
+   * `{ constraints: { payroll_run_sod_check: { check: ... } } }` shape
+   * node-pg-migrate's `parseConstraints` silently ignores (the name is
+   * nested one level inside `options.constraints` instead of being a
+   * recognised kind), so the old regex passed while the constraint itself
+   * never existed. This now runs the migration through node-pg-migrate's
+   * REAL `MigrationBuilderImpl` and inspects the actual generated SQL.
+   */
+  it('the CHECK constraint exists, matching the Task 14 brief verbatim, actually created by node-pg-migrate', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "payroll_run_sod_check" CHECK \(approved_by IS NULL OR approved_by <> prepared_by\);/,
     )
   })
 
@@ -259,16 +316,29 @@ describe('payroll schema migration — segregation of duties (payroll_run_sod_ch
     expect(columnMatch?.[0]).not.toMatch(/notNull:\s*true/)
   })
 
-  it('DEMONSTRATION: the SoD check assertion FAILS if the constraint is removed from the source', () => {
-    const source = migrationSource()
-    const withConstraintRemoved = source.replace(
-      /payroll_run_sod_check:\s*\{\s*check:\s*'approved_by IS NULL OR approved_by <> prepared_by',?\s*\},?\n?/,
-      '',
-    )
-    expect(withConstraintRemoved).not.toEqual(source) // the replace actually matched something
-    expect(withConstraintRemoved).not.toMatch(
-      /payroll_run_sod_check:\s*\{\s*check:\s*'approved_by IS NULL OR approved_by <> prepared_by',?\s*\}/,
-    )
+  /**
+   * Regression proof, kept executable rather than a one-off manual run:
+   * reconstructs the exact broken options object this constraint used to
+   * be declared with before Task 16c's fix, and proves node-pg-migrate's
+   * real `parseConstraints` produces no CHECK constraint from it at all —
+   * this is the "fails against the old shape" demonstration the Task 16c
+   * brief asks for.
+   */
+  it('the OLD { constraints: { payroll_run_sod_check: { check: ... } } } shape produces no CHECK constraint', () => {
+    const sql = buildSql((pgm) => {
+      pgm.createTable(
+        { schema: 'payroll', name: 'payroll_run_regression_check' },
+        { prepared_by: { type: 'uuid', notNull: true }, approved_by: { type: 'uuid' } },
+        {
+          constraints: {
+            payroll_run_sod_check: { check: 'approved_by IS NULL OR approved_by <> prepared_by' },
+          },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberately reconstructing the exact malformed (not TableOptions-shaped) options object the original defect used.
+        } as any,
+      )
+    })
+    expect(sql).not.toMatch(/CHECK/)
+    expect(sql).not.toMatch(/payroll_run_sod_check/)
   })
 })
 
@@ -441,5 +511,41 @@ describe('payroll schema migration — every DATABASE-DESIGN.md §2.5 column is 
     for (const column of ['run_id', 'kind', 'file_ref', 'status']) {
       expect(source).toMatch(new RegExp(`\\b${column}\\s*:`))
     }
+  })
+})
+
+describe('payroll schema migration — every remaining constraint is actually created by node-pg-migrate (Task 16c)', () => {
+  it('pay_profile_employee_id_key, pay_profile_pay_basis_check', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(/ADD CONSTRAINT "pay_profile_employee_id_key" UNIQUE \("employee_id"\);/)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "pay_profile_pay_basis_check" CHECK \(pay_basis IN \('monthly', 'daily', 'hourly'\)\);/,
+    )
+  })
+
+  it('payroll_run_run_type_check, payroll_run_status_check, payroll_run_timesheet_lock_version_check', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "payroll_run_run_type_check" CHECK \(run_type IN \('regular', 'offcycle', 'adjustment', 'final_pay'\)\);/,
+    )
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "payroll_run_status_check" CHECK \(status IN \('draft', 'calculated', 'reviewed', 'approved', 'committed'\)\);/,
+    )
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "payroll_run_timesheet_lock_version_check" CHECK \(timesheet_lock_version >= 0\);/,
+    )
+  })
+
+  it('statutory_export_kind_check, statutory_export_status_check', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "statutory_export_kind_check" CHECK \(kind IN \('sso_1_10', 'pnd1', 'bank_csv', 'pnd1kor', '50bis', 'kor_ror_11'\)\);/,
+    )
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "statutory_export_status_check" CHECK \(status IN \('generated', 'downloaded'\)\);/,
+    )
   })
 })

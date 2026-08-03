@@ -1,5 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import MigrationBuilderImpl from 'node-pg-migrate/dist/migrationBuilder'
+import type { DB, Logger, MigrationBuilder } from 'node-pg-migrate/dist/types'
 
 /**
  * Proves 1754700100000_payroll-child-immutability.js's fix — coordinator
@@ -82,10 +84,37 @@ describe('payroll child-immutability migration — applies cleanly and determini
 })
 
 describe('payroll child-immutability migration — unchanged: SoD check, bytea columns, timesheet_lock_version, the original two triggers', () => {
-  it('payroll_run_sod_check is untouched', () => {
-    const source = migrationSource()
-    expect(source).toMatch(
-      /payroll_run_sod_check:\s*\{\s*check:\s*'approved_by IS NULL OR approved_by <> prepared_by',?\s*\}/,
+  /**
+   * Task 16c: this used to be a source-text regex, which cannot tell
+   * node-pg-migrate's valid `constraints: { check: ... }` shape apart from
+   * the invalid, silently-ignored `constraints: { payroll_run_sod_check: {
+   * check: ... } } }` shape the parent migration actually used — see
+   * `payroll-schema.test.ts` for the full explanation and the fix (a
+   * `pgm.addConstraint` call). This test now runs the PARENT migration
+   * (`payroll-schema.js`, unchanged by this file) through node-pg-migrate's
+   * REAL `MigrationBuilderImpl` and confirms the SoD check the Task 14
+   * brief requires is still actually created, unaffected by this file's own
+   * additions.
+   */
+  it('payroll_run_sod_check is untouched — still actually created by node-pg-migrate', () => {
+    const files = migrationFiles()
+    const parentFile = files.find((f) => f.includes('payroll-schema'))
+    if (parentFile === undefined) throw new Error('no *payroll-schema*.js migration file found')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- node-pg-migrate migrations are CommonJS files loaded by the runner the same way; this test loads the same artifact.
+    const parentMigration = require(join(MIGRATIONS_DIR, parentFile)) as { up: (pgm: MigrationBuilder) => void }
+    const unreachableDb: DB = {
+      query: () => {
+        throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+      },
+      select: () => {
+        throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+      },
+    }
+    const silentLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} }
+    const pgm = new MigrationBuilderImpl(unreachableDb, undefined, false, silentLogger)
+    parentMigration.up(pgm)
+    expect(pgm.getSql()).toMatch(
+      /ADD CONSTRAINT "payroll_run_sod_check" CHECK \(approved_by IS NULL OR approved_by <> prepared_by\);/,
     )
   })
 

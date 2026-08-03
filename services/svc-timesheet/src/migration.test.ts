@@ -1,5 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import RealMigrationBuilderImpl from 'node-pg-migrate/dist/migrationBuilder'
+import type { DB, Logger, MigrationBuilder } from 'node-pg-migrate/dist/types'
 
 /**
  * Proves the `timesheet` schema migration's shape directly — no database
@@ -64,12 +66,29 @@ interface CreateSchemaCall {
  * can tell "this default came from `pgm.func(...)`" apart from a literal
  * JS value (e.g. `0`) without needing a real Postgres function evaluator.
  */
+interface AddConstraintCall {
+  schema: string
+  name: string
+  constraintName: string
+  spec: Record<string, unknown>
+}
+
 class FakePgmRecorder {
   readonly schemas: CreateSchemaCall[] = []
   readonly tables: CreateTableCall[] = []
   readonly indexes: Array<{ schema: string; name: string; columns: string[]; options: Record<string, unknown> }> = []
   readonly extensions: Array<{ name: string; options: Record<string, unknown> }> = []
   readonly sqlStatements: string[] = []
+  /**
+   * (Task 16c) `pgm.addConstraint(table, constraintName, spec)` calls —
+   * the migration's fix for node-pg-migrate silently ignoring a
+   * name-keyed `constraints:` option on `createTable` itself. Recorded
+   * separately from `tables[].options['constraints']` (which is now
+   * always `undefined` — the fix moved every constraint out of
+   * `createTable`'s options entirely) so tests can assert a constraint was
+   * actually declared, the way node-pg-migrate itself would see it.
+   */
+  readonly constraints: AddConstraintCall[] = []
   private readonly existingSchemas = new Set<string>()
   private readonly existingTables = new Set<string>()
 
@@ -119,6 +138,19 @@ class FakePgmRecorder {
   dropSchema(_name: string, _options?: Record<string, unknown>): void {
     void _name
     void _options
+  }
+
+  addConstraint(
+    ident: { schema: string; name: string },
+    constraintName: string,
+    spec: Record<string, unknown>,
+  ): void {
+    this.constraints.push({ schema: ident.schema, name: ident.name, constraintName, spec })
+  }
+
+  dropConstraint(_ident: { schema: string; name: string }, _constraintName: string): void {
+    void _ident
+    void _constraintName
   }
 }
 
@@ -250,14 +282,32 @@ describe('timesheet schema migration — day_record', () => {
     expect(dayRecordBlock).not.toMatch(/references\s*:/i)
   })
 
-  it('enforces one row per employee per day via a UNIQUE(employee_id, work_date) constraint', () => {
+  /**
+   * Task 16c: this used to read `dayRecord.options['constraints']` directly
+   * — the raw options object node-pg-migrate's `createTable` was (still is)
+   * given. That worked as a *structural* check of intent, but it could not
+   * tell the difference between node-pg-migrate's valid
+   * `constraints: { unique: [...] }` shape and the invalid
+   * `constraints: { day_record_employee_id_work_date_key: { unique: [...] } } }`
+   * shape this migration actually used to declare — `Object.values()` finds
+   * the `{ unique: [...] }` value either way, even though node-pg-migrate's
+   * own `parseConstraints` only recognises the former. The fix moves the
+   * constraint out of `createTable` entirely into a `pgm.addConstraint`
+   * call, which this recorder now captures separately (`recorder.constraints`).
+   */
+  it('enforces one row per employee per day via a UNIQUE(employee_id, work_date) constraint, added via pgm.addConstraint', () => {
     const recorder = new FakePgmRecorder()
     loadMigration().up(recorder)
-    const dayRecord = table(recorder, 'day_record')
-    const constraints = dayRecord.options['constraints'] as Record<string, { unique?: string[] }> | undefined
+    table(recorder, 'day_record') // sanity: the table itself still exists
 
-    const uniqueConstraint = Object.values(constraints ?? {}).find(
-      (c) => Array.isArray(c.unique) && c.unique.includes('employee_id') && c.unique.includes('work_date'),
+    const uniqueConstraint = recorder.constraints.find(
+      (c) =>
+        c.schema === 'timesheet' &&
+        c.name === 'day_record' &&
+        c.constraintName === 'day_record_employee_id_work_date_key' &&
+        Array.isArray(c.spec['unique']) &&
+        (c.spec['unique'] as string[]).includes('employee_id') &&
+        (c.spec['unique'] as string[]).includes('work_date'),
     )
     expect(uniqueConstraint).toBeDefined()
   })
@@ -304,12 +354,17 @@ describe('timesheet schema migration — period', () => {
     expect(excludeStatement).toMatch(/EXCLUDE USING gist\s*\(\s*range\s+WITH\s+&&\s*\)/i)
 
     // The old guard must be gone, not merely supplemented: no `unique`
-    // naming `range` anywhere in `period`'s structured constraints.
-    const period = table(recorder, 'period')
-    const constraints = period.options['constraints'] as Record<string, { unique?: string[] | string }> | undefined
-    const rangeUnique = Object.values(constraints ?? {}).find((c) => {
-      const cols = Array.isArray(c.unique) ? c.unique : c.unique !== undefined ? [c.unique] : []
-      return cols.includes('range')
+    // naming `range` anywhere in `period`'s constraints — checked against
+    // the recorded `pgm.addConstraint` calls (Task 16c: `period`'s other
+    // constraints, `period_status_check`/`period_lock_version_check`, moved
+    // out of `createTable`'s options into `addConstraint` calls; `range`'s
+    // guard was never in `createTable`'s options to begin with — it is the
+    // raw-SQL EXCLUDE statement asserted above).
+    table(recorder, 'period') // sanity: the table itself still exists
+    const rangeUnique = recorder.constraints.find((c) => {
+      const spec = c.spec['unique']
+      const cols = Array.isArray(spec) ? spec : spec !== undefined ? [spec] : []
+      return c.name === 'period' && cols.includes('range')
     })
     expect(rangeUnique).toBeUndefined()
   })
@@ -413,5 +468,78 @@ describe('timesheet schema migration — no foreign keys leave the schema anywhe
     for (const block of referenceBlocks) {
       expect(block).toMatch(/schema:\s*'timesheet'/)
     }
+  })
+})
+
+describe('timesheet schema migration — every remaining constraint is actually created by node-pg-migrate (Task 16c)', () => {
+  /**
+   * The `FakePgmRecorder` above proves the RIGHT `addConstraint` call is
+   * issued with the right arguments; this block goes one step further and
+   * runs the migration through node-pg-migrate's REAL
+   * `MigrationBuilderImpl` (the same class `Migration.apply()` constructs
+   * internally) to confirm those calls actually produce the SQL Postgres
+   * would run.
+   */
+  const unreachableDb: DB = {
+    query: () => {
+      throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+    },
+    select: () => {
+      throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+    },
+  }
+  const silentLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} }
+
+  function buildRealSql(): string {
+    const pgm = new RealMigrationBuilderImpl(unreachableDb, undefined, false, silentLogger)
+    // `MigrationModule.up` is typed against `FakePgmRecorder` for the rest of
+    // this file's tests, but at runtime it only ever calls methods
+    // (`createTable`/`addConstraint`/`createIndex`/`sql`/`createSchema`/
+    // `createExtension`/`func`) that the real `MigrationBuilder` also
+    // implements — this cast is safe for exactly that reason.
+    ;(loadMigration().up as unknown as (pgm: MigrationBuilder) => void)(pgm)
+    return pgm.getSql()
+  }
+
+  it('day_record: employee_id_work_date_key, status_check, worked_hours/late_min/ot_15x/ot_2x/ot_3x checks, actual_out_after_in_check', () => {
+    const sql = buildRealSql()
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "day_record_employee_id_work_date_key" UNIQUE \("employee_id", "work_date"\);/,
+    )
+    expect(sql).toMatch(/ADD CONSTRAINT "day_record_status_check" CHECK \(status IN \('ok', 'exception', 'corrected'\)\);/)
+    for (const col of ['worked_hours', 'late_min', 'ot_15x', 'ot_2x', 'ot_3x']) {
+      expect(sql).toMatch(new RegExp(`ADD CONSTRAINT "day_record_${col}_check" CHECK \\(${col} >= 0\\);`))
+    }
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "day_record_actual_out_after_in_check" CHECK \(actual_in IS NULL OR actual_out IS NULL OR actual_out > actual_in\);/,
+    )
+  })
+
+  it('time_exception_kind_check', () => {
+    const sql = buildRealSql()
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "time_exception_kind_check" CHECK \(kind IN \('missed_punch', 'late', 'absence', 'unapproved_ot'\)\);/,
+    )
+  })
+
+  it('period_status_check / period_lock_version_check', () => {
+    const sql = buildRealSql()
+    expect(sql).toMatch(/ADD CONSTRAINT "period_status_check" CHECK \(status IN \('open', 'locked'\)\);/)
+    expect(sql).toMatch(/ADD CONSTRAINT "period_lock_version_check" CHECK \(lock_version >= 0\);/)
+  })
+
+  it('timesheet_employee_ref_employment_type_check / timesheet_employee_ref_status_check', () => {
+    const sql = buildRealSql()
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "timesheet_employee_ref_employment_type_check" CHECK \(employment_type IN \('monthly', 'daily', 'hourly', 'contract'\)\);/,
+    )
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "timesheet_employee_ref_status_check" CHECK \(status IN \('onboarding', 'active', 'terminated'\)\);/,
+    )
+  })
+
+  it('the period_no_overlap EXCLUDE constraint (raw SQL, never affected by this bug) is still present in the real generated SQL', () => {
+    const sql = buildRealSql()
+    expect(sql).toMatch(/ADD CONSTRAINT\s+period_no_overlap\s+EXCLUDE USING gist \(range WITH &&\);/)
   })
 })

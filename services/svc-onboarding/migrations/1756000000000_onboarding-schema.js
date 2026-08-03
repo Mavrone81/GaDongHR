@@ -105,8 +105,17 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    { constraints: { position_code_key: { unique: ['code'] } } },
   )
+  // Task 16c fix: node-pg-migrate's `createTable` `constraints` option is
+  // keyed by CONSTRAINT KIND, not by a chosen name — the previous
+  // `{ constraints: { position_code_key: { unique: [...] } } }` nested the
+  // name one level too deep, so node-pg-migrate's `parseConstraints` found
+  // no recognised kind and silently created nothing. This service has never
+  // been deployed, so the fix is an in-place edit; `pgm.addConstraint` is
+  // used so each name matches this file's own prior comments verbatim.
+  pgm.addConstraint({ schema: 'onboarding', name: 'position' }, 'position_code_key', {
+    unique: ['code'],
+  })
   pgm.createIndex({ schema: 'onboarding', name: 'position' }, ['org_unit_id'])
 
   // --- EMPLOYEE — DATABASE-DESIGN §2.1, every 🔐 column is bytea ---
@@ -159,32 +168,37 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        employee_emp_code_key: { unique: ['emp_code'] },
-        // The actual M1-1 acceptance criterion ("a duplicate national ID is
-        // blocked") lives here, not in application code — a second INSERT
-        // whose bidx collides with an existing row's is rejected by
-        // Postgres itself, even if `EmployeeService` (Phase 2) had a bug.
-        employee_national_id_bidx_key: { unique: ['national_id_bidx'] },
-        employee_employment_type_check: {
-          check: "employment_type IN ('monthly', 'daily', 'hourly', 'contract')",
-        },
-        // Full lifecycle vocabulary per M1-ONBOARDING.md §1.2's state
-        // diagram (draft → onboarding → active → terminated, plus the
-        // onboarding → cancelled no-show/withdrawn branch) — a superset of
-        // the ERD box's abbreviated "onboarding|active|terminated" comment,
-        // needed because `draft` is the diagram's own documented start
-        // state and `cancelled` is a real terminal state Phase 2 must be
-        // able to write.
-        employee_status_check: {
-          check: "status IN ('draft', 'onboarding', 'active', 'cancelled', 'terminated')",
-        },
-        employee_preferred_lang_check: {
-          check: "preferred_lang IN ('th', 'en', 'zh')",
-        },
-      },
-    },
+  )
+  pgm.addConstraint({ schema: 'onboarding', name: 'employee' }, 'employee_emp_code_key', {
+    unique: ['emp_code'],
+  })
+  // The actual M1-1 acceptance criterion ("a duplicate national ID is
+  // blocked") lives here, not in application code — a second INSERT whose
+  // bidx collides with an existing row's is rejected by Postgres itself,
+  // even if `EmployeeService` (Phase 2) had a bug.
+  pgm.addConstraint(
+    { schema: 'onboarding', name: 'employee' },
+    'employee_national_id_bidx_key',
+    { unique: ['national_id_bidx'] },
+  )
+  pgm.addConstraint(
+    { schema: 'onboarding', name: 'employee' },
+    'employee_employment_type_check',
+    { check: "employment_type IN ('monthly', 'daily', 'hourly', 'contract')" },
+  )
+  // Full lifecycle vocabulary per M1-ONBOARDING.md §1.2's state diagram
+  // (draft → onboarding → active → terminated, plus the onboarding →
+  // cancelled no-show/withdrawn branch) — a superset of the ERD box's
+  // abbreviated "onboarding|active|terminated" comment, needed because
+  // `draft` is the diagram's own documented start state and `cancelled` is
+  // a real terminal state Phase 2 must be able to write.
+  pgm.addConstraint({ schema: 'onboarding', name: 'employee' }, 'employee_status_check', {
+    check: "status IN ('draft', 'onboarding', 'active', 'cancelled', 'terminated')",
+  })
+  pgm.addConstraint(
+    { schema: 'onboarding', name: 'employee' },
+    'employee_preferred_lang_check',
+    { check: "preferred_lang IN ('th', 'en', 'zh')" },
   )
   pgm.createIndex({ schema: 'onboarding', name: 'employee' }, ['org_unit_id'])
   pgm.createIndex({ schema: 'onboarding', name: 'employee' }, ['position_id'])
@@ -216,13 +230,11 @@ exports.up = (pgm) => {
       verified_by: { type: 'uuid' },
       verified_at: { type: 'timestamptz' },
     },
-    {
-      constraints: {
-        employee_document_status_check: {
-          check: "status IN ('pending', 'verified', 'rejected')",
-        },
-      },
-    },
+  )
+  pgm.addConstraint(
+    { schema: 'onboarding', name: 'employee_document' },
+    'employee_document_status_check',
+    { check: "status IN ('pending', 'verified', 'rejected')" },
   )
   pgm.createIndex({ schema: 'onboarding', name: 'employee_document' }, ['employee_id'])
 
@@ -242,13 +254,15 @@ exports.up = (pgm) => {
       body_text: { type: 'text', notNull: true },
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        consent_form_purpose_lang_version_key: { unique: ['purpose', 'lang', 'version'] },
-        consent_form_lang_check: { check: "lang IN ('th', 'en', 'zh')" },
-      },
-    },
   )
+  pgm.addConstraint(
+    { schema: 'onboarding', name: 'consent_form' },
+    'consent_form_purpose_lang_version_key',
+    { unique: ['purpose', 'lang', 'version'] },
+  )
+  pgm.addConstraint({ schema: 'onboarding', name: 'consent_form' }, 'consent_form_lang_check', {
+    check: "lang IN ('th', 'en', 'zh')",
+  })
 
   // --- CONSENT_RECORD — DATABASE-DESIGN §2.1, verbatim ---
   pgm.createTable(
@@ -274,13 +288,11 @@ exports.up = (pgm) => {
       decided_at: { type: 'timestamptz', notNull: true },
       form_text_snapshot: { type: 'bytea', notNull: true }, // 🔐 as-shown
     },
-    {
-      constraints: {
-        consent_record_state_check: {
-          check: "state IN ('granted', 'refused', 'withdrawn')",
-        },
-      },
-    },
+  )
+  pgm.addConstraint(
+    { schema: 'onboarding', name: 'consent_record' },
+    'consent_record_state_check',
+    { check: "state IN ('granted', 'refused', 'withdrawn')" },
   )
   pgm.createIndex({ schema: 'onboarding', name: 'consent_record' }, ['employee_id'])
   pgm.createIndex({ schema: 'onboarding', name: 'consent_record' }, ['employee_id', 'purpose'])
@@ -329,15 +341,13 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        probation_employee_id_key: { unique: ['employee_id'] },
-        probation_outcome_check: {
-          check: "outcome IS NULL OR outcome IN ('confirm', 'extend', 'terminate')",
-        },
-      },
-    },
   )
+  pgm.addConstraint({ schema: 'onboarding', name: 'probation' }, 'probation_employee_id_key', {
+    unique: ['employee_id'],
+  })
+  pgm.addConstraint({ schema: 'onboarding', name: 'probation' }, 'probation_outcome_check', {
+    check: "outcome IS NULL OR outcome IN ('confirm', 'extend', 'terminate')",
+  })
 
   // --- every schema carries these two (roadmap "Database conventions") ---
   pgm.createTable(

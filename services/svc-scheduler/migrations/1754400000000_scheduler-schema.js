@@ -82,12 +82,17 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        shift_grace_min_check: { check: 'grace_min >= 0' },
-      },
-    },
   )
+  // Task 16c fix: node-pg-migrate's `createTable` `constraints` option is
+  // keyed by CONSTRAINT KIND, not by a chosen name — the previous shape
+  // nested each name one level too deep, so node-pg-migrate's
+  // `parseConstraints` found no recognised kind and silently created
+  // nothing. This service has never been deployed, so the fix is an
+  // in-place edit; `pgm.addConstraint` is used so each name matches this
+  // file's own prior comments verbatim.
+  pgm.addConstraint({ schema: 'scheduler', name: 'shift' }, 'shift_grace_min_check', {
+    check: 'grace_min >= 0',
+  })
 
   pgm.createTable(
     { schema: 'scheduler', name: 'holiday_calendar' },
@@ -97,11 +102,11 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        holiday_calendar_year_key: { unique: ['year'] },
-      },
-    },
+  )
+  pgm.addConstraint(
+    { schema: 'scheduler', name: 'holiday_calendar' },
+    'holiday_calendar_year_key',
+    { unique: ['year'] },
   )
 
   pgm.createTable(
@@ -129,11 +134,11 @@ exports.up = (pgm) => {
       },
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        holiday_calendar_id_holiday_date_key: { unique: ['calendar_id', 'holiday_date'] },
-      },
-    },
+  )
+  pgm.addConstraint(
+    { schema: 'scheduler', name: 'holiday' },
+    'holiday_calendar_id_holiday_date_key',
+    { unique: ['calendar_id', 'holiday_date'] },
   )
   pgm.createIndex({ schema: 'scheduler', name: 'holiday' }, ['calendar_id'])
 
@@ -176,12 +181,10 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        roster_entry_status_check: { check: "status IN ('planned', 'published')" },
-      },
-    },
   )
+  pgm.addConstraint({ schema: 'scheduler', name: 'roster_entry' }, 'roster_entry_status_check', {
+    check: "status IN ('planned', 'published')",
+  })
   // Backs "team roster grid for a date range" and "this employee's schedule".
   pgm.createIndex({ schema: 'scheduler', name: 'roster_entry' }, ['employee_id', 'work_date'])
   pgm.createIndex({ schema: 'scheduler', name: 'roster_entry' }, ['shift_id'])
@@ -202,18 +205,16 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        ot_request_hours_check: { check: 'hours > 0' },
-        ot_request_rate_class_check: {
-          check: "rate_class IN ('workday', 'holiday_work', 'holiday_ot')",
-        },
-        ot_request_status_check: {
-          check: "status IN ('pending', 'approved', 'rejected')",
-        },
-      },
-    },
   )
+  pgm.addConstraint({ schema: 'scheduler', name: 'ot_request' }, 'ot_request_hours_check', {
+    check: 'hours > 0',
+  })
+  pgm.addConstraint({ schema: 'scheduler', name: 'ot_request' }, 'ot_request_rate_class_check', {
+    check: "rate_class IN ('workday', 'holiday_work', 'holiday_ot')",
+  })
+  pgm.addConstraint({ schema: 'scheduler', name: 'ot_request' }, 'ot_request_status_check', {
+    check: "status IN ('pending', 'approved', 'rejected')",
+  })
   pgm.createIndex({ schema: 'scheduler', name: 'ot_request' }, ['employee_id', 'ot_date'])
 
   pgm.createTable(

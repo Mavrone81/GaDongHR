@@ -119,13 +119,20 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        pay_profile_employee_id_key: { unique: ['employee_id'] },
-        pay_profile_pay_basis_check: { check: "pay_basis IN ('monthly', 'daily', 'hourly')" },
-      },
-    },
   )
+  // Task 16c fix: node-pg-migrate's `createTable` `constraints` option is
+  // keyed by CONSTRAINT KIND, not by a chosen name — the previous shape
+  // nested each name one level too deep, so node-pg-migrate's
+  // `parseConstraints` found no recognised kind and silently created
+  // nothing. This service has never been deployed, so the fix is an
+  // in-place edit; `pgm.addConstraint` is used so each name matches this
+  // file's own prior comments/tests verbatim.
+  pgm.addConstraint({ schema: 'payroll', name: 'pay_profile' }, 'pay_profile_employee_id_key', {
+    unique: ['employee_id'],
+  })
+  pgm.addConstraint({ schema: 'payroll', name: 'pay_profile' }, 'pay_profile_pay_basis_check', {
+    check: "pay_basis IN ('monthly', 'daily', 'hourly')",
+  })
 
   pgm.sql(`COMMENT ON COLUMN payroll.pay_profile.base_pay IS
     'S3-classified salary figure. Always envelope-encrypted by svc-crypto before INSERT/UPDATE -- never written in the clear (Task 14 brief: "A salary in plaintext defeats the product''s central claim").'`)
@@ -153,25 +160,25 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        payroll_run_run_type_check: {
-          check: "run_type IN ('regular', 'offcycle', 'adjustment', 'final_pay')",
-        },
-        payroll_run_status_check: {
-          check: "status IN ('draft', 'calculated', 'reviewed', 'approved', 'committed')",
-        },
-        payroll_run_timesheet_lock_version_check: { check: 'timesheet_lock_version >= 0' },
-        // Segregation of duties (Task 14 brief, verbatim): the preparer and
-        // approver of one run must be different people. This is the DB
-        // "belt" — Phase 5's service layer carries the equivalent "brace".
-        // `payroll-schema.test.ts` demonstrates this failing when removed.
-        payroll_run_sod_check: {
-          check: 'approved_by IS NULL OR approved_by <> prepared_by',
-        },
-      },
-    },
   )
+  pgm.addConstraint({ schema: 'payroll', name: 'payroll_run' }, 'payroll_run_run_type_check', {
+    check: "run_type IN ('regular', 'offcycle', 'adjustment', 'final_pay')",
+  })
+  pgm.addConstraint({ schema: 'payroll', name: 'payroll_run' }, 'payroll_run_status_check', {
+    check: "status IN ('draft', 'calculated', 'reviewed', 'approved', 'committed')",
+  })
+  pgm.addConstraint(
+    { schema: 'payroll', name: 'payroll_run' },
+    'payroll_run_timesheet_lock_version_check',
+    { check: 'timesheet_lock_version >= 0' },
+  )
+  // Segregation of duties (Task 14 brief, verbatim): the preparer and
+  // approver of one run must be different people. This is the DB "belt" —
+  // Phase 5's service layer carries the equivalent "brace".
+  // `payroll-schema.test.ts` demonstrates this failing when removed.
+  pgm.addConstraint({ schema: 'payroll', name: 'payroll_run' }, 'payroll_run_sod_check', {
+    check: 'approved_by IS NULL OR approved_by <> prepared_by',
+  })
   pgm.createIndex({ schema: 'payroll', name: 'payroll_run' }, ['period', 'status'])
 
   pgm.createTable(
@@ -247,16 +254,16 @@ exports.up = (pgm) => {
       status: { type: 'text', notNull: true, default: 'generated' },
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
-    {
-      constraints: {
-        statutory_export_kind_check: {
-          check: "kind IN ('sso_1_10', 'pnd1', 'bank_csv', 'pnd1kor', '50bis', 'kor_ror_11')",
-        },
-        statutory_export_status_check: {
-          check: "status IN ('generated', 'downloaded')",
-        },
-      },
-    },
+  )
+  pgm.addConstraint(
+    { schema: 'payroll', name: 'statutory_export' },
+    'statutory_export_kind_check',
+    { check: "kind IN ('sso_1_10', 'pnd1', 'bank_csv', 'pnd1kor', '50bis', 'kor_ror_11')" },
+  )
+  pgm.addConstraint(
+    { schema: 'payroll', name: 'statutory_export' },
+    'statutory_export_status_check',
+    { check: "status IN ('generated', 'downloaded')" },
   )
   pgm.createIndex({ schema: 'payroll', name: 'statutory_export' }, ['run_id'])
 

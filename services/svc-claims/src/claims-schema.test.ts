@@ -1,15 +1,18 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import MigrationBuilderImpl from 'node-pg-migrate/dist/migrationBuilder'
+import type { DB, Logger, MigrationBuilder } from 'node-pg-migrate/dist/types'
 
 /**
  * Proves the migration's SQL shape directly — no database available in
  * this environment (Task 14 brief CONSTRAINTS, matching Tasks 7/8/9/13/14's
- * precedent). Two assertion strategies are used, matching the brief's
- * "assert against the migration's generated SQL or a fake":
+ * precedent). Three assertion strategies are used:
  *
  *  1. Regex assertions against the migration file's own source text
  *     (`migrationSource()`), the same technique
- *     `services/svc-leave/src/leave-schema.test.ts` established.
+ *     `services/svc-leave/src/leave-schema.test.ts` established — used only
+ *     for column-shape assertions (types, presence), never for constraint
+ *     existence (see 3).
  *  2. A structural run of `exports.up` against a minimal fake
  *     `MigrationBuilder` (`FakePgm`) that records every builder call it
  *     receives — this proves the migration function is a deterministic,
@@ -17,6 +20,15 @@ import { join } from 'node:path'
  *     re-running it safe; real re-run idempotency for an *already applied*
  *     migration is `node-pg-migrate`'s job via its `pgmigrations` ledger,
  *     which `src/main.ts` wires exactly as `services/svc-config` does).
+ *  3. (Task 16c) Constraint-existence assertions run the migration against
+ *     node-pg-migrate's REAL `MigrationBuilderImpl` — the same class
+ *     `Migration.apply()` constructs internally — and inspect the actual
+ *     generated SQL. A source-text regex cannot distinguish node-pg-migrate's
+ *     valid `constraints: { check: ... }` shape from the invalid
+ *     `constraints: { someName: { check: ... } } }` shape that silently
+ *     creates nothing — this file's own `claim_status_check` assertion used
+ *     to be exactly that kind of regex, which is how the original bug
+ *     shipped undetected.
  *
  * The suites the Task 14 brief calls out by name: `receipt.file_ref` is
  * `bytea` (uncontrolled user content that can incidentally contain
@@ -54,6 +66,42 @@ function loadMigration(): ClaimsMigrationModule {
   return require(join(MIGRATIONS_DIR, claimsSchemaFile)) as ClaimsMigrationModule
 }
 
+function loadRealMigration(): { up: (pgm: MigrationBuilder) => void; down: (pgm: MigrationBuilder) => void } {
+  const files = migrationFiles()
+  const claimsSchemaFile = files.find((f) => f.includes('claims-schema'))
+  if (claimsSchemaFile === undefined) throw new Error('no *claims-schema*.js migration file found')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- node-pg-migrate migrations are CommonJS files loaded by the runner the same way; this test loads the same artifact.
+  return require(join(MIGRATIONS_DIR, claimsSchemaFile)) as {
+    up: (pgm: MigrationBuilder) => void
+    down: (pgm: MigrationBuilder) => void
+  }
+}
+
+/**
+ * `MigrationBuilderImpl`'s constructor only touches `db` to hand
+ * `pgm.db.query`/`pgm.db.select` through to a migration that calls them
+ * directly — this migration never does, so a `db` that throws if ever
+ * actually invoked is a safe, honest stand-in for "no Postgres in this
+ * environment".
+ */
+const unreachableDb: DB = {
+  query: () => {
+    throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+  },
+  select: () => {
+    throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+  },
+}
+
+const silentLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} }
+
+/** Runs `action` against a real node-pg-migrate `MigrationBuilder` and returns the exact SQL it would emit — see file header, strategy 3. */
+function buildSql(action: (pgm: MigrationBuilder) => void): string {
+  const pgm = new MigrationBuilderImpl(unreachableDb, undefined, false, silentLogger)
+  action(pgm)
+  return pgm.getSql()
+}
+
 /** Every builder call `exports.up`/`exports.down` in this migration actually issues, recorded in call order. */
 type RecordedCall = { method: string; args: unknown[] }
 
@@ -85,6 +133,10 @@ class FakePgm {
 
   dropSchema(...args: unknown[]): void {
     this.calls.push({ method: 'dropSchema', args })
+  }
+
+  addConstraint(...args: unknown[]): void {
+    this.calls.push({ method: 'addConstraint', args })
   }
 
   /** node-pg-migrate's `pgm.func(expr)` wraps a raw SQL expression (e.g. `now()`) so it isn't quoted as a string literal default — here it's just an identity tag, sufficient for structural comparison. */
@@ -293,20 +345,48 @@ describe('claims schema migration — dup_hash exists and is indexed (M6-5 dupli
 describe('claims schema migration — status CHECK lists exactly the six ERD states', () => {
   const ERD_STATES = ['draft', 'pending', 'approved', 'for_payroll', 'paid_offcycle', 'rejected'] as const
 
-  it('claim_status_check exists with exactly these six states, in this order', () => {
-    const source = migrationSource()
-    const checkMatch = /claim_status_check:\s*\{\s*check:\s*"([^"]*)"/.exec(source)
+  /**
+   * Task 16c: this used to be a source-text regex — `claim_status_check`
+   * was declared as `{ constraints: { claim_status_check: { check: ... } } }`,
+   * a shape node-pg-migrate's `parseConstraints` silently ignores (the
+   * constraint name is nested one level inside `options.constraints`
+   * instead of being a recognised kind), so the old regex passed while the
+   * constraint itself never existed. This now runs the migration through
+   * node-pg-migrate's REAL `MigrationBuilderImpl` and inspects the actual
+   * generated SQL.
+   */
+  it('claim_status_check exists with exactly these six states, in this order, actually created by node-pg-migrate', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    const checkMatch = /ADD CONSTRAINT "claim_status_check" CHECK \(status IN \(([^)]*)\)\);/.exec(sql)
     expect(checkMatch).not.toBeNull()
-    const checkExpr = checkMatch?.[1] ?? ''
-    const listedStates = /IN \(([^)]*)\)/.exec(checkExpr)?.[1] ?? ''
-    const states = listedStates.split(',').map((s) => s.trim().replace(/'/g, ''))
+    const states = (checkMatch?.[1] ?? '').split(',').map((s) => s.trim().replace(/'/g, ''))
     expect(states).toEqual([...ERD_STATES])
   })
 
   it.each(ERD_STATES)('%s is one of the states in the CHECK', (state) => {
-    const source = migrationSource()
-    const checkMatch = /claim_status_check:\s*\{\s*check:\s*"([^"]*)"/.exec(source)
-    expect(checkMatch?.[1]).toContain(`'${state}'`)
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toContain(`'${state}'`)
+  })
+
+  it('the OLD { constraints: { claim_status_check: { check: ... } } } shape produces no CHECK constraint (regression proof)', () => {
+    const sql = buildSql((pgm) => {
+      pgm.createTable(
+        { schema: 'claims', name: 'claim_regression_check' },
+        { status: { type: 'text', notNull: true } },
+        {
+          constraints: {
+            claim_status_check: {
+              check: "status IN ('draft', 'pending', 'approved', 'for_payroll', 'paid_offcycle', 'rejected')",
+            },
+          },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberately reconstructing the exact malformed (not TableOptions-shaped) options object the original defect used.
+        } as any,
+      )
+    })
+    expect(sql).not.toMatch(/CHECK/)
+    expect(sql).not.toMatch(/claim_status_check/)
   })
 
   it('status defaults to draft', () => {
@@ -390,5 +470,15 @@ describe('claims schema migration — every DATABASE-DESIGN.md §2.4 column is p
     expect(source).toMatch(/name:\s*['"]claims_employee_ref['"]/)
     const block = /name:\s*['"]claims_employee_ref['"][\s\S]{0,300}/.exec(source)?.[0] ?? ''
     expect(block).toMatch(/employee_id:\s*\{\s*type:\s*'uuid',\s*primaryKey:\s*true/)
+  })
+})
+
+describe('claims schema migration — approval_step2.decision CHECK (Task 16c)', () => {
+  it('approval_step2_decision_check is actually created by node-pg-migrate', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "approval_step2_decision_check" CHECK \(decision IS NULL OR decision IN \('approved', 'rejected'\)\);/,
+    )
   })
 })

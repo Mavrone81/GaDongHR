@@ -1,15 +1,16 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import MigrationBuilderImpl from 'node-pg-migrate/dist/migrationBuilder'
+import type { DB, Logger, MigrationBuilder } from 'node-pg-migrate/dist/types'
 
 /**
  * Proves the `retention` schema migration's SQL shape directly — no
  * database available in this environment (Task 14 brief CONSTRAINTS,
- * matching Tasks 7/8/9/13's precedent). Two assertion strategies, matching
- * `services/svc-attendance/src/attendance-schema.test.ts`'s established
- * technique:
+ * matching Tasks 7/8/9/13's precedent). Three assertion strategies:
  *
  *  1. Regex assertions against the migration file's own source text
- *     (`migrationSource()`).
+ *     (`migrationSource()`) — used only for column-shape assertions, never
+ *     for constraint existence (see 3).
  *  2. A structural run of `exports.up`/`exports.down` against a minimal
  *     fake `MigrationBuilder` (`FakePgm`) that records every builder call
  *     it receives — proves the migration is a deterministic, side-effect-
@@ -17,6 +18,14 @@ import { join } from 'node:path'
  *     safe (real re-run idempotency for an *already applied* migration is
  *     `node-pg-migrate`'s job via its `pgmigrations` ledger, wired in
  *     `src/main.ts` exactly as `services/svc-config` does).
+ *  3. (Task 16c) Constraint-existence assertions run the migration against
+ *     node-pg-migrate's REAL `MigrationBuilderImpl` — the same class
+ *     `Migration.apply()` constructs internally — and inspect the actual
+ *     generated SQL. Every constraint in this file used to be declared via
+ *     node-pg-migrate's silently-ignored `{ constraints: { <name>: {...} } }`
+ *     shape, and the tests below used to be source-text regexes that could
+ *     not tell the difference between that (broken) shape and a working
+ *     one — exactly how the bug shipped undetected.
  *
  * The suites below are grouped around the Task 14 brief's three
  * structural rules (legal hold, the review-gated status CHECK, and
@@ -50,6 +59,35 @@ function loadMigration(): RetentionMigrationModule {
   return require(join(MIGRATIONS_DIR, retentionSchemaFile)) as RetentionMigrationModule
 }
 
+function loadRealMigration(): { up: (pgm: MigrationBuilder) => void; down: (pgm: MigrationBuilder) => void } {
+  const files = migrationFiles()
+  const retentionSchemaFile = files.find((f) => f.includes('retention-schema'))
+  if (retentionSchemaFile === undefined) throw new Error('no *retention-schema*.js migration file found')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- node-pg-migrate migrations are CommonJS files loaded by the runner the same way; this test loads the same artifact.
+  return require(join(MIGRATIONS_DIR, retentionSchemaFile)) as {
+    up: (pgm: MigrationBuilder) => void
+    down: (pgm: MigrationBuilder) => void
+  }
+}
+
+const unreachableDb: DB = {
+  query: () => {
+    throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+  },
+  select: () => {
+    throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+  },
+}
+
+const silentLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} }
+
+/** Runs `action` against a real node-pg-migrate `MigrationBuilder` and returns the exact SQL it would emit — see file header, strategy 3. */
+function buildSql(action: (pgm: MigrationBuilder) => void): string {
+  const pgm = new MigrationBuilderImpl(unreachableDb, undefined, false, silentLogger)
+  action(pgm)
+  return pgm.getSql()
+}
+
 /** Every builder call `exports.up`/`exports.down` in this migration actually issues, recorded in call order. */
 type RecordedCall = { method: string; args: unknown[] }
 
@@ -80,6 +118,10 @@ class FakePgm {
 
   dropSchema(...args: unknown[]): void {
     this.calls.push({ method: 'dropSchema', args })
+  }
+
+  addConstraint(...args: unknown[]): void {
+    this.calls.push({ method: 'addConstraint', args })
   }
 
   /** node-pg-migrate's `pgm.func(expr)` wraps a raw SQL expression (e.g. `now()`) so it isn't quoted as a string literal default — here it's just an identity tag, sufficient for structural comparison. */
@@ -150,39 +192,67 @@ describe('retention schema migration — rule 2: status CHECK covers all six sta
     'blocked_conflict',
   ]
 
-  it.each(requiredStates)('candidate_status_check names %s', (state) => {
-    const source = migrationSource()
-    const checkMatch = /candidate_status_check:\s*\{\s*check:\s*"([^"]*)"/.exec(source)
+  /**
+   * Task 16c: these used to be source-text regexes against
+   * `candidate_status_check:\s*\{\s*check:...` — the exact shape
+   * node-pg-migrate's `parseConstraints` silently ignores (the name is
+   * nested one level inside `options.constraints` instead of being a
+   * recognised kind), so the old regex passed while the constraint itself
+   * never existed. This now runs the migration through node-pg-migrate's
+   * REAL `MigrationBuilderImpl` and inspects the actual generated SQL.
+   */
+  it.each(requiredStates)('candidate_status_check names %s, actually created by node-pg-migrate', (state) => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    const checkMatch = /ADD CONSTRAINT "candidate_status_check" CHECK \(status IN \(([^)]*)\)\);/.exec(sql)
     expect(checkMatch).not.toBeNull()
-    const checkExpression = checkMatch?.[1] ?? ''
-    expect(checkExpression).toContain(`'${state}'`)
+    expect(checkMatch?.[1] ?? '').toContain(`'${state}'`)
   })
 
   it('names exactly six states — no more, no fewer', () => {
-    const source = migrationSource()
-    const checkMatch = /candidate_status_check:\s*\{\s*check:\s*"([^"]*)"/.exec(source)
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    const checkMatch = /ADD CONSTRAINT "candidate_status_check" CHECK \(status IN \(([^)]*)\)\);/.exec(sql)
     const checkExpression = checkMatch?.[1] ?? ''
     const namedStates = [...checkExpression.matchAll(/'([a-z_]+)'/g)].map((m) => m[1])
     expect(namedStates.sort()).toEqual([...requiredStates].sort())
   })
 
-  it('the same assertion FAILS if a state is dropped from the CHECK (proves the per-state assertions are load-bearing)', () => {
-    const source = migrationSource()
-    const withStateDropped = source.replace(", 'blocked_conflict'", '')
-    expect(withStateDropped).not.toEqual(source)
-    const checkMatch = /candidate_status_check:\s*\{\s*check:\s*"([^"]*)"/.exec(withStateDropped)
-    expect(checkMatch?.[1] ?? '').not.toContain("'blocked_conflict'")
-  })
-
   it('a candidate can never reach erased without having passed review: candidate_erased_requires_review_check requires reviewed_by, reviewed_at and erased_at all be set', () => {
-    const source = migrationSource()
-    const checkMatch = /candidate_erased_requires_review_check:\s*\{\s*check:\s*"([^"]*)"/.exec(source)
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    const checkMatch = /ADD CONSTRAINT "candidate_erased_requires_review_check" CHECK \(([^;]*)\);/.exec(sql)
     expect(checkMatch).not.toBeNull()
     const checkExpression = checkMatch?.[1] ?? ''
     expect(checkExpression).toContain("status <> 'erased'")
     expect(checkExpression).toContain('reviewed_by IS NOT NULL')
     expect(checkExpression).toContain('reviewed_at IS NOT NULL')
     expect(checkExpression).toContain('erased_at IS NOT NULL')
+  })
+
+  /**
+   * Regression proof, kept executable rather than a one-off manual run:
+   * reconstructs the exact broken options object this file used before
+   * Task 16c's fix and proves it produces no CHECK constraint at all.
+   */
+  it('the OLD { constraints: { candidate_status_check: { check: ... } } } shape produces no CHECK constraint', () => {
+    const sql = buildSql((pgm) => {
+      pgm.createTable(
+        { schema: 'retention', name: 'candidate_regression_check' },
+        { status: { type: 'text', notNull: true } },
+        {
+          constraints: {
+            candidate_status_check: {
+              check:
+                "status IN ('identified', 'awaiting_review', 'approved', 'erased', 'blocked_legal_hold', 'blocked_conflict')",
+            },
+          },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberately reconstructing the exact malformed (not TableOptions-shaped) options object the original defect used.
+        } as any,
+      )
+    })
+    expect(sql).not.toMatch(/CHECK/)
+    expect(sql).not.toMatch(/candidate_status_check/)
   })
 })
 
@@ -257,10 +327,38 @@ describe('retention schema migration — policy is effective-dated', () => {
     expect(columnMatch?.[0]).not.toMatch(/notNull:\s*true/)
   })
 
-  it('policy is unique on (data_class, effective_from) — a re-legislated data class gets a new row, never an in-place overwrite', () => {
-    const source = migrationSource()
-    expect(source).toMatch(
-      /policy_data_class_effective_from_key:\s*\{\s*unique:\s*\['data_class',\s*'effective_from'\]\s*\}/,
+  it('policy is unique on (data_class, effective_from) — a re-legislated data class gets a new row, never an in-place overwrite, actually created by node-pg-migrate (Task 16c)', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "policy_data_class_effective_from_key" UNIQUE \("data_class", "effective_from"\);/,
+    )
+  })
+
+  it('the OLD { constraints: { policy_data_class_effective_from_key: { unique: [...] } } } shape produces no UNIQUE constraint (regression proof)', () => {
+    const sql = buildSql((pgm) => {
+      pgm.createTable(
+        { schema: 'retention', name: 'policy_regression_check' },
+        { data_class: { type: 'text', notNull: true }, effective_from: { type: 'date', notNull: true } },
+        {
+          constraints: {
+            policy_data_class_effective_from_key: { unique: ['data_class', 'effective_from'] },
+          },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberately reconstructing the exact malformed (not TableOptions-shaped) options object the original defect used.
+        } as any,
+      )
+    })
+    expect(sql).not.toMatch(/UNIQUE/)
+    expect(sql).not.toMatch(/policy_data_class_effective_from_key/)
+  })
+})
+
+describe('retention schema migration — run.status CHECK (Task 16c)', () => {
+  it('run_status_check is actually created by node-pg-migrate', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "run_status_check" CHECK \(status IN \('running', 'completed', 'failed'\)\);/,
     )
   })
 })

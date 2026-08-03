@@ -105,15 +105,17 @@ exports.up = (pgm) => {
       // below — see file-level comment on why the index is the point.
       dup_hash: { type: 'text' },
     },
-    {
-      constraints: {
-        claim_status_check: {
-          check:
-            "status IN ('draft', 'pending', 'approved', 'for_payroll', 'paid_offcycle', 'rejected')",
-        },
-      },
-    },
   )
+  // Task 16c fix: node-pg-migrate's `createTable` `constraints` option is
+  // keyed by CONSTRAINT KIND, not by a chosen name — the previous
+  // `{ constraints: { claim_status_check: { check: ... } } }` nested the
+  // name one level too deep, so node-pg-migrate's `parseConstraints` found
+  // no recognised kind and silently created nothing. This service has never
+  // been deployed, so the fix is an in-place edit; `pgm.addConstraint` is
+  // used so the name matches this file's own prior comments verbatim.
+  pgm.addConstraint({ schema: 'claims', name: 'claim' }, 'claim_status_check', {
+    check: "status IN ('draft', 'pending', 'approved', 'for_payroll', 'paid_offcycle', 'rejected')",
+  })
   pgm.createIndex({ schema: 'claims', name: 'claim' }, ['employee_id'])
   // The load-bearing index for M6-5 duplicate-receipt detection — see the
   // file-level comment. `claims-schema.test.ts` demonstrates the
@@ -170,13 +172,11 @@ exports.up = (pgm) => {
       decision: { type: 'text' },
       comment: { type: 'text' },
     },
-    {
-      constraints: {
-        approval_step2_decision_check: {
-          check: "decision IS NULL OR decision IN ('approved', 'rejected')",
-        },
-      },
-    },
+  )
+  pgm.addConstraint(
+    { schema: 'claims', name: 'approval_step2' },
+    'approval_step2_decision_check',
+    { check: "decision IS NULL OR decision IN ('approved', 'rejected')" },
   )
   pgm.createIndex({ schema: 'claims', name: 'approval_step2' }, ['subject_id', 'level'])
 

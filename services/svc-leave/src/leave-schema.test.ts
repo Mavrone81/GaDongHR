@@ -1,15 +1,18 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import MigrationBuilderImpl from 'node-pg-migrate/dist/migrationBuilder'
+import type { DB, Logger, MigrationBuilder } from 'node-pg-migrate/dist/types'
 
 /**
  * Proves the migration's SQL shape directly — no database available in
  * this environment (Task 14 brief CONSTRAINTS, matching Tasks 7/8/9/13's
- * precedent). Two assertion strategies are used, matching the brief's
- * "assert against the migration's generated SQL or a fake":
+ * precedent). Three assertion strategies are used:
  *
  *  1. Regex assertions against the migration file's own source text
  *     (`migrationSource()`), the same technique
- *     `services/svc-attendance/src/attendance-schema.test.ts` established.
+ *     `services/svc-attendance/src/attendance-schema.test.ts` established —
+ *     used only for column-shape assertions, never for constraint
+ *     existence (see 3).
  *  2. A structural run of `exports.up` against a minimal fake
  *     `MigrationBuilder` (`FakePgm`) that records every builder call it
  *     receives — this proves the migration function is a deterministic,
@@ -17,6 +20,15 @@ import { join } from 'node:path'
  *     re-running it safe; real re-run idempotency for an *already applied*
  *     migration is `node-pg-migrate`'s job via its `pgmigrations` ledger,
  *     which `src/main.ts` wires exactly as `services/svc-config` does).
+ *  3. (Task 16c) Constraint-existence assertions run the migration against
+ *     node-pg-migrate's REAL `MigrationBuilderImpl` — the same class
+ *     `Migration.apply()` constructs internally — and inspect the actual
+ *     generated SQL. This file previously had NO test at all for
+ *     `leave_type_code_key`, `leave_balance_employee_type_year_key`,
+ *     `leave_request_status_check`, or `approval_step_decision_check` — all
+ *     four were declared via node-pg-migrate's silently-ignored
+ *     `{ constraints: { <name>: {...} } }` shape (Task 16c) and so never
+ *     actually existed. This closes that gap.
  *
  * The three most important suites here are the ones the Task 14 brief
  * calls out by name: `attachment_ref` is `bytea` (a medical-certificate
@@ -54,6 +66,35 @@ function loadMigration(): LeaveMigrationModule {
   return require(join(MIGRATIONS_DIR, leaveSchemaFile)) as LeaveMigrationModule
 }
 
+function loadRealMigration(): { up: (pgm: MigrationBuilder) => void; down: (pgm: MigrationBuilder) => void } {
+  const files = migrationFiles()
+  const leaveSchemaFile = files.find((f) => f.includes('leave-schema'))
+  if (leaveSchemaFile === undefined) throw new Error('no *leave-schema*.js migration file found')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- node-pg-migrate migrations are CommonJS files loaded by the runner the same way; this test loads the same artifact.
+  return require(join(MIGRATIONS_DIR, leaveSchemaFile)) as {
+    up: (pgm: MigrationBuilder) => void
+    down: (pgm: MigrationBuilder) => void
+  }
+}
+
+const unreachableDb: DB = {
+  query: () => {
+    throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+  },
+  select: () => {
+    throw new Error('unreachable: this harness only builds SQL text, it never executes it')
+  },
+}
+
+const silentLogger: Logger = { info: () => {}, warn: () => {}, error: () => {} }
+
+/** Runs `action` against a real node-pg-migrate `MigrationBuilder` and returns the exact SQL it would emit — see file header, strategy 3. */
+function buildSql(action: (pgm: MigrationBuilder) => void): string {
+  const pgm = new MigrationBuilderImpl(unreachableDb, undefined, false, silentLogger)
+  action(pgm)
+  return pgm.getSql()
+}
+
 /** Every builder call `exports.up`/`exports.down` in this migration actually issues, recorded in call order. */
 type RecordedCall = { method: string; args: unknown[] }
 
@@ -85,6 +126,10 @@ class FakePgm {
 
   dropSchema(...args: unknown[]): void {
     this.calls.push({ method: 'dropSchema', args })
+  }
+
+  addConstraint(...args: unknown[]): void {
+    this.calls.push({ method: 'addConstraint', args })
   }
 
   /** node-pg-migrate's `pgm.func(expr)` wraps a raw SQL expression (e.g. `now()`) so it isn't quoted as a string literal default — here it's just an identity tag, sufficient for structural comparison. */
@@ -309,5 +354,73 @@ describe('leave schema migration — every DATABASE-DESIGN.md §2.4 column is pr
     expect(source).toMatch(/name:\s*['"]leave_employee_ref['"]/)
     const block = /name:\s*['"]leave_employee_ref['"][\s\S]{0,300}/.exec(source)?.[0] ?? ''
     expect(block).toMatch(/employee_id:\s*\{\s*type:\s*'uuid',\s*primaryKey:\s*true/)
+  })
+})
+
+describe('leave schema migration — constraints actually created by node-pg-migrate (Task 16c)', () => {
+  it('leave_type_code_key: UNIQUE (code)', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(/ADD CONSTRAINT "leave_type_code_key" UNIQUE \("code"\);/)
+  })
+
+  it('leave_type_pay_mode_check / leave_type_accrual_mode_check', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "leave_type_pay_mode_check" CHECK \(pay_mode IN \('full', 'half', 'unpaid', 'per_rule'\)\);/,
+    )
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "leave_type_accrual_mode_check" CHECK \(accrual_mode IN \('annual_grant', 'monthly', 'anniversary'\)\);/,
+    )
+  })
+
+  /**
+   * The natural key this table models (DATABASE-DESIGN.md §2.4's
+   * `LEAVE_TYPE ||--o{ LEAVE_BALANCE : accrues`) — without it, two balance
+   * rows for the same employee/type/year could coexist with no defined
+   * "current" one.
+   */
+  it('leave_balance_employee_type_year_key: UNIQUE (employee_id, leave_type_id, year)', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "leave_balance_employee_type_year_key" UNIQUE \("employee_id", "leave_type_id", "year"\);/,
+    )
+  })
+
+  it('leave_request_status_check', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "leave_request_status_check" CHECK \(status IN \('pending', 'approved', 'rejected', 'cancelled'\)\);/,
+    )
+  })
+
+  it('approval_step_decision_check', () => {
+    const migration = loadRealMigration()
+    const sql = buildSql(migration.up)
+    expect(sql).toMatch(
+      /ADD CONSTRAINT "approval_step_decision_check" CHECK \(decision IS NULL OR decision IN \('approved', 'rejected'\)\);/,
+    )
+  })
+
+  /**
+   * Regression proof, kept executable: reconstructs the exact broken
+   * options object every one of the six constraints above used to be
+   * declared with, and proves it produces nothing — this is what the old
+   * (nonexistent) test coverage would have needed to catch Task 16c's bug.
+   */
+  it('the OLD { constraints: { <name>: { unique/check: ... } } } shape produces no constraint at all', () => {
+    const sql = buildSql((pgm) => {
+      pgm.createTable(
+        { schema: 'leave', name: 'leave_type_regression_check' },
+        { code: { type: 'text', notNull: true } },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberately reconstructing the exact malformed (not TableOptions-shaped) options object the original defect used.
+        { constraints: { leave_type_code_key: { unique: ['code'] } } } as any,
+      )
+    })
+    expect(sql).not.toMatch(/UNIQUE/)
+    expect(sql).not.toMatch(/leave_type_code_key/)
   })
 })
