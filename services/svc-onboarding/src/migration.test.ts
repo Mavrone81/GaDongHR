@@ -88,6 +88,9 @@ interface FakePgm {
   createTable(nameSpec: TableNameSpec | string, columns: Columns, opts?: CreateTableOptions): void
   createIndex(nameSpec: TableNameSpec | string, columns: string[] | string, opts?: unknown): void
   addConstraint(nameSpec: TableNameSpec | string, constraintName: string, spec: ConstraintDef): void
+  dropConstraint(nameSpec: TableNameSpec | string, constraintName: string, opts?: { ifExists?: boolean }): void
+  addColumn(nameSpec: TableNameSpec | string, columns: Columns): void
+  dropColumn(nameSpec: TableNameSpec | string, columnName: string): void
   func(expr: string): { __pgmFunc: string }
   sql(query: string): void
 }
@@ -97,21 +100,37 @@ interface MigrationModule {
   down: (pgm: FakePgm) => void
 }
 
-function loadMigrationModule(): MigrationModule {
-  const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.js'))
-  if (files.length !== 1) {
-    throw new Error(`expected exactly one migration file in ${MIGRATIONS_DIR}, found ${files.length}`)
+/**
+ * `svc-onboarding` shipped with exactly one migration until this task
+ * (Task 14 brief: schema-only). This task's own migration
+ * (`..._employee-clock-in-method.js`, M1-3's `clock_in_method` routing
+ * column — see its own header for why it exists and is not an adverse
+ * flag) is deliberately additive rather than folded into the original
+ * file, so every migration in `migrations/` is loaded and applied **in
+ * filename order** — the same order `node-pg-migrate`'s real runner
+ * (`main.ts`) applies them in.
+ */
+function loadMigrationModules(): MigrationModule[] {
+  const files = readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith('.js'))
+    .sort()
+  if (files.length === 0) {
+    throw new Error(`expected at least one migration file in ${MIGRATIONS_DIR}, found none`)
   }
-  const [file] = files
-  if (!file) throw new Error('unreachable: length checked above')
-  const path = join(MIGRATIONS_DIR, file)
-  // Migration files are plain CommonJS `.js` (node-pg-migrate's own runner
-  // loads them with `require` — `main.ts`'s `runner({ dir: ... })` — and
-  // there is no ESM module here to `import`), so a dynamic `require` is
-  // the correct way to load one, not a workaround.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- see comment above; this is the one legitimate dynamic-require site in this service
-  const mod: unknown = require(path)
-  return mod as MigrationModule
+  return files.map((file) => {
+    const path = join(MIGRATIONS_DIR, file)
+    // Migration files are plain CommonJS `.js` (node-pg-migrate's own
+    // runner loads them with `require` — `main.ts`'s `runner({ dir: ... })`
+    // — and there is no ESM module here to `import`), so a dynamic
+    // `require` is the correct way to load one, not a workaround.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- see comment above; this is the one legitimate dynamic-require site in this service
+    const mod: unknown = require(path)
+    return mod as MigrationModule
+  })
+}
+
+function combinedUp(pgm: FakePgm): void {
+  for (const mod of loadMigrationModules()) mod.up(pgm)
 }
 
 function recordingPgm(): {
@@ -137,6 +156,14 @@ function recordingPgm(): {
       const { schema, name } = typeof nameSpec === 'string' ? { schema: 'public', name: nameSpec } : nameSpec
       constraints.push({ schema, name, constraintName, spec })
     },
+    dropConstraint: () => undefined,
+    addColumn: (nameSpec, columns) => {
+      const { schema, name } = typeof nameSpec === 'string' ? { schema: 'public', name: nameSpec } : nameSpec
+      const table = tables.find((t) => t.schema === schema && t.name === name)
+      if (!table) throw new Error(`addColumn: recordingPgm has no table "${name}" — createTable must run first`)
+      Object.assign(table.columns, columns)
+    },
+    dropColumn: () => undefined,
     func: (expr) => ({ __pgmFunc: expr }),
     sql: () => undefined,
   }
@@ -156,15 +183,13 @@ function column(table: RecordedTable, name: string): ColumnDef {
 }
 
 describe('onboarding schema migration', () => {
-  const migration = loadMigrationModule()
-
   function run(): {
     tables: RecordedTable[]
     schemasCreated: Array<{ name: string; opts?: { ifNotExists?: boolean } }>
     constraints: RecordedConstraint[]
   } {
     const { pgm, tables, schemasCreated, constraints } = recordingPgm()
-    migration.up(pgm)
+    combinedUp(pgm)
     return { tables, schemasCreated, constraints }
   }
 
@@ -277,6 +302,13 @@ describe('onboarding schema migration', () => {
     expect(uniqueOnBidx).toBe(true)
   })
 
+  it("employee.clock_in_method is text, defaults to 'biometric', and is not bytea — a routing fact, not a 🔐 field, and not encrypted", () => {
+    const { tables } = run()
+    const employee = findTable(tables, 'employee')
+    expect(column(employee, 'clock_in_method').type).toBe('text')
+    expect(column(employee, 'clock_in_method').default).toBe('biometric')
+  })
+
   it('email_bidx is bytea (the companion blind index for the other searchable 🔐 field)', () => {
     const { tables } = run()
     const employee = findTable(tables, 'employee')
@@ -350,8 +382,9 @@ describe('onboarding schema migration — every remaining constraint is actually
 
   function buildRealSql(): string {
     const pgm = new RealMigrationBuilderImpl(unreachableDb, undefined, false, silentLogger)
-    const migration = loadMigrationModule()
-    ;(migration.up as unknown as (pgm: MigrationBuilder) => void)(pgm)
+    for (const migration of loadMigrationModules()) {
+      ;(migration.up as unknown as (pgm: MigrationBuilder) => void)(pgm)
+    }
     return pgm.getSql()
   }
 
@@ -402,6 +435,15 @@ describe('onboarding schema migration — every remaining constraint is actually
     expect(sql).toMatch(
       /ADD CONSTRAINT "probation_outcome_check" CHECK \(outcome IS NULL OR outcome IN \('confirm', 'extend', 'terminate'\)\);/,
     )
+  })
+
+  it("employee_clock_in_method_check — added by this task's migration, and it is NOT an adverse flag (no 'refused'/'denied' vocabulary anywhere in the constraint's own SQL)", () => {
+    const sql = buildRealSql()
+    const clause = /ADD CONSTRAINT "employee_clock_in_method_check" CHECK \(clock_in_method IN \('biometric', 'alternative'\)\);/.exec(sql)?.[0]
+    expect(clause).toBe("ADD CONSTRAINT \"employee_clock_in_method_check\" CHECK (clock_in_method IN ('biometric', 'alternative'));")
+    expect(clause).not.toMatch(/refus/i)
+    expect(clause).not.toMatch(/denied/i)
+    expect(clause).not.toMatch(/adverse/i)
   })
 
   /**
