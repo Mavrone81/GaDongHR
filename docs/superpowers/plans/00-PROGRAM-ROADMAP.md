@@ -205,7 +205,9 @@ employee.create  employee.read  employee.update  employee.lifecycle  employee.im
 employee.sensitive.read
 onboarding.manage  document.generate  consent.self
 roster.read  roster.write  roster.publish  ot.request  ot.approve  holiday.manage
-punch.submit  enrolment.manage  device.register  device.approve
+attendance.enrol.self  attendance.enrol.alternative  attendance.template.delete
+attendance.punch.device  attendance.punch.verify  attendance.punch.code  attendance.punch.read
+attendance.device.manage  attendance.security.read
 timesheet.read  timesheet.correct  timesheet.lock  timesheet.unlock
 leave.request  leave.approve  leave.admin  leave.balance.read
 claim.submit  claim.approve  claim.approve.finance  claim.admin
@@ -219,6 +221,31 @@ notify.notification.read  notify.notification.update
 ```
 
 **`biometric.template.read` is granted to no human role, ever** — it exists only as a machine grant to `svc-attendance`. Security doc §4.2, asserted globally by XC-RBAC.
+
+**Revised 2026-08-04 (integration reconciliation) — M4's attendance permissions replace four coarse
+codes.** The catalog used to carry `punch.submit`, `enrolment.manage`, `device.register` and
+`device.approve`, written before `svc-attendance` existed. M4 shipped nine finer-grained
+`attendance.*` codes instead and never reconciled, so the four coarse codes were granted to roles
+while being referenced by **no route in the codebase**, and all nine shipped codes were granted to
+**no role** — every attendance route 403'd for every caller, `kiosk-device` included. A kiosk that
+cannot punch is the whole module.
+
+The shipped codes win, and the four coarse ones are retired rather than restored. They are what the
+roadmap's own open security gap above asks for ("split permissions by scope"): `attendance.punch.*`
+distinguishes a kiosk (device-authenticated) from a mobile 1:1 verify, a typed PIN and reading
+one's own history — four genuinely different exposures that `punch.submit` collapsed into one
+grant. The mapping is `punch.submit` → the four `attendance.punch.*`; `enrolment.manage` →
+`attendance.enrol.self` / `attendance.enrol.alternative` / `attendance.template.delete`;
+`device.register` + `device.approve` → `attendance.device.manage`.
+
+⚠️ **One deliberate narrowing, recorded as a follow-up, not fixed here.** That last mapping is
+two-into-one: this catalog split registering a device from approving it *specifically* so the two
+could be held by different people. `attendance.device.manage` covers both. The two-person rule
+still holds — `device.service.ts` rejects `registeredBy === approvedBy` with
+`deviceApprovalRequiresSecondPerson()`, and a test pins it — but it is now enforced only by an
+identity check at the service, not also by the permission split. Restoring the split is an
+`svc-attendance` change (two decorators), out of scope for a manifest reconciliation. **Owned by
+Phase 6 hardening, alongside the RBAC matrix generation.**
 
 **Added 2026-08-03 (Task 14b, building `web/ui-coverage.json`):** the five codes on the last two
 lines were already shipped in `@RequirePermission(...)` decorators but missing from this list.

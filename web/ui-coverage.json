@@ -42,92 +42,105 @@
       "service": "svc-timesheet",
       "method": "GET",
       "path": "my/days",
-      "exempt": "consumed-not-displayed",
-      "reason": "M3 Phase 3 (consolidation, OT classification, exception workflow, period locking) delivered the API and business logic only — the timesheet UI screens (employee/manager/HR views) are a later phase's scope, not built in this task."
+      "permission": "timesheet.read",
+      "screen": "/ess/timesheet",
+      "notes": "Employee’s own day records: worked hours, lateness, OT by rate class, exception flags. The screen an employee checks before a period locks."
     },
     {
       "service": "svc-timesheet",
       "method": "GET",
       "path": "teams/:orgUnit/days",
-      "exempt": "consumed-not-displayed",
-      "reason": "See my/days above — same M3 Phase 3 scope note, manager team view."
+      "permission": "timesheet.read",
+      "screen": "/team/timesheet",
+      "notes": "Manager’s team view for the same data, scoped to their org unit."
     },
     {
       "service": "svc-timesheet",
       "method": "GET",
       "path": "days/:employeeId",
-      "exempt": "consumed-not-displayed",
-      "reason": "See my/days above — same M3 Phase 3 scope note, HR org-wide view."
+      "permission": "timesheet.read",
+      "screen": "/hr/timesheet",
+      "notes": "HR’s org-wide view of one employee’s day records."
     },
     {
       "service": "svc-timesheet",
       "method": "GET",
       "path": "exceptions",
-      "exempt": "consumed-not-displayed",
-      "reason": "See my/days above — same M3 Phase 3 scope note, manager/HR exception queue."
+      "permission": "timesheet.read",
+      "screen": "/team/timesheet/exceptions",
+      "notes": "The exception queue — missing punches, unapproved OT, anomalies. Manager/HR work list; this is the screen the whole exception workflow exists for."
     },
     {
       "service": "svc-timesheet",
       "method": "POST",
       "path": "exceptions/:id/propose",
-      "exempt": "consumed-not-displayed",
-      "reason": "See my/days above — same M3 Phase 3 scope note, manager's proposed correction."
+      "permission": "timesheet.correct",
+      "screen": "/team/timesheet/exceptions",
+      "notes": "Manager proposes a correction from that queue."
     },
     {
       "service": "svc-timesheet",
       "method": "POST",
       "path": "exceptions/:id/confirm",
-      "exempt": "consumed-not-displayed",
-      "reason": "See my/days above — same M3 Phase 3 scope note, HR confirmation (audited who/when/why)."
+      "permission": "timesheet.correct",
+      "screen": "/hr/timesheet/exceptions",
+      "notes": "HR confirms the proposed correction — audited who/when/why, and the second half of the two-person correction flow."
     },
     {
       "service": "svc-timesheet",
       "method": "POST",
       "path": "manual-punch",
-      "exempt": "consumed-not-displayed",
-      "reason": "See my/days above — same M3 Phase 3 scope note, HR manual punch entry."
+      "permission": "timesheet.correct",
+      "screen": "/hr/timesheet",
+      "notes": "HR enters a punch by hand where the device failed. Needs a screen precisely because it is the highest-trust write in the module."
     },
     {
       "service": "svc-timesheet",
       "method": "GET",
       "path": "periods",
-      "exempt": "consumed-not-displayed",
-      "reason": "See my/days above — same M3 Phase 3 scope note, period list."
+      "permission": "timesheet.lock",
+      "screen": "/admin/timesheet/periods",
+      "notes": "Pay-period list with lock state and version — payroll’s starting point."
     },
     {
       "service": "svc-timesheet",
       "method": "POST",
       "path": "periods",
-      "exempt": "consumed-not-displayed",
-      "reason": "See my/days above — same M3 Phase 3 scope note, period creation."
+      "permission": "timesheet.lock",
+      "screen": "/admin/timesheet/periods",
+      "notes": "Create the next pay period."
     },
     {
       "service": "svc-timesheet",
       "method": "POST",
       "path": "periods/:id/lock",
-      "exempt": "consumed-not-displayed",
-      "reason": "See my/days above — same M3 Phase 3 scope note, HR period lock (publishes timesheet.locked)."
+      "permission": "timesheet.lock",
+      "screen": "/admin/timesheet/periods",
+      "notes": "Lock a period and publish timesheet.locked — the event M7 consumes to calculate a run."
     },
     {
       "service": "svc-timesheet",
       "method": "POST",
       "path": "periods/:id/unlock",
-      "exempt": "consumed-not-displayed",
-      "reason": "See my/days above — same M3 Phase 3 scope note, Payroll Approver unlock (publishes timesheet.unlocked, forces a variance report)."
+      "permission": "timesheet.unlock",
+      "screen": "/admin/timesheet/periods",
+      "notes": "Payroll Approver unlock, with reason. Forces a variance report and bumps the lock version, which invalidates any run already calculated (PAY-030) — the screen must show that consequence before confirming."
     },
     {
       "service": "svc-timesheet",
       "method": "GET",
       "path": "periods/:id/export",
-      "exempt": "consumed-not-displayed",
-      "reason": "See my/days above — same M3 Phase 3 scope note, locked-version snapshot export."
+      "permission": "timesheet.read",
+      "screen": "/admin/timesheet/periods",
+      "notes": "Locked-version snapshot export, downloaded from the period screen."
     },
     {
       "service": "svc-timesheet",
       "method": "GET",
       "path": "ot/summary",
-      "exempt": "consumed-not-displayed",
-      "reason": "See my/days above — same M3 Phase 3 scope note, OT-by-rate-class summary."
+      "permission": "timesheet.read",
+      "screen": "/team/timesheet/ot-summary",
+      "notes": "OT hours by rate class (1.5x/2x/3x) across a date range — the manager/HR view of OT cost before a period locks."
     },
     {
       "service": "svc-i18n",
@@ -193,7 +206,119 @@
       "method": "GET",
       "path": "health",
       "exempt": "operational",
-      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. No business routes exist yet — Phase 3 adds them."
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. Marked @Public() by the 2026-08-04 guard convergence — see packages/kernel/src/authz/public-routes.audit.test.ts."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "GET",
+      "path": "devices",
+      "permission": "attendance.device.manage",
+      "screen": "/admin/attendance/devices",
+      "notes": "Kiosk/device register: site, kind, approval state. The list an admin works from before approving."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "POST",
+      "path": "devices",
+      "permission": "attendance.device.manage",
+      "screen": "/admin/attendance/devices",
+      "notes": "Register a new kiosk or tablet and issue its per-device HMAC secret."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "POST",
+      "path": "devices/:id/approve",
+      "permission": "attendance.device.manage",
+      "screen": "/admin/attendance/devices",
+      "notes": "Second-person approval of a registered device. The service rejects registeredBy === approvedBy, so the screen must surface who registered it."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "POST",
+      "path": "enrolments/start",
+      "permission": "attendance.enrol.self",
+      "screen": "/ess/enrolment",
+      "notes": "Employee-facing face-enrolment wizard, step 1 — opens a capture session after the separate biometric consent."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "POST",
+      "path": "enrolments/:session/frames",
+      "permission": "attendance.enrol.self",
+      "screen": "/ess/enrolment",
+      "notes": "Same wizard, capture step: frames stream from the browser camera as the employee follows the prompts."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "POST",
+      "path": "enrolments/:session/complete",
+      "permission": "attendance.enrol.self",
+      "screen": "/ess/enrolment",
+      "notes": "Same wizard, final step — commits the template and shows the enrolled/refused outcome."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "POST",
+      "path": "enrolments/alternative",
+      "permission": "attendance.enrol.alternative",
+      "screen": "/hr/attendance/enrolment",
+      "notes": "The PDPA refusal path made visible: HR issues a PIN, QR or badge to an employee who declines biometrics. PRD M4-1 requires this to be a real, staffed workflow, not a fallback nobody can reach."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "DELETE",
+      "path": "enrolments/:employeeId/template",
+      "permission": "attendance.template.delete",
+      "screen": "/compliance/biometric-erasure",
+      "notes": "Manual face-template erasure, alongside the automatic deletion a consent withdrawal already triggers. The DPO console needs a way to act on a request that arrives by any other channel."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "POST",
+      "path": "punches/face",
+      "permission": "attendance.punch.device",
+      "screen": "/kiosk/punch",
+      "notes": "The kiosk PWA itself — the wall-mounted tablet screen an employee stands in front of. Device-authenticated by per-device HMAC, not an OIDC session."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "POST",
+      "path": "punches/verify",
+      "permission": "attendance.punch.verify",
+      "screen": "/ess/punch",
+      "notes": "Mobile 1:1 face verification from the employee’s own phone, for staff not at a kiosk."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "POST",
+      "path": "punches/code",
+      "permission": "attendance.punch.code",
+      "screen": "/kiosk/punch",
+      "notes": "Same kiosk screen’s keypad/scan path — the alternative credential in use, for employees who refused biometrics or whose face match fails."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "POST",
+      "path": "punches/batch",
+      "permission": "attendance.punch.device",
+      "screen": "/kiosk/punch",
+      "notes": "The kiosk screen’s offline queue draining after connectivity returns. Not separately displayed, but it is that screen’s own behaviour rather than a headless integration: the queue depth and replay outcome surface in the kiosk UI (M4-4 AC — zero punch loss across a broker restart)."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "GET",
+      "path": "my/punches",
+      "permission": "attendance.punch.read",
+      "screen": "/ess/punch",
+      "notes": "Employee’s own punch history. Match scores are stripped server-side before this reaches the screen (module doc row 9)."
+    },
+    {
+      "service": "svc-attendance",
+      "method": "GET",
+      "path": "security-events",
+      "permission": "attendance.security.read",
+      "screen": "/admin/attendance/security",
+      "notes": "Liveness failures and spoof attempts, for the admin/security console. The evidence trail behind PRD Q2’s FAR/FRR benchmark."
     },
     {
       "service": "svc-payroll",

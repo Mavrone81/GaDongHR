@@ -47,7 +47,14 @@ export interface RoleTemplate {
  *    caller including hr-system-admin — the notification inbox and document
  *    viewer were unreachable by design, not by bug, until this fix.
  *
- * Total: 54 (48 + 6). No other permission is invented here.
+ *  - the nine `attendance.*` codes — integration reconciliation
+ *    (2026-08-04). These are not additions on top of the roadmap's four
+ *    coarse attendance codes; they REPLACE them, and `punch.submit`,
+ *    `enrolment.manage`, `device.register` and `device.approve` are gone
+ *    from this list entirely. See the block comment on those nine below,
+ *    and the roadmap's permission catalog for the mapping.
+ *
+ * Total: 59 (48 − 4 retired + 6 + 9). No other permission is invented here.
  */
 export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
   { code: 'employee.create', description: 'Create a new employee record' },
@@ -65,10 +72,26 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
   { code: 'ot.request', description: 'Request overtime' },
   { code: 'ot.approve', description: 'Approve requested overtime' },
   { code: 'holiday.manage', description: 'Manage the holiday calendar' },
-  { code: 'punch.submit', description: 'Submit an attendance punch event' },
-  { code: 'enrolment.manage', description: 'Manage biometric enrolment records (not template contents)' },
-  { code: 'device.register', description: 'Register an attendance device' },
-  { code: 'device.approve', description: 'Approve a registered attendance device' },
+  // --- M4 attendance (reconciled 2026-08-04) -------------------------------
+  // These nine REPLACE the roadmap's original `punch.submit`,
+  // `enrolment.manage`, `device.register` and `device.approve`. Those four
+  // were written before svc-attendance existed and are referenced by no
+  // route in the codebase; these nine are what `@RequirePermission(...)`
+  // actually declares in `services/svc-attendance/src/*.controller.ts`, and
+  // were granted to no role at all until this reconciliation — so every
+  // attendance route denied every caller, `kiosk-device` included.
+  // `permission-reachability.test.ts` is what surfaced it. See the roadmap's
+  // permission catalog for the full mapping and the one recorded narrowing
+  // (device register/approve collapsing into a single `manage`).
+  { code: 'attendance.enrol.self', description: "Enrol one's own face template (start/frames/complete)" },
+  { code: 'attendance.enrol.alternative', description: 'Issue a non-biometric credential (PIN, QR, badge) — the PDPA biometric-refusal path' },
+  { code: 'attendance.template.delete', description: "Delete an employee's face template (erasure) — deletion only, never reading template contents" },
+  { code: 'attendance.punch.device', description: 'Submit a punch as a registered kiosk device (per-device HMAC, not a human session)' },
+  { code: 'attendance.punch.verify', description: 'Submit a 1:1 face-verified punch from a personal device' },
+  { code: 'attendance.punch.code', description: 'Submit a punch by PIN, QR or badge' },
+  { code: 'attendance.punch.read', description: "Read one's own punch history" },
+  { code: 'attendance.device.manage', description: 'Register and approve attendance devices (two-person rule still enforced at the service)' },
+  { code: 'attendance.security.read', description: 'Read attendance security events (liveness failures, spoof attempts)' },
   { code: 'timesheet.read', description: 'Read a timesheet' },
   { code: 'timesheet.correct', description: 'Correct a timesheet day record' },
   { code: 'timesheet.lock', description: 'Lock a timesheet period' },
@@ -127,7 +150,16 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     permissions: [
       'employee.read',
       'employee.update',
-      'punch.submit',
+      // M4 reconciliation (2026-08-04): replaces `punch.submit`, which no
+      // route ever declared. These are the four attendance routes an
+      // employee reaches for themselves — enrolling their own face,
+      // punching by 1:1 verify or by PIN/QR/badge, and reading their own
+      // history. `attendance.punch.device` is deliberately NOT here: that
+      // is the kiosk's grant, and it is device-authenticated.
+      'attendance.enrol.self',
+      'attendance.punch.verify',
+      'attendance.punch.code',
+      'attendance.punch.read',
       'leave.request',
       'leave.balance.read',
       'claim.submit',
@@ -336,9 +368,22 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'config.rule.propose',
       'config.rule.read',
       'config.pack.import',
-      'device.register',
-      'device.approve',
-      'enrolment.manage',
+      // M4 reconciliation (2026-08-04), replacing `device.register`,
+      // `device.approve` and `enrolment.manage` — none of which any route
+      // declared. `attendance.device.manage` covers register AND approve;
+      // the two-person rule is still enforced at the service
+      // (`deviceApprovalRequiresSecondPerson`), and restoring the permission
+      // split is recorded as Phase 6 work in the roadmap.
+      //
+      // `attendance.template.delete` is DELETION, never reading template
+      // contents — §4.2's absolute bar is on `biometric.template.read`,
+      // which this role still does not hold and never may. The predecessor
+      // `enrolment.manage` was already scoped this way ("not template
+      // contents").
+      'attendance.device.manage',
+      'attendance.enrol.alternative',
+      'attendance.template.delete',
+      'attendance.security.read',
       // Task 14c: self-scoped notification inbox — see employee-ess comment.
       // Deliberately NOT `document.read`, for the same side-door reason as
       // hr-officer — §4.2 denies this role "payroll amounts by default".
@@ -396,7 +441,14 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     code: 'kiosk-device',
     nameI18n: { en: 'Kiosk Device', th: 'อุปกรณ์ตู้คีออสก์' },
     isSystem: true,
-    permissions: ['punch.submit'],
+    // M4 reconciliation (2026-08-04): `attendance.punch.device` replaces
+    // `punch.submit`. This is the ONLY permission this role may ever hold
+    // (Security doc §4.2: "punch submit only, device-bound"), and the guard
+    // reaches it through `DeviceAuthGuard`'s `device:<id>` principal rather
+    // than an OIDC session. Until this fix the kiosk held a permission no
+    // route declared and lacked the one every kiosk punch requires — so
+    // `POST /punches/face` and `POST /punches/batch` denied every device.
+    permissions: ['attendance.punch.device'],
   },
 ]
 

@@ -89,9 +89,31 @@ describe('ROLE_TEMPLATES — exactly the ten from the roadmap', () => {
     }
   })
 
-  it('kiosk-device holds only punch.submit', () => {
+  it('kiosk-device holds only attendance.punch.device', () => {
+    // Reconciled 2026-08-04: was `punch.submit`, a code the roadmap's
+    // pre-svc-attendance catalog invented and NO route ever declared. The
+    // kiosk therefore held a permission that unlocked nothing while lacking
+    // `attendance.punch.device`, which every kiosk punch route requires —
+    // so `POST /punches/face` and `POST /punches/batch` denied every device,
+    // forever. Security doc §4.2's "punch submit only, device-bound" still
+    // holds: exactly one permission, and it is device-authenticated.
     const role = ROLE_TEMPLATES.find((r) => r.code === 'kiosk-device')
-    expect(role?.permissions).toEqual(['punch.submit'])
+    expect(role?.permissions).toEqual(['attendance.punch.device'])
+  })
+
+  it('the four retired coarse attendance codes are granted to no role and exist in no catalog entry', () => {
+    // They were referenced by no route while being granted to real roles —
+    // the mirror image of the Task 14c defect (a grant nobody can use,
+    // rather than a route nobody can reach). Retiring them has to be
+    // complete on both sides or the next reader reasonably assumes the
+    // kiosk can still punch via `punch.submit`.
+    const retired = ['punch.submit', 'enrolment.manage', 'device.register', 'device.approve']
+    const catalogCodes = new Set(PERMISSION_CATALOG.map((p) => p.code))
+    const grantedCodes = new Set(ROLE_TEMPLATES.flatMap((r) => r.permissions))
+    for (const code of retired) {
+      expect(catalogCodes.has(code)).toBe(false)
+      expect(grantedCodes.has(code)).toBe(false)
+    }
   })
 })
 
