@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Inject, Post, Query, Req, UseGuards } from '@nestjs/common'
-import { PermissionGuard, RequirePermission, withTransaction } from '@gadong/kernel'
+import { Body, Controller, Get, Inject, Post, Query, Req } from '@nestjs/common'
+import { RequirePermission, withTransaction } from '@gadong/kernel'
 import type { AuthenticatedRequest } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { DB_POOL } from './attendance.controller'
@@ -7,7 +7,7 @@ import { PunchService } from './punch.service'
 import { PunchRepository } from './punch.repository'
 import type { InsertPunchResult, NewPunchRow, PunchDirection, PunchRow } from './punch.repository'
 import type { AlternativeKind } from './alternative-credential.repository'
-import { DeviceAuthGuard } from './device-auth.guard'
+import { DeviceAuthenticated } from './device-auth.guard'
 import type { DeviceAuthenticatedRequest } from './device-auth.guard'
 import { runFailClosed } from './http-fail-closed'
 
@@ -75,16 +75,21 @@ export class PunchController {
     @Inject(DB_POOL) private readonly pool: Pool,
   ) {}
 
-  // Guard ORDER matters here: Nest runs guards left-to-right within one
-  // `@UseGuards(...)` call. `DeviceAuthGuard` must run BEFORE
-  // `PermissionGuard` — it is what populates `request.userId` (as
-  // `device:<id>`) for a kiosk call, which `PermissionGuard` then reads.
-  // Reversing this order (or splitting them across a class-level
-  // `PermissionGuard` + a method-level `DeviceAuthGuard`, which Nest would
-  // also run class-then-method, i.e. still the wrong order) would deny
-  // every kiosk request before `DeviceAuthGuard` ever ran.
+  // Guard ORDER still matters, but it is no longer expressed here.
+  // `DeviceAuthGuard` must run BEFORE `PermissionGuard` — it is what
+  // populates `request.userId` (as `device:<id>`) for a kiosk call, which
+  // `PermissionGuard` then reads. That used to force
+  // `@UseGuards(DeviceAuthGuard, PermissionGuard)` onto these two routes,
+  // which in turn is why this service could not mount a global `APP_GUARD`
+  // (Nest runs global guards BEFORE route guards, so a global
+  // `PermissionGuard` would have denied every kiosk request before
+  // `DeviceAuthGuard` ever ran). The ordering now lives in the `APP_GUARD`
+  // registration order in `app.module.ts`, which Nest honours, and
+  // `@DeviceAuthenticated()` marks which routes the first of those two
+  // guards actually acts on. Same order, same behaviour, no per-route
+  // guard mounting. See `device-auth.guard.ts`'s header.
   @Post('punches/face')
-  @UseGuards(DeviceAuthGuard, PermissionGuard)
+  @DeviceAuthenticated()
   @RequirePermission('attendance.punch.device')
   async face(@Body() body: FacePunchBody, @Req() req: DeviceAuthenticatedRequest) {
     const deviceId = req.deviceId
@@ -101,7 +106,6 @@ export class PunchController {
   }
 
   @Post('punches/verify')
-  @UseGuards(PermissionGuard)
   @RequirePermission('attendance.punch.verify')
   async verify(@Body() body: VerifyPunchBody, @Req() req: Req) {
     const employeeId = req.userId ?? 'unknown'
@@ -117,7 +121,6 @@ export class PunchController {
   }
 
   @Post('punches/code')
-  @UseGuards(PermissionGuard)
   @RequirePermission('attendance.punch.code')
   async code(@Body() body: CodePunchBody, @Req() req: Req) {
     const employeeId = body.employeeId ?? (body.kind === 'pin' ? req.userId : undefined)
@@ -133,7 +136,7 @@ export class PunchController {
   }
 
   @Post('punches/batch')
-  @UseGuards(DeviceAuthGuard, PermissionGuard)
+  @DeviceAuthenticated()
   @RequirePermission('attendance.punch.device')
   async batch(@Body() body: BatchPunchBody, @Req() req: DeviceAuthenticatedRequest) {
     const deviceId = req.deviceId
@@ -146,7 +149,6 @@ export class PunchController {
   }
 
   @Get('my/punches')
-  @UseGuards(PermissionGuard)
   @RequirePermission('attendance.punch.read')
   async myPunches(@Query('from') from: string, @Query('to') to: string, @Req() req: Req): Promise<{ punches: PunchRow[] }> {
     const employeeId = req.userId ?? 'unknown'

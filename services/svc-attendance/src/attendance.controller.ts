@@ -1,5 +1,5 @@
 import { Controller, Get, Inject } from '@nestjs/common'
-import { buildHealth } from '@gadong/kernel'
+import { Public, buildHealth } from '@gadong/kernel'
 import type { HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
 
@@ -16,18 +16,21 @@ export interface HealthCheckPort {
 }
 
 /**
- * The HTTP boundary for this service — today, ONLY `GET /health` (Task 14
- * brief: "Do NOT implement enrolment, matching, liveness or punch
- * ingestion. Phase 3 owns those"). No `@RequirePermission`-guarded routes
- * exist yet, so `app.module.ts` deliberately does not mount the kernel's
- * `PermissionGuard`/`OidcMiddleware` either — wiring auth infrastructure
- * for zero protected routes would be dead code no test could justify.
- * Phase 3 adds both alongside its first real route, matching how
- * `services/svc-config`/`services/svc-docs` mount them.
+ * `GET /health` — this service's only unauthenticated route.
  *
- * `/health` itself is exempt from auth everywhere in this codebase (every
- * other service's controller leaves it unguarded too), so that convention
- * needs no guard to hold here either.
+ * The `@Public()` below is what let `svc-attendance` converge on the
+ * standard guard mounting (2026-08-04). M4 avoided adding it, and mounted
+ * `PermissionGuard` per-controller instead, so that this route could stay
+ * exactly as unguarded as the Task 14 skeleton left it. The cost of that
+ * choice was that a controller added to this service later would ship with
+ * no permission check and nothing would fail — the one failure mode
+ * per-controller mounting has and global mounting does not.
+ *
+ * `@Public()` is not a weaker exemption than being unguarded: it is a
+ * stronger one, because it is checked. `public-routes.audit.test.ts` holds
+ * a reviewed list of every `@Public()` route in the system and fails if
+ * this set changes without that list changing, and each entry must also
+ * carry an exemption with a reason in `web/ui-coverage.json`.
  */
 @Controller()
 export class AttendanceController {
@@ -38,6 +41,7 @@ export class AttendanceController {
   ) {}
 
   @Get('health')
+  @Public()
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
     const crypto = await this.cryptoHealth.check()

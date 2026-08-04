@@ -1,5 +1,5 @@
-import { Controller, Get, Inject, Query, UseGuards } from '@nestjs/common'
-import { GadongError, PermissionGuard, RequirePermission } from '@gadong/kernel'
+import { Controller, Get, Inject, Query } from '@nestjs/common'
+import { GadongError, RequirePermission } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { DB_POOL } from './attendance.controller'
 import { SecurityEventRepository } from './security-event.repository'
@@ -14,7 +14,6 @@ function invalidKind(kind: string): GadongError {
 
 /** `GET /security-events?kind=liveness_failed` — module doc §3 row 11: weekly review queue (PRD metric). */
 @Controller('security-events')
-@UseGuards(PermissionGuard)
 export class SecurityController {
   constructor(
     private readonly securityEvents: SecurityEventRepository,

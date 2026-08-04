@@ -122,7 +122,46 @@ exports.up = (pgm) => {
       actual_out: { type: 'timestamptz' },
       worked_hours: { type: 'numeric', notNull: true, default: 0 },
       late_min: { type: 'numeric', notNull: true, default: 0 },
+      // OT quantities, in HOURS, each stored against the multiplier it is
+      // payable at. `ot_15x` (LPA s.61) and `ot_3x` (LPA s.63) are literal
+      // hours worked. `ot_2x` IS NOT — see the contract below.
       ot_15x: { type: 'numeric', notNull: true, default: 0 },
+      //
+      // ⚠️ CROSS-MODULE CONTRACT — `ot_2x` IS A PAY-RATE EQUIVALENT, NOT
+      // HOURS WORKED. Read this before changing anything that writes it.
+      //
+      // It is the number of hours payable at exactly 2x the hourly base,
+      // with LPA s.62's entitlement discount ALREADY BAKED INTO THE
+      // QUANTITY:
+      //
+      //   - MONTHLY staff are already paid a normal day's wage for a public
+      //     holiday whether or not they work it, so the law owes only a
+      //     further +1x for hours actually worked. `src/ot-classifier.ts`
+      //     therefore stores HALF the worked minutes here, so that
+      //     `half x 2x = 1x`.
+      //   - DAILY / HOURLY / CONTRACT staff get nothing for an unworked
+      //     holiday, so the law owes the full 2x and the FULL worked
+      //     minutes are stored.
+      //
+      // So an 8-hour holiday shift writes `ot_2x = 4.00` for a monthly
+      // employee and `8.00` for a daily-rate one (TC-M3-007). Nothing is
+      // lost: `worked_hours` above always carries the true, unscaled hours.
+      //
+      // svc-payroll's gross-to-net engine consumes this via
+      // `timesheet.locked` + `GET /periods/:id/totals` and applies
+      // `ot.holiday_work.multiplier` UNIFORMLY at 2x, deliberately NOT
+      // re-deriving the distinction from the employee's pay basis. Halving
+      // on both sides pays a monthly employee HALF what s.62 owes, on a
+      // payslip that looks entirely plausible.
+      //
+      // The Statutory Spec §4 expresses the identical rule the other way
+      // round (the discount living in the MULTIPLIER). Both encodings are
+      // correct in isolation; applying both, or neither, is the defect. If
+      // a future rule pack moves the discount into the multiplier, THE
+      // HALVING IN `ot-classifier.ts` MUST BE REMOVED IN THE SAME CHANGE.
+      // `services/svc-payroll/src/engine/ot-2x-contract.cross-module.test.ts`
+      // is the only test that runs both modules together and will fail if
+      // one side moves without the other.
       ot_2x: { type: 'numeric', notNull: true, default: 0 },
       ot_3x: { type: 'numeric', notNull: true, default: 0 },
       leave_code: { type: 'text' },

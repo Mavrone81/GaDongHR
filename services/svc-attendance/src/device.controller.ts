@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common'
-import { PermissionGuard, RequirePermission, withTransaction } from '@gadong/kernel'
+import { Body, Controller, Get, Inject, Param, Post, Req } from '@nestjs/common'
+import { RequirePermission, withTransaction } from '@gadong/kernel'
 import type { AuthenticatedRequest } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { DB_POOL } from './attendance.controller'
@@ -25,7 +25,6 @@ interface RegisterDeviceBody {
 
 /** `/devices*` — module doc §3 row 10: registration with second-person approval (`DeviceService.approve`). */
 @Controller('devices')
-@UseGuards(PermissionGuard)
 export class DeviceController {
   constructor(
     private readonly devices: DeviceService,

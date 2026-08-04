@@ -63,11 +63,31 @@ const EXPECTED_PUBLIC_ROUTES: PublicRoute[] = [
   // `PermissionGuard` globally for the first time to guard real business
   // routes, which would otherwise deny-by-default their own healthcheck —
   // the same Task 16e defect class `health.controller.ts`'s M1 fix caught.
-  // svc-scheduler's health stays non-public: M2 did not mount a global
-  // guard, so its health route needs no bypass.
   { service: 'svc-onboarding', method: 'GET', path: 'health' },
   { service: 'svc-leave', method: 'GET', path: 'health' },
   { service: 'svc-claims', method: 'GET', path: 'health' },
+  // Added by the integration reconciliation (2026-08-04), FIXING A LIVE
+  // DEFECT. The note that used to sit here read "svc-scheduler's health
+  // stays non-public: M2 did not mount a global guard, so its health route
+  // needs no bypass" — and it was wrong. M2's Phase 3 build DID add
+  // `{ provide: APP_GUARD, useClass: PermissionGuard }` when it added the
+  // rostering controllers, so `GET /health` had a global guard, no
+  // `@Public()` and no `@RequirePermission`, and returned AUZ-403 to
+  // compose's healthcheck, the deploy script and monitoring on every call.
+  //
+  // This gate could not have caught it: it compares `@Public()` MARKERS,
+  // and a route that is neither public nor guarded has no marker to
+  // compare. `guard-mounting.audit.test.ts` (added alongside this entry)
+  // asserts the complementary property — every route in a globally-guarded
+  // service declares one or the other — which is what makes this class of
+  // defect visible.
+  { service: 'svc-scheduler', method: 'GET', path: 'health' },
+  // Added by the same reconciliation, converging svc-attendance off the
+  // per-controller `@UseGuards(PermissionGuard)` pattern onto the standard
+  // global `APP_GUARD`. M4 chose per-controller specifically so it would
+  // not have to add this line; the cost was that a controller added to
+  // svc-attendance later would have shipped unguarded with no test failing.
+  { service: 'svc-attendance', method: 'GET', path: 'health' },
   // Added by M7 (Phase 5), same cause as the three above: `svc-payroll` now
   // mounts `PermissionGuard` globally to guard the pay-profile, run
   // lifecycle, payslip, bank-file and statutory-export routes, so its own

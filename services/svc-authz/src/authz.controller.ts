@@ -63,9 +63,28 @@ function deniedDecision(): Decision {
  *    admins and so ARE guarded, individually, with
  *    `@UseGuards(PermissionGuard)` + `@RequirePermission(...)` — the same
  *    deny-by-default `svc-config`'s routes get via `APP_GUARD`, just
- *    applied per-method here because `APP_GUARD` has no per-route "skip
- *    this one" escape hatch (kernel `guard.ts`'s own doc comment:
- *    "deliberately no way to mark a route public").
+ *    applied per-method here.
+ *
+ * **Why this service keeps the per-route pattern (reviewed 2026-08-04,
+ * guard convergence).** Every other service converged on a global
+ * `APP_GUARD` plus `@Public()`, because per-route mounting fails open for
+ * routes nobody remembered to decorate. `svc-authz` is the one documented
+ * exception, and it is a genuine one: `@Public()` on `/decide` would make
+ * the guard return `true` before consulting anything, which WOULD work
+ * mechanically — but it would also mean this service's authorisation
+ * posture depended on a decorator staying attached to the single most
+ * security-critical route in the system, where forgetting it produces
+ * infinite recursion (`/decide` asking `/decide`) rather than a clean
+ * denial. Leaving `/decide` guardless by construction, and guarding the
+ * three admin routes explicitly, keeps the circular route incapable of
+ * being guarded rather than merely exempted from guarding.
+ *
+ * The failure mode that costs — a controller added here later inheriting
+ * no guard — is closed by test, not by mounting:
+ * `packages/kernel/src/authz/guard-mounting.audit.test.ts` requires every
+ * route in this service to carry `@UseGuards(PermissionGuard)` or appear
+ * in its named `/decide`-and-`/health` allowlist, so a new unguarded route
+ * fails the build.
  *
  * `AuthzClient` (used inside `PermissionGuard`, wired in `app.module.ts`)
  * therefore calls back into this same running service's own `/decide` over

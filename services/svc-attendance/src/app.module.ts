@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
-import { APP_FILTER } from '@nestjs/core'
+import { APP_FILTER, APP_GUARD } from '@nestjs/core'
 import {
   AuditEmitter,
   AuthzClient,
@@ -99,27 +99,43 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
 }
 
 /**
- * Phase 3 (M4 build): supersedes the Task 14 skeleton's guard-free
- * `AppModule` (health/schema only). `PermissionGuard` is now REAL
- * enforcement, but deliberately NOT mounted as a global `APP_GUARD` the way
- * `svc-onboarding`/`svc-leave`/`svc-claims` mount it — see
- * `enrolment.controller.ts`'s header comment: `AttendanceController`'s
- * pre-existing `GET /health` route has no `@Public()` today (Task 14) and
- * this build must not force one onto it, so every BUSINESS controller
- * instead applies `PermissionGuard` itself via `@UseGuards` (class- or
- * method-level — see `punch.controller.ts`'s header comment on why the two
- * kiosk routes need it at method level, after `DeviceAuthGuard`). `/health`
- * stays exactly as unguarded as it was before this build.
- *
  * `OidcMiddleware` is scoped to the human-facing controllers only
  * (`configure()` below) — the two kiosk-only punch routes authenticate via
  * `DeviceAuthGuard` instead, and `AttendanceController`'s health route
  * needs neither.
+ *
+ * **Guard mounting (converged 2026-08-04).** This service now uses the
+ * standard pattern every other service uses — a global `APP_GUARD`
+ * `PermissionGuard` plus `@Public()` on the one route that is genuinely
+ * unauthenticated — enforced by
+ * `packages/kernel/src/authz/guard-mounting.audit.test.ts`.
+ *
+ * The M4 build mounted `PermissionGuard` per-controller via `@UseGuards`
+ * instead, to avoid forcing a `@Public()` onto `AttendanceController`'s
+ * pre-existing `GET /health`. Per-controller mounting fails open in exactly
+ * one way, and it is the way that matters: a controller added to this
+ * service later inherits nothing, so it ships unguarded and every test
+ * still passes. Global mounting fails closed — an undecorated route throws
+ * AUZ-403 rather than serving.
+ *
+ * TWO guards are registered, and the ORDER IS LOAD-BEARING. Nest runs
+ * `APP_GUARD` providers in registration order, so `DeviceAuthGuard` runs
+ * first and populates `request.userId` as `device:<id>` for a kiosk call,
+ * which `PermissionGuard` then reads — the same order the two kiosk routes
+ * previously got from `@UseGuards(DeviceAuthGuard, PermissionGuard)`.
+ * Reversing these two lines would deny every kiosk punch before
+ * `DeviceAuthGuard` ever ran. `DeviceAuthGuard` acts only on routes marked
+ * `@DeviceAuthenticated()` and is a no-op elsewhere; it never grants
+ * anything on its own, because `PermissionGuard` still has to allow the
+ * request afterwards.
  */
 @Module({
   controllers: [AttendanceController, EnrolmentController, PunchController, DeviceController, SecurityController],
   providers: [
     { provide: APP_FILTER, useClass: GadongErrorFilter },
+    // ORDER IS LOAD-BEARING — see this module's header comment.
+    { provide: APP_GUARD, useClass: DeviceAuthGuard },
+    { provide: APP_GUARD, useClass: PermissionGuard },
     {
       provide: AuthzClient,
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),

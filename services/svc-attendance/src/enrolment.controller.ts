@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, HttpCode, Inject, Param, Post, Req, UseGuards } from '@nestjs/common'
-import { PermissionGuard, RequirePermission, withTransaction } from '@gadong/kernel'
+import { Body, Controller, Delete, HttpCode, Inject, Param, Post, Req } from '@nestjs/common'
+import { RequirePermission, withTransaction } from '@gadong/kernel'
 import type { AuthenticatedRequest } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { DB_POOL } from './attendance.controller'
@@ -31,13 +31,20 @@ interface AlternativeBody {
   code: string
 }
 /**
- * `/enrolments*` — M4-1/M4-5. Guarded per-controller with
- * `@UseGuards(PermissionGuard)` (rather than a global `APP_GUARD` in
- * `AppModule`) so `AttendanceController`'s pre-existing `GET /health` route
- * (Task 14, unguarded, no `@Public()`) is unaffected — see `app.module.ts`.
+ * `/enrolments*` — M4-1/M4-5. Guarded by the global `APP_GUARD`
+ * `PermissionGuard` in `AppModule`, like every other service; each route
+ * below declares its own `@RequirePermission`.
+ *
+ * This controller used to carry `@UseGuards(PermissionGuard)` at class
+ * level to avoid forcing a `@Public()` onto `AttendanceController`'s
+ * `GET /health`. That trade was the wrong way round: per-controller
+ * mounting means a controller added to this service LATER ships with no
+ * permission check at all and nothing fails. `/health` now carries
+ * `@Public()` — an explicit, audited exemption
+ * (`packages/kernel/src/authz/public-routes.audit.test.ts`) — and the
+ * guard is global. See `app.module.ts`.
  */
 @Controller('enrolments')
-@UseGuards(PermissionGuard)
 export class EnrolmentController {
   constructor(
     private readonly enrolments: EnrolmentService,

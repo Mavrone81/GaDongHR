@@ -1,24 +1,39 @@
 import { Controller, Get, Inject } from '@nestjs/common'
-import { buildHealth } from '@gadong/kernel'
+import { Public, buildHealth } from '@gadong/kernel'
 import type { HealthPayload, Queryable } from '@gadong/kernel'
 
 /** DI token for the `scheduler` schema's connection pool — matches `services/svc-config`'s `DB_POOL` pattern. `app.module.ts` binds it to a real `pg.Pool` via kernel's `createPool`. */
 export const DB_POOL = Symbol('DB_POOL')
 
 /**
- * The HTTP boundary for `GET /health` — the only route this task builds
- * (Task 14 brief: schema, migrations, and health, not rostering/OT/holiday
- * business logic — that is Phase 3). Deliberately no `@RequirePermission`
- * and no `PermissionGuard` mounted in `AppModule`: `/health` is exempt from
- * the guard on every other service too (`services/svc-config`'s
- * `RulesController.health`), and there are no other routes here yet for the
- * guard to protect — Phase 3's controllers add it when they add routes.
+ * The HTTP boundary for `GET /health`.
+ *
+ * **Fixed 2026-08-04 (integration reconciliation), a live defect.** This
+ * comment used to read "no `PermissionGuard` mounted in `AppModule`", and
+ * `packages/kernel/src/authz/public-routes.audit.test.ts` encoded the same
+ * belief ("M2 did not mount a global guard, so its health route needs no
+ * bypass"). Both were stale: M2's Phase 3 build DID add
+ * `{ provide: APP_GUARD, useClass: PermissionGuard }` to `app.module.ts`
+ * when it added the rostering controllers. With a global guard mounted and
+ * neither `@Public()` nor `@RequirePermission` on this route,
+ * `PermissionGuard` reaches its "no permission declared" branch and throws
+ * AUZ-403 — so `GET /health` returned 403 to compose's healthcheck, the
+ * deploy script and monitoring, on every request.
+ *
+ * Nothing caught it: the audit test only compares `@Public()` MARKERS
+ * against its expected list (a route that is neither public nor guarded is
+ * invisible to it), and `health.controller.test.ts` calls `health()`
+ * directly, which never runs a guard. The `every route in a globally
+ * guarded service declares @RequirePermission or @Public()` assertion added
+ * to `packages/kernel/src/authz/guard-mounting.audit.test.ts` is what makes
+ * this class of defect visible from now on.
  */
 @Controller()
 export class HealthController {
   constructor(@Inject(DB_POOL) private readonly pool: Queryable) {}
 
   @Get('health')
+  @Public()
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
     return buildHealth('svc-scheduler', { db })
