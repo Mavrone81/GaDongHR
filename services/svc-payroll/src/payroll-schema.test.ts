@@ -41,7 +41,14 @@ import type { DB, Logger, MigrationBuilder } from 'node-pg-migrate/dist/types'
 const MIGRATIONS_DIR = join(__dirname, '..', 'migrations')
 
 function migrationFiles(): string[] {
-  const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.js'))
+  // Sorted (M7/Phase 5): `migrationSource()` concatenates every migration
+  // file, and the exhaustive bytea enumeration below asserts an ORDERED
+  // list. `readdirSync` gives no ordering guarantee, so with more than one
+  // migration file that assertion would be platform-dependent. Sorting by
+  // filename is also the order node-pg-migrate itself applies them in.
+  const files = readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith('.js'))
+    .sort()
   if (files.length === 0) throw new Error(`no migration files found in ${MIGRATIONS_DIR}`)
   return files
 }
@@ -214,6 +221,27 @@ describe('payroll schema migration — every money column is bytea, enumerated e
       'pdf_ref',
       'amount',
       'file_ref',
+      // --- 1754701000000_payroll-engine.js (M7, Phase 5) ---
+      // `pay_input.amount`: one-off items, unused-leave payouts and expense
+      // reimbursements are money, so the column is ciphertext like every
+      // other money column here.
+      'amount',
+      // `pay_profile.bank_account`/`bank_account_name`: "bank account" is
+      // named explicitly in the roadmap's S3 row. `pf_rate_employer` is the
+      // employer's matching provident-fund rate — a salary-derived figure,
+      // treated exactly as `pf_rate` already is.
+      'bank_account',
+      'bank_account_name',
+      'pf_rate_employer',
+      // `payslip.sso_er`/`ewf_er`/`pf_er`: the EMPLOYER-side contributions
+      // the Phase 1 skeleton omitted. `taxable_gross`/`non_taxable_pay`:
+      // the split that keeps a reimbursement out of the tax and SSO bases
+      // without any export having to re-derive which base a figure is in.
+      'sso_er',
+      'ewf_er',
+      'pf_er',
+      'taxable_gross',
+      'non_taxable_pay',
     ])
   })
 

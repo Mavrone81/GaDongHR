@@ -274,6 +274,15 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'payroll.run.prepare',
       'payroll.run.calculate',
       'payroll.export',
+      // M7 reconciliation (Phase 5): `payslip.read.any` was in the roadmap's
+      // permission catalog but granted to NO role, so `svc-payroll`'s
+      // `GET /runs/:id/payslips` — how a payroll officer checks the payslips
+      // the run they just calculated actually produced — was unreachable by
+      // anyone. Granted to exactly the two roles Security doc §4.2 already
+      // allows to see payroll amounts (both already hold
+      // `payroll.profile.read`, i.e. full salary access), and deliberately
+      // NOT to hr-officer, hr-system-admin or auditor-readonly.
+      'payslip.read.any',
       // M6 reconciliation (2026-08-04): `claim.approve.finance` — PRD M6-3's
       // second approval band ("manager + finance" above 2,000 THB). The ten
       // role templates have no dedicated "Finance" persona; `payroll-officer`
@@ -303,6 +312,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'payroll.run.approve',
       'payroll.run.commit',
       'payroll.profile.read',
+      // M7 reconciliation (Phase 5) — see payroll-officer's comment. An
+      // approver who cannot see the payslips they are approving is being
+      // asked to sign for figures they never saw.
+      'payslip.read.any',
       'timesheet.unlock',
       'config.rule.read',
       // Task 14c: notify self-scoped inbox, and document.read for the same

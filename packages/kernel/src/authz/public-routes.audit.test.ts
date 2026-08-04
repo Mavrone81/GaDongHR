@@ -68,6 +68,15 @@ const EXPECTED_PUBLIC_ROUTES: PublicRoute[] = [
   { service: 'svc-onboarding', method: 'GET', path: 'health' },
   { service: 'svc-leave', method: 'GET', path: 'health' },
   { service: 'svc-claims', method: 'GET', path: 'health' },
+  // Added by M7 (Phase 5), same cause as the three above: `svc-payroll` now
+  // mounts `PermissionGuard` globally to guard the pay-profile, run
+  // lifecycle, payslip, bank-file and statutory-export routes, so its own
+  // healthcheck — called by compose, the deploy script and monitoring with
+  // no bearer token — would otherwise be denied by deny-by-default. It is
+  // the only `@Public()` route in the service that holds every salary in
+  // the product, and `services/svc-payroll/src/payroll.controller.test.ts`
+  // asserts independently that no other route there is public.
+  { service: 'svc-payroll', method: 'GET', path: 'health' },
 ]
 
 function routeKeyString(r: PublicRoute): string {
