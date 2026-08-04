@@ -109,7 +109,7 @@
       "method": "GET",
       "path": "health",
       "exempt": "operational",
-      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. No business routes exist yet — Phase 5 adds them."
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. The only @Public() route in the service that holds every salary in the product."
     },
     {
       "service": "svc-leave",
@@ -652,6 +652,126 @@
       "permission": "claim.approve.finance",
       "screen": "/team/claims",
       "notes": "Routes an approved claim to the next payroll run or an off-cycle payment, from the same console."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "GET",
+      "path": "profiles/:employeeId",
+      "permission": "payroll.profile.read",
+      "screen": "/admin/payroll/profiles/:employeeId",
+      "notes": "Pay structure screen: basis, base pay, recurring items, PF rate, tax declaration and (masked) bank account."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "PUT",
+      "path": "profiles/:employeeId",
+      "permission": "payroll.profile.write",
+      "screen": "/admin/payroll/profiles/:employeeId",
+      "notes": "Same screen's save action. A sub-minimum wage is rejected inline with PAY-010 showing the province, the floor and the Wage Committee citation."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "POST",
+      "path": "runs",
+      "permission": "payroll.run.prepare",
+      "screen": "/admin/payroll/runs",
+      "notes": "Opens a period run from the payroll run list; binds the current timesheet lock version."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "GET",
+      "path": "runs",
+      "permission": "payroll.run.prepare",
+      "screen": "/admin/payroll/runs",
+      "notes": "The payroll run list itself — every run for a period with its lifecycle status."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "POST",
+      "path": "runs/:id/calculate",
+      "permission": "payroll.run.calculate",
+      "screen": "/admin/payroll/runs/:id",
+      "notes": "Runs gross-to-net for the in-scope employees from the run detail screen."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "GET",
+      "path": "runs/:id/variance",
+      "permission": "payroll.run.approve",
+      "screen": "/admin/payroll/runs/:id/variance",
+      "notes": "Variance review: line-level movement against the previous period's committed run, threshold-flagged. The approver's screen before signing."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "POST",
+      "path": "runs/:id/review",
+      "permission": "payroll.run.prepare",
+      "screen": "/admin/payroll/runs/:id/variance",
+      "notes": "Marks the variance review complete, from the same screen."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "POST",
+      "path": "runs/:id/approve",
+      "permission": "payroll.run.approve",
+      "screen": "/admin/payroll/runs/:id/variance",
+      "notes": "Approval, with step-up re-auth. A preparer approving their own run is refused inline with AUZ-409 (segregation of duties)."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "POST",
+      "path": "runs/:id/commit",
+      "permission": "payroll.run.commit",
+      "screen": "/admin/payroll/runs/:id",
+      "notes": "Commits the approved run. The screen states plainly that a committed run is immutable and corrections require an adjustment run."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "POST",
+      "path": "adjustment-runs",
+      "permission": "payroll.run.prepare",
+      "screen": "/admin/payroll/runs",
+      "notes": "Creates a correction run against a committed run — the only sanctioned way to change what a committed period said."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "GET",
+      "path": "runs/:id/payslips",
+      "permission": "payslip.read.any",
+      "screen": "/admin/payroll/runs/:id/payslips",
+      "notes": "Itemised payslips produced by a run, for the payroll officer and approver only. Behind a payroll permission rather than the generic document.read, per the roadmap's row-level-scoping gap."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "GET",
+      "path": "my/payslips",
+      "permission": "payslip.read.self",
+      "screen": "/my/payslips",
+      "notes": "The employee's own e-payslips in their own language, Buddhist Era dates on Thai. Self-scoped by construction — the employee id comes from the token, never the request."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "POST",
+      "path": "runs/:id/bank-file",
+      "permission": "payroll.export",
+      "screen": "/admin/payroll/runs/:id/exports",
+      "notes": "Generates the net-pay transfer file in the chosen format (KBank, SCB, BBL, Krungsri or generic CSV); the download is audited."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "POST",
+      "path": "runs/:id/exports/:kind",
+      "permission": "payroll.export",
+      "screen": "/admin/payroll/runs/:id/exports",
+      "notes": "Same screen: สปส.1-10, ภ.ง.ด.1, ภ.ง.ด.1ก, 50 ทวิ and คร.11 data packs for manual e-filing."
+    },
+    {
+      "service": "svc-payroll",
+      "method": "POST",
+      "path": "final-pay/:employeeId",
+      "permission": "payroll.run.prepare",
+      "screen": "/admin/payroll/final-pay/:employeeId",
+      "notes": "Final-pay assessment: severance by the s.118 tiers, pay in lieu of notice, and the s.119 cause and citation when severance is withheld."
     }
   ]
 }

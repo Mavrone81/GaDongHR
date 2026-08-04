@@ -23,7 +23,9 @@ import type { DB, Logger, MigrationBuilder } from 'node-pg-migrate/dist/types'
 const MIGRATIONS_DIR = join(__dirname, '..', 'migrations')
 
 function migrationFiles(): string[] {
-  const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.js'))
+  const files = readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith('.js'))
+    .sort()
   if (files.length === 0) throw new Error(`no migration files found in ${MIGRATIONS_DIR}`)
   return files
 }
@@ -31,6 +33,23 @@ function migrationFiles(): string[] {
 /** All migration files concatenated — the new triggers/functions live in 1754700100000, but this deliberately scans every file so a reader never has to guess which file a given assertion targets. */
 function migrationSource(): string {
   return migrationFiles()
+    .map((f) => readFileSync(join(MIGRATIONS_DIR, f), 'utf8'))
+    .join('\n')
+}
+
+/**
+ * Only the two migrations that existed when this file was written
+ * (`*payroll-schema*` and `*payroll-child-immutability*`). The regression
+ * this file guards is "1754700100000 did not silently change the parent's
+ * columns" — a question about those two files and no others. Phase 5's
+ * `1754701000000_payroll-engine.js` legitimately ADDS encrypted columns
+ * (enumerated in `payroll-schema.test.ts`, which owns the whole-schema
+ * view), so scanning every file here would turn a correct addition into a
+ * false failure of an unrelated assertion.
+ */
+function parentMigrationSource(): string {
+  return migrationFiles()
+    .filter((f) => f.includes('payroll-schema') || f.includes('payroll-child-immutability'))
     .map((f) => readFileSync(join(MIGRATIONS_DIR, f), 'utf8'))
     .join('\n')
 }
@@ -119,7 +138,7 @@ describe('payroll child-immutability migration — unchanged: SoD check, bytea c
   })
 
   it('all 13 bytea columns are still exactly the same 13, in the same order', () => {
-    const source = migrationSource()
+    const source = parentMigrationSource()
     const byteaColumnPattern = /(\w+):\s*\{\s*type:\s*'bytea'/g
     const byteaColumns: string[] = []
     let match: RegExpExecArray | null
