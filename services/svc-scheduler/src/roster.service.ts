@@ -6,6 +6,7 @@ import type { Conflict, ConflictReport, RunningTotal } from './guardrail'
 import { evaluateDailyTotal, evaluateWeeklyTotal } from './guardrail'
 import { paidDurationMinutes } from './hours'
 import { minutesToHoursString } from './hours'
+import { HolidaysRepository } from './holidays.repository'
 import { LeaveRefRepository } from './leave-ref.repository'
 import type { RosterEntryRow } from './roster.repository'
 import { RosterRepository } from './roster.repository'
@@ -51,6 +52,11 @@ export interface PublishResult {
   entries: RosterEntryRow[]
 }
 
+/** Shift times are stored as `HH:MM` or `HH:MM:SS`; `roster.entry.published`'s ISO timestamps need seconds. */
+function normaliseTime(t: string): string {
+  return /^\d{2}:\d{2}$/.test(t) ? `${t}:00` : t
+}
+
 function shiftNotFound(shiftId: string): GadongError {
   return new GadongError('SCH-404', 'scheduler.error.shift_not_found', 404, [{ shiftId }])
 }
@@ -87,6 +93,7 @@ export class RosterService {
     private readonly shiftsRepo: ShiftsRepository,
     private readonly leaveRefRepo: LeaveRefRepository,
     private readonly guardrails: GuardrailPolicy,
+    private readonly holidaysRepo: HolidaysRepository,
   ) {}
 
   /**
@@ -222,7 +229,38 @@ export class RosterService {
     return { created, skipped }
   }
 
-  /** `POST /rosters/publish` — moves every `planned` entry in range to `published` and emits `roster.published` in the SAME transaction (ADR-005). */
+  /**
+   * `POST /rosters/publish` — moves every `planned` entry in range to
+   * `published` and emits, in the SAME transaction (ADR-005), TWO events:
+   *
+   *  - `roster.published`, the terse summary the roadmap's event catalog
+   *    specifies: "a roster was published, this wide, this many entries".
+   *  - `roster.entry.published`, ONE PER ENTRY, carrying the shift timing a
+   *    consumer needs to build a per-employee-per-day read model.
+   *
+   * **Why two (fixed 2026-08-04, integration reconciliation).** M3
+   * (`svc-timesheet`) consumed `roster.published` expecting the per-entry
+   * shape — `employeeId`, `workDate`, `scheduledStart`, `scheduledEnd`,
+   * `rosterEntryId` — and this service published only the summary. In
+   * production every publish would have thrown
+   * `roster.published: missing or invalid "employeeId"` in M3's consumer,
+   * `timesheet.roster_ref` would never have populated, and both sides'
+   * unit tests would have kept passing: each tested its own payload shape
+   * against its own fixture, and nothing ran the two together.
+   *
+   * The summary is not wrong and the per-entry payload is not wrong — they
+   * are two different events that were sharing one routing key. The summary
+   * is what a notification or an audit consumer wants; the per-entry stream
+   * is what a read model needs, and it matches how `employee.created` /
+   * `employee.updated` already feed every service's `*_employee_ref` table.
+   *
+   * `isHoliday` is resolved HERE, from this service's own holiday calendar,
+   * because `svc-scheduler` owns `holiday.manage` and is the only source of
+   * truth for it. That field is load-bearing: it is what drives M3's
+   * `ot_2x`/`ot_3x` holiday classification (`ot-classifier.ts`), so a
+   * consumer defaulting it to `false` would silently zero every holiday OT
+   * premium in the product.
+   */
   async publish(tx: Queryable, input: PublishInput): Promise<PublishResult> {
     const entries = await this.rosterRepo.publishRange(tx, input.from, input.to, input.employeeIds ?? null)
     const rosterId = randomUUID()
@@ -234,7 +272,50 @@ export class RosterService {
       entryCount: entries.length,
     })
 
+    const holidays = await this.holidayDatesIn(input.from, input.to)
+    for (const entry of entries) {
+      const shift = await this.shiftsRepo.findById(entry.shiftId)
+      // A shift deleted out from under a published entry cannot produce
+      // timing, and inventing a window would be worse than omitting the
+      // event — `sumMinutes` skips the same case for the same reason.
+      if (!shift) continue
+      await writeOutbox(tx, 'scheduler', 'roster.entry.published', {
+        rosterId,
+        rosterEntryId: entry.id,
+        employeeId: entry.employeeId,
+        workDate: entry.workDate,
+        scheduledStart: `${entry.workDate}T${normaliseTime(shift.startT)}Z`,
+        scheduledEnd: `${shift.crossesMidnight ? addDays(entry.workDate, 1) : entry.workDate}T${normaliseTime(shift.endT)}Z`,
+        graceMin: shift.graceMin,
+        hazardous: entry.hazardous,
+        isHoliday: holidays.has(entry.workDate),
+      })
+    }
+
     return { rosterId, entryCount: entries.length, entries }
+  }
+
+  /**
+   * Public-holiday dates within `[from, to]`, from this service's own
+   * calendar. Substitute holidays count: a substitute IS the observed
+   * holiday for LPA s.62 purposes, which is the whole point of generating
+   * them (`holidays.service.ts`'s `computeSubstitutes`).
+   */
+  private async holidayDatesIn(from: string, to: string): Promise<Set<string>> {
+    const dates = new Set<string>()
+    const firstYear = Number(from.slice(0, 4))
+    const lastYear = Number(to.slice(0, 4))
+    if (!Number.isFinite(firstYear) || !Number.isFinite(lastYear)) return dates
+    // A publish range may straddle a year boundary (a December-to-January
+    // fortnight), and each year is a separate calendar row.
+    for (let year = firstYear; year <= lastYear; year += 1) {
+      const calendar = await this.holidaysRepo.findCalendarByYear(year)
+      if (!calendar) continue
+      for (const holiday of await this.holidaysRepo.listByCalendar(calendar.id)) {
+        if (holiday.holidayDate >= from && holiday.holidayDate <= to) dates.add(holiday.holidayDate)
+      }
+    }
+    return dates
   }
 
   private async sumMinutes(entries: RosterEntryRow[]): Promise<number> {

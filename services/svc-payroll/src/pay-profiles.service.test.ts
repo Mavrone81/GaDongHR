@@ -114,9 +114,18 @@ describe('pay profile — write', () => {
     await expect(h.service.upsert(h.tx, EMPLOYEE, dto({ basePayThb: '11000' }), '2026-10-31')).resolves.toBeDefined()
   })
 
-  it('a province with no notification on file does not block the write either', async () => {
+  it('REJECTS a write for a province with no notification on file (PAY-012) — fails closed', async () => {
+    // Changed 2026-08-04: this used to assert the write SUCCEEDED. Accepting
+    // a base pay that could not be checked against any floor is how an
+    // unverified wage reaches a payslip looking checked — strictly worse
+    // than having no check at all, because the payslip is indistinguishable
+    // from a compliant one. The 77-province table (Spec §12 V4) is not
+    // shipped, so this genuinely blocks; that is what a go-live blocker
+    // should do. See the roadmap's unverified-statutory-figures section.
     const h = await harness('TH-99')
-    await expect(h.service.upsert(h.tx, EMPLOYEE, dto({ basePayThb: '11000' }), '2026-10-31')).resolves.toBeDefined()
+    await expect(h.service.upsert(h.tx, EMPLOYEE, dto({ basePayThb: '11000' }), '2026-10-31')).rejects.toMatchObject({
+      code: 'PAY-012',
+    })
   })
 
   it('REJECTS a provident-fund rate outside the statutory band, on either side', async () => {

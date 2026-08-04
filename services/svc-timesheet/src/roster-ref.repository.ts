@@ -54,12 +54,16 @@ function mapRow(row: Record<string, unknown>): RosterRefRow {
 }
 
 /**
- * `timesheet.roster_ref` — the local read model `roster.published`-triggered
- * entry data feeds (see the refs migration's header for why this exists:
- * `roster.published`'s broker-level summary payload has no per-entry shift
- * timing, so `ConsolidationService.applyRosterEntry` is handed the richer
- * per-entry detail directly and persists it here, keyed by (employee_id,
- * work_date) to match `day_record`'s own key).
+ * `timesheet.roster_ref` — the local read model fed by
+ * `roster.entry.published`, one event per roster entry, carrying the shift
+ * timing this service cannot see across the schema boundary. Keyed by
+ * (employee_id, work_date) to match `day_record`'s own key.
+ *
+ * The sibling `roster.published` event is a terse summary (`{rosterId,
+ * orgUnitId, dateRange, entryCount}`) and deliberately NOT what this read
+ * model consumes — reading it here is the defect the 2026-08-04 integration
+ * reconciliation fixed. See `events.consumer.ts`'s
+ * `RosterEntryPublishedPayload`.
  */
 export class RosterRefRepository {
   constructor(private readonly db: Queryable) {}

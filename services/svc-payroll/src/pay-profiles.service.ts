@@ -1,6 +1,6 @@
 import { CryptoClient } from '@gadong/kernel'
 import type { Queryable } from '@gadong/kernel'
-import { belowMinimumWage, employeeRefNotFound, payProfileNotFound, providentFundRateOutOfBand } from './errors'
+import { belowMinimumWage, employeeRefNotFound, minimumWageNotOnFile, payProfileNotFound, providentFundRateOutOfBand } from './errors'
 import { bahtToSatang, parsePercent, satangToBaht } from './money'
 import type { Satang } from './money'
 import { checkMinimumWage } from './engine/minimum-wage'
@@ -238,9 +238,17 @@ export class PayProfilesService {
     basePay: Satang,
     provinceCode: string | null,
   ): Promise<void> {
+    // A profile with no province at all cannot be floor-checked here; the
+    // employee ref is populated from `employee.created`/`updated`, and
+    // `refs.repository.ts` deliberately refuses to overwrite a known
+    // province with null. The engine re-checks at calculate time, where the
+    // province IS required.
     if (provinceCode === null) return
     const floor = await resolver.optionalMoney(minimumWageRuleKey(provinceCode))
-    if (floor === null) return
+    // FAILS CLOSED (2026-08-04) — see `minimumWageNotOnFile`. Accepting a
+    // base pay we cannot check against any floor is how an unverified wage
+    // reaches a payslip looking checked.
+    if (floor === null) throw minimumWageNotOnFile(provinceCode, minimumWageRuleKey(provinceCode))
     const [divisor, hoursPerDay] = await Promise.all([
       resolver.requiredCount(RULE_KEYS.minWageMonthlyDivisor),
       resolver.requiredCount(RULE_KEYS.otHourlyBaseHours),

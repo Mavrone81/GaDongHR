@@ -28,6 +28,28 @@ export function belowMinimumWage(provinceCode: string, dailyEquivalent: string, 
   ])
 }
 
+/**
+ * PAY-012 — no minimum-wage notification is on file for this employee's
+ * province, so the floor could not be checked at all.
+ *
+ * **Fails closed as of 2026-08-04.** This case previously produced a payslip
+ * NOTE and let the run proceed. That is strictly worse than having no check:
+ * an unverified wage was paid on a payslip that looked exactly like a
+ * checked one, and the only thing distinguishing them was a note nobody is
+ * required to read. The whole point of PAY-010 is that a wage below the
+ * provincial floor is not a number to build a payslip on — and "we don't
+ * know the floor" cannot be a weaker outcome than "the floor was missed".
+ *
+ * The 77-province table (Statutory Spec §12 V4) is NOT shipped, so this will
+ * block real runs outside the seeded provinces until Legal delivers it. That
+ * is the intended behaviour of a go-live blocker: see the roadmap's
+ * "Statutory figures that are not yet verified" section, where V4 is
+ * recorded with this consequence stated.
+ */
+export function minimumWageNotOnFile(provinceCode: string, ruleKey: string): GadongError {
+  return new GadongError('PAY-012', 'payroll.error.minimum_wage_not_on_file', 422, [{ provinceCode, ruleKey }])
+}
+
 /** PAY-011 — the provident-fund rate on a profile is outside the statutory 2–15% band (bounds from config, never from here). */
 export function providentFundRateOutOfBand(rate: string, min: string, max: string, citation: string): GadongError {
   return new GadongError('PAY-011', 'payroll.error.pf_rate_out_of_band', 422, [{ rate, min, max, citation }])

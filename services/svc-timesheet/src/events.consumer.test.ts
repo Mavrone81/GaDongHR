@@ -60,7 +60,7 @@ describe('EventsConsumer — idempotency: triple delivery of the same event prod
     expect(all).toHaveLength(1)
   })
 
-  it('roster.published (per entry): three identical deliveries → one roster_ref write', async () => {
+  it('roster.entry.published: three identical deliveries → one roster_ref write', async () => {
     const h = harness()
     const payload = {
       employeeId: 'emp-1',

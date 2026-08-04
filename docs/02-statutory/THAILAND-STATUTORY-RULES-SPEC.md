@@ -71,10 +71,43 @@ Governance classes:
 | hours.ot.max_per_week | 36 | ceiling 36 | LPA s.26 + Ministerial Reg. |
 | hours.break.min_after | ≥1 h break after ≤5 h work | floor | LPA s.27 |
 | ot.workday.multiplier | 1.5× hourly wage | floor 1.5 | LPA s.61 |
-| ot.holiday_work.multiplier | +1× for employees entitled to paid holidays (→2× total); 2× for daily-rate without holiday pay | floor | LPA s.62 |
+| ot.holiday_work.multiplier | **2×**, flat — see the s.62 encoding note below | floor 2 | LPA s.62 |
 | ot.holiday_ot.multiplier | 3× | floor 3 | LPA s.63 |
 | ot.hourly_base.formula | monthly ÷ 30 ÷ 8 | fairness-validated | Market convention; configurable divisor (30/26/actual) — engine blocks configs producing sub-statutory OT pay |
 | ot.consent | OT requires employee consent per instance except emergency work | — | LPA s.24 |
+
+### s.62 encoding note — the discount lives in the QUANTITY, not the multiplier
+
+**Corrected 2026-08-04 to match what shipped. The law is unchanged; only this document was wrong
+about how the system encodes it.**
+
+This row previously read *"+1× for employees entitled to paid holidays (→2× total); 2× for
+daily-rate without holiday pay"* — describing `ot.holiday_work.multiplier` as a **conditional**
+value. It is not, and never was in the shipped code: the rule pack carries a **flat `2`**, and the
+entitlement distinction is applied upstream by `svc-timesheet`.
+
+The statutory outcome is identical either way, and s.62 itself is unchanged:
+
+- an employee **entitled to a paid holiday** (monthly staff, already paid for the day) is owed a
+  further **+1×** for hours actually worked;
+- an employee **not** so entitled (daily-rate, paid nothing for an unworked holiday) is owed the
+  full **2×**.
+
+What differs is *where* that fork is expressed. `svc-timesheet` writes `day_record.ot_2x` as a
+**pay-rate equivalent** — hours payable at 2×, already halved for monthly staff — so an 8-hour
+holiday shift stores `4.00` for a monthly employee and `8.00` for a daily-rate one.
+`svc-payroll`'s engine then multiplies by a uniform 2×.
+
+⚠️ **The two encodings are alternatives, never both.** Applying the discount in the quantity *and*
+in the multiplier pays half what s.62 owes; applying it in neither pays double. Both errors produce
+an entirely plausible-looking payslip. **A future rule pack that moves the discount back into this
+multiplier must remove the halving in `svc-timesheet`'s `ot-classifier.ts` in the same change** —
+and the config floor above must move with it.
+
+`services/svc-payroll/src/engine/ot-2x-contract.cross-module.test.ts` is the only test that runs
+both modules together and fails if either side moves alone. The full contract is in the roadmap's
+event catalog under `timesheet.locked`, and on the `ot_2x` column in
+`services/svc-timesheet/migrations/1756000000000_timesheet-schema.js`.
 
 ## 5. Social Security Fund (SSO)
 

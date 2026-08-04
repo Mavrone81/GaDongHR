@@ -1,6 +1,7 @@
 import { ConfigClient } from './config-client'
 import type { ConfigTransport } from './config-client'
 import { GuardrailPolicy } from './guardrail'
+import { HolidaysRepository } from './holidays.repository'
 import { LeaveRefRepository } from './leave-ref.repository'
 import { RosterRepository } from './roster.repository'
 import { RosterService } from './roster.service'
@@ -44,6 +45,7 @@ interface Harness {
   db: FakeSchedulerDb
   service: RosterService
   shiftId: string
+  holidaysRepo: HolidaysRepository
 }
 
 async function setup(configHours?: { daily?: number; weeklyStandard?: number; weeklyHazardous?: number; weeklyOt?: number }): Promise<Harness> {
@@ -54,14 +56,15 @@ async function setup(configHours?: { daily?: number; weeklyStandard?: number; we
   const guardrails = new GuardrailPolicy(
     new ConfigClient(configTransport(configHours?.daily, configHours?.weeklyStandard, configHours?.weeklyHazardous, configHours?.weeklyOt)),
   )
-  const service = new RosterService(rosterRepo, shiftsRepo, leaveRefRepo, guardrails)
+  const holidaysRepo = new HolidaysRepository(db.asPool())
+  const service = new RosterService(rosterRepo, shiftsRepo, leaveRefRepo, guardrails, holidaysRepo)
 
   const tx = db.connect()
   await tx.query('BEGIN')
   const shift = await shiftsRepo.insert(tx, DAY_SHIFT)
   await tx.query('COMMIT')
 
-  return { db, service, shiftId: shift.id }
+  return { db, service, shiftId: shift.id, holidaysRepo }
 }
 
 describe('RosterService.assign — double booking', () => {
@@ -241,14 +244,92 @@ describe('RosterService.publish', () => {
     await tx.query('COMMIT')
 
     expect(result.entryCount).toBe(2)
-    const outboxRows = db.debugOutboxRows()
-    expect(outboxRows).toHaveLength(1)
-    expect(outboxRows[0]?.topic).toBe('roster.published')
-    expect(outboxRows[0]?.payload).toMatchObject({
+    const summaries = db.debugOutboxRows().filter((r) => r.topic === 'roster.published')
+    expect(summaries).toHaveLength(1)
+    expect(summaries[0]?.payload).toMatchObject({
       orgUnitId: 'org-1',
       dateRange: { from: '2026-08-01', to: '2026-08-31' },
       entryCount: 2,
     })
+  })
+
+  /**
+   * The producer half of a contract that had no consumer test and no
+   * producer test — only two fixtures that never met. `svc-timesheet`'s
+   * `EventsConsumer.handleRosterEntryPublished` requires `employeeId`,
+   * `workDate`, `scheduledStart`, `scheduledEnd` and `rosterEntryId` as
+   * non-empty strings and throws on any of them missing; before this fix
+   * the only `roster.*` event this service emitted was the summary above,
+   * which has none of them. Every publish would have failed in the consumer
+   * in production while both services' suites stayed green.
+   */
+  it('emits one roster.entry.published per entry, carrying the per-entry shift timing svc-timesheet requires', async () => {
+    const { db, service, shiftId } = await setup()
+    const tx = db.connect()
+    await tx.query('BEGIN')
+    await service.assign(tx, { employeeId: 'emp-1', shiftId, workDate: '2026-08-05' })
+    await service.assign(tx, { employeeId: 'emp-2', shiftId, workDate: '2026-08-06' })
+    await service.publish(tx, { from: '2026-08-01', to: '2026-08-31', orgUnitId: 'org-1' })
+    await tx.query('COMMIT')
+
+    const entryEvents = db.debugOutboxRows().filter((r) => r.topic === 'roster.entry.published')
+    expect(entryEvents).toHaveLength(2)
+
+    const first = entryEvents[0]?.payload as Record<string, unknown>
+    // DAY_SHIFT is 08:00–16:00, graceMin 0, does not cross midnight.
+    expect(first).toMatchObject({
+      employeeId: 'emp-1',
+      workDate: '2026-08-05',
+      scheduledStart: '2026-08-05T08:00:00Z',
+      scheduledEnd: '2026-08-05T16:00:00Z',
+      graceMin: 0,
+      hazardous: false,
+      isHoliday: false,
+    })
+    // Every field svc-timesheet's parser demands is present and a non-empty
+    // string — asserted by the same rule that parser applies, not by eye.
+    for (const field of ['employeeId', 'workDate', 'scheduledStart', 'scheduledEnd', 'rosterEntryId']) {
+      expect(typeof first[field]).toBe('string')
+      expect((first[field] as string).length).toBeGreaterThan(0)
+    }
+  })
+
+  it('marks an entry on a public holiday isHoliday: true — the field that drives holiday OT classification downstream', async () => {
+    const { db, service, shiftId, holidaysRepo } = await setup()
+
+    const tx0 = db.connect()
+    await tx0.query('BEGIN')
+    const calendar = await holidaysRepo.insertCalendar(tx0, 2026)
+    await holidaysRepo.insertHoliday(tx0, calendar.id, {
+      holidayDate: '2026-08-05',
+      nameI18n: { en: 'Test Holiday', th: 'วันหยุด' },
+      isSubstitute: false,
+      substituteForId: null,
+    })
+    await tx0.query('COMMIT')
+
+    const tx = db.connect()
+    await tx.query('BEGIN')
+    await service.assign(tx, { employeeId: 'emp-1', shiftId, workDate: '2026-08-05' }) // the holiday
+    await service.assign(tx, { employeeId: 'emp-2', shiftId, workDate: '2026-08-06' }) // an ordinary day
+    await service.publish(tx, { from: '2026-08-01', to: '2026-08-31' })
+    await tx.query('COMMIT')
+
+    const byDate = new Map(
+      db
+        .debugOutboxRows()
+        .filter((r) => r.topic === 'roster.entry.published')
+        .map((r) => {
+          const p = r.payload as Record<string, unknown>
+          return [p['workDate'] as string, p['isHoliday']]
+        }),
+    )
+    // This is the flag svc-timesheet's OtClassifier branches on to produce
+    // ot_2x/ot_3x. Defaulting it to false — which is what the consumer does
+    // when no roster_ref row exists — silently zeroes every holiday premium
+    // in the product, on payslips that look entirely ordinary.
+    expect(byDate.get('2026-08-05')).toBe(true)
+    expect(byDate.get('2026-08-06')).toBe(false)
   })
 })
 

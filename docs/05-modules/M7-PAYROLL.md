@@ -142,7 +142,7 @@ All payroll endpoints require step-up re-auth for approve/commit/export download
 | out | `payslip.issued` | employeeId, period → notify svc |
 
 ### Error codes (extract)
-`PAY-010` pay below provincial minimum wage (province + floor cited) · `PAY-020` SoD violation preparer=approver · `PAY-021` commit without approval · `PAY-030` timesheet lock version stale (unlock occurred) — recalc required · `PAY-040` missing tax declaration → default single-allowance basis applied with warning · `PAY-050` export before commit.
+`PAY-010` pay below provincial minimum wage (province + floor cited) · `PAY-012` NO minimum-wage notification on file for the employee's province — fails closed, blocks the run rather than emitting a payslip note (see the roadmap's unverified-statutory-figures section, §12 V4) · `PAY-020` SoD violation preparer=approver · `PAY-021` commit without approval · `PAY-030` timesheet lock version stale (unlock occurred) — recalc required · `PAY-040` missing tax declaration → default single-allowance basis applied with warning · `PAY-050` export before commit.
 
 ## 4. Test Hooks (feeds Stage 4 + parallel-run plan)
 Canonical fixtures: (a) Sep-2026 vs Oct-2026 EWF gate; (b) SSO ceiling boundary salary at old/new ceiling effective dates; (c) OT-heavy daily-rate employee incl. 3× holiday OT; (d) infant-care 50% mid-month; (e) bonus-month WHT; (f) termination at 3 years −1 day vs +1 day (90 vs 180 severance days); (g) claims reimbursement excluded from SSO/tax base; (h) preparer attempting self-approval rejected; (i) committed-run mutation attempt blocked at DB; (j) two full parallel runs vs incumbent ≤0.5% variance (PRD success metric).

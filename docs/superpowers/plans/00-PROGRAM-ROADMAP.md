@@ -179,11 +179,12 @@ Routing key = event name. Payloads carry **no S3-class plaintext**; a consumer n
 | `employee.created` / `employee.updated` | onboarding | `{id, empCode, orgUnitId, employmentType, provinceCode, startDate, status, preferredLang}` |
 | `employee.terminated` | onboarding | `{id, terminationDate, reasonCategory}` |
 | `consent.granted` / `consent.withdrawn` | onboarding | `{employeeId, purpose, formVersion, at}` |
-| `roster.published` | scheduler | `{rosterId, orgUnitId, dateRange, entryCount}` |
+| `roster.published` | scheduler | `{rosterId, orgUnitId, dateRange, entryCount}` — summary only, deliberately |
+| `roster.entry.published` | scheduler | `{rosterId, rosterEntryId, employeeId, workDate, scheduledStart, scheduledEnd, graceMin, hazardous, isHoliday}` — one per entry |
 | `ot.approved` | scheduler | `{employeeId, otDate, hours, rateClass, approvedBy}` |
 | `attendance.punch` | attendance | `{idemKey, employeeId, deviceId, punchedAt, direction, method, siteCode, matchScore, livenessPassed}` |
 | `attendance.liveness_failed` | attendance | `{deviceId, at, siteCode}` |
-| `timesheet.locked` | timesheet | `{periodId, dateRange, lockVersion, lockedBy}` |
+| `timesheet.locked` | timesheet | `{periodId, dateRange, lockVersion, lockedBy}` — ⚠️ see the `ot_2x` contract below |
 | `timesheet.corrected` | timesheet | `{dayRecordId, employeeId, workDate, correctedBy, reason}` |
 | `leave.approved` / `leave.cancelled` | leave | `{requestId, employeeId, leaveTypeCode, dates, days, payMode}` |
 | `leave.balance_payout` | leave | `{employeeId, leaveTypeCode, days, reason}` |
@@ -195,6 +196,40 @@ Routing key = event name. Payloads carry **no S3-class plaintext**; a consumer n
 | `audit.*` | every service | see audit entry shape below |
 
 **Delivery contract:** producers write to their schema's `outbox` table in the same transaction as the state change; a relay in the kernel publishes. Consumers dedupe on `processed_events(event_id)`. Every consumer must be idempotent — duplicate delivery ×3 produces one effect (XC-EVENTS).
+
+#### ⚠️ `timesheet.locked` and the `ot_2x` contract — read before touching OT
+
+`timesheet.locked` carries no figures; M7 fetches the period's totals through M3's audited API once
+a lock version is bound. **One of those totals does not mean what its name suggests, and two modules
+have to agree about it or a payslip is quietly wrong.**
+
+> **`day_record.ot_2x` is a PAY-RATE EQUIVALENT, not hours worked.** It is the number of hours
+> payable at exactly 2× the hourly base, with LPA s.62's entitlement discount **already baked into
+> the quantity**.
+
+- A **monthly** employee is already paid a normal day's wage for a public holiday whether or not
+  they work it, so the law owes only a further **+1×** for hours actually worked. M3 stores **half**
+  the worked minutes, so that `half × 2× = 1×`.
+- A **daily / hourly / contract** employee gets nothing for an unworked holiday, so the law owes the
+  full **2×**, and M3 stores the **full** worked minutes.
+
+An 8-hour holiday shift therefore writes `ot_2x = 4.00` for a monthly employee and `8.00` for a
+daily-rate one. Nothing is lost — `day_record.worked_hours` always carries the true, unscaled hours.
+**M7 applies `ot.holiday_work.multiplier` uniformly at 2× and must never re-derive the distinction
+from pay basis.** Doing so pays a monthly employee half what s.62 owes, on a payslip that looks
+entirely plausible.
+
+**The trap, and why this is written here rather than in either module.** The Statutory Spec §4 used
+to express the identical rule the *other* way round, with the discount in the **multiplier**
+("+1× for employees entitled to paid holidays; 2× for daily-rate"). Both encodings are correct in
+isolation. Applying **both** underpays by half; applying **neither** overpays by double. Each module
+was internally consistent and separately tested, and **neither could detect the other's drift** —
+M7's fixtures hard-coded `4` and `8`, M3's asserted `'4.00'`, and no test executed both.
+
+**If a future rule pack moves the discount into the multiplier, M3's halving must be removed in the
+same change.** `services/svc-payroll/src/engine/ot-2x-contract.cross-module.test.ts` runs M3's real
+classifier into M7's real engine and fails if either side moves alone — verified by mutation in both
+directions. §4 of the Statutory Spec has been corrected to match what shipped.
 
 ### Permission catalog — `resource.action`
 
@@ -392,6 +427,43 @@ Every Thai statutory figure resolves through `svc-config` by rule key and date. 
 - Coverage gates: ≥85% lines on engine packages; **100% branch on `GrossToNetEngine` and `OtClassifier`**.
 - Secrets never committed; `.env` is server-side only, chmod 600.
 
+## 🔴 STATUTORY FIGURES THAT ARE NOT YET VERIFIED — for Legal counsel and the Finance lead
+
+**Raised 2026-08-04 by the M7 payroll build and recorded here, not in a build report, because these
+are decisions for people who do not read build reports.** Every item below is a number the payroll
+engine will use to pay real people and file real returns. None of them is a coding task. Each says
+what happens *if it is wrong*, because "unverified" understates it — an unverified figure does not
+produce an error, it produces a confident, plausible, wrong payslip.
+
+Everything here resolves through `svc-config` as effective-dated data, so **each fix is a rule-pack
+import, not a code change or a release.** The engineering is done; the figures are not.
+
+### Go-live blockers — payroll cannot be trusted in production until these are answered
+
+| # | Figure | Why it blocks | Consequence if wrong |
+|---|---|---|---|
+| **V4** | **The 2026 provincial minimum-wage table — all 77 provinces.** Not shipped. Two provinces are seeded as placeholders (Bangkok 400, one low band 337), both citing "Spec §12 V4 — verify". | Every employee's base pay is checked against their own province's floor. 75 provinces have no figure at all. | **Underpaying below the statutory floor**, per employee, every month, plus back-pay and penalties. |
+| **N1** | **The EWF wage base: capped at the SSO ceiling, or uncapped?** The Statutory Spec never states it. The engine supports both (`sso_capped_wage` / `sso_wage`) and the rule pack must choose. | EWF contributions start **1 October 2026**. There is no default that is safe to guess. | Capped vs uncapped is a **≈2.6× difference** in the contribution for higher earners — wrong for both the employee deduction and the employer cost, from the first October payslip. |
+
+**V4 now fails closed (changed 2026-08-04).** An employee whose province has no notification on file
+used to produce a *payslip note* and the run continued — so an unverified wage was paid on a payslip
+indistinguishable from a checked one, and the note was the only difference. The engine and the
+profile-write path now both reject with **PAY-012**. This will genuinely block payroll runs outside
+the two seeded provinces, which is the intended behaviour of a blocker: the alternative is paying
+unverified wages that look verified. Pinned by
+`services/svc-payroll/src/engine/gross-to-net.test.ts`.
+
+### Must be confirmed before the first live run of the affected feature
+
+| # | Figure | What is unverified | Consequence if wrong |
+|---|---|---|---|
+| **N9** | **All four bank file layouts** — KBank, SCB, BBL, Krungsri. Field widths, header/trailer codes and encoding were written from convention, **not from any bank's published specification**; `bank-files.ts` says so at the top. | No layout has been validated against a real bank test file. | **The salary payment file is rejected, or worse, accepted and misapplied.** Nobody gets paid on payday. Needs one test file per bank, from each bank. |
+| **N3–N5** | **Taxability and SSO treatment of severance, accrued-leave payout, and notice-in-lieu.** Three separate questions: whether each is PIT-taxable, and whether each enters the SSO contribution base. | Termination pay is the highest-value, lowest-frequency calculation in the product — errors are large and are noticed by the leaver. | Over- or under-withholding on a final payment, and an incorrect SSO filing for the month. |
+| **N6–N8** | **Three monthly→daily divisors**, deliberately kept as separate rule keys: `ot.hourly_base.days_divisor` (OT), `minwage.monthly_equivalent_divisor` (the minimum-wage test), `severance.daily_wage_divisor` (s.118 tiers). 30 is assumed for each. | They are separate keys precisely so a company changing its OT convention (e.g. to 26 days) cannot silently move the statutory minimum-wage test or the severance base. Which divisor is *legally* correct for each purpose is unconfirmed. | 30 vs 26 is a **~15% swing** in the hourly base, the daily-equivalent floor comparison, and every severance tier. |
+
+**Owner: Legal counsel** for V4, N1, N3–N5, N6–N8. **Owner: Finance lead** for N9 (obtaining each
+bank's specification and a test file). **None of these can be closed by Engineering.**
+
 ## Open items that block later phases
 
 | Item | Blocks | Owner |
@@ -399,6 +471,10 @@ Every Thai statutory figure resolves through `svc-config` by rule key and date. 
 | PRD Q2 — CompreFace FAR/FRR benchmark on Thai/Chinese faces, CPU latency < 2 s | Phase 3 exit | Engineering |
 | Statutory §12 V2 — exact gazetted 2026 SSO ceiling (17,500 assumed) | Phase 5 config freeze | Legal |
 | Statutory §12 V1 — LPA No. 9 maternity pay split (employer vs SSO days) | Phase 4 | Legal |
-| Statutory §12 V4 — 2026 provincial minimum-wage table | Phase 5 | Legal |
+| **Statutory §12 V4 — 2026 provincial minimum-wage table (75 of 77 provinces missing; now fails closed with PAY-012)** | **Phase 5 GO-LIVE** | Legal |
+| **Statutory N1 — EWF wage base, capped vs uncapped (≈2.6× difference, live 1 Oct 2026)** | **Phase 5 GO-LIVE** | Legal |
+| Statutory N9 — four bank file layouts unverified against any bank's spec | Phase 5 first live payment | Finance |
+| Statutory N3–N5 — taxability/SSO base of severance, leave payout, notice-in-lieu | Phase 5 first termination | Legal |
+| Statutory N6–N8 — three monthly→daily divisors (30 assumed; ~15% swing) | Phase 5 config freeze | Legal |
 | UI direction selection | Phase 2 web shell | Product |
 | **4 GB RAM ceiling** — Phase 1 fits; Phase 3 adds CompreFace (2–3 GB) | Phase 3 | Product |

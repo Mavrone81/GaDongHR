@@ -121,9 +121,9 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
     { provide: ShiftsService, useFactory: (r: ShiftsRepository) => new ShiftsService(r), inject: [ShiftsRepository] },
     {
       provide: RosterService,
-      useFactory: (roster: RosterRepository, shifts: ShiftsRepository, leave: LeaveRefRepository, guardrails: GuardrailPolicy) =>
-        new RosterService(roster, shifts, leave, guardrails),
-      inject: [RosterRepository, ShiftsRepository, LeaveRefRepository, GuardrailPolicy],
+      useFactory: (roster: RosterRepository, shifts: ShiftsRepository, leave: LeaveRefRepository, guardrails: GuardrailPolicy, holidays: HolidaysRepository) =>
+        new RosterService(roster, shifts, leave, guardrails, holidays),
+      inject: [RosterRepository, ShiftsRepository, LeaveRefRepository, GuardrailPolicy, HolidaysRepository],
     },
     {
       provide: HolidaysService,

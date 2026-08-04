@@ -125,7 +125,7 @@ export class ConsolidationService {
     return today
   }
 
-  // ---------- roster.published (per-entry) ----------
+  // ---------- roster.entry.published (one per roster entry) ----------
 
   async applyRosterEntry(tx: Queryable, input: RosterEntryInput): Promise<DayRecordRow> {
     const upsert: UpsertRosterRef = {

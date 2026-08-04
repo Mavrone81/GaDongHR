@@ -340,9 +340,30 @@ describe('M7-1: the provincial minimum-wage floor', () => {
     expect(computeGrossToNet(input({ basis: 'hourly', basePayThb: '50', timesheet: { hoursWorked: '160' } }), rules).gross).toBe(bahtToSatang('8000'))
   })
 
-  it('a province with NO notification on file produces a note, never a silent pass', async () => {
-    const result = computeGrossToNet(input({ basePayThb: '1', provinceCode: 'TH-99' }), await rulesAsOf(SEPTEMBER_2026, 'TH-99'))
-    expect(result.notes).toContain('payroll.note.minimum_wage_not_on_file:TH-99')
+  it('a province with NO notification on file BLOCKS the run (PAY-012) — fails closed, never a note', async () => {
+    // Changed 2026-08-04. This previously asserted a payslip NOTE and let
+    // the run proceed, which is strictly worse than no check: the wage was
+    // paid, on a payslip identical to a checked one, and the note was the
+    // only difference. "We could not check the floor" must not be a softer
+    // outcome than "the wage is below the floor" (PAY-010, which throws).
+    const rules = await rulesAsOf(SEPTEMBER_2026, 'TH-99')
+    expect(() => computeGrossToNet(input({ basePayThb: '1', provinceCode: 'TH-99' }), rules)).toThrow(
+      expect.objectContaining({ code: 'PAY-012' }),
+    )
+    // A wage that would obviously clear any plausible floor is blocked too:
+    // the gate is "was it checked", not "is it probably fine".
+    expect(() => computeGrossToNet(input({ basePayThb: '900000', provinceCode: 'TH-99' }), rules)).toThrow(
+      expect.objectContaining({ code: 'PAY-012' }),
+    )
+  })
+
+  it('no payslip note can stand in for the floor check — the fail-open note is gone entirely', async () => {
+    // The note string is what the old behaviour emitted. Asserting its
+    // absence stops a future change quietly reinstating "pay it, but
+    // mention it" as the handling for an unverifiable wage.
+    const rules = await rulesAsOf(SEPTEMBER_2026, PROVINCE_BANGKOK)
+    const result = computeGrossToNet(input({ basePayThb: '45000' }), rules)
+    expect(result.notes.some((n) => n.startsWith('payroll.note.minimum_wage_not_on_file'))).toBe(false)
   })
 
   it('THE FLOOR IS DATA: raising the Bangkok notification makes a previously-compliant wage fail', async () => {

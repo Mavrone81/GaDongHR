@@ -1,5 +1,5 @@
-import { belowMinimumWage, providentFundRateOutOfBand, statutoryRuleMalformed } from '../errors'
-import { RULE_KEYS } from '../statutory'
+import { belowMinimumWage, minimumWageNotOnFile, providentFundRateOutOfBand, statutoryRuleMalformed } from '../errors'
+import { RULE_KEYS, minimumWageRuleKey } from '../statutory'
 import {
   applyRate,
   clampToBand,
@@ -119,10 +119,14 @@ export function computeGrossToNet(input: GrossToNetInput, rules: EngineRules): G
   //    provincial floor is not a number to build a payslip on.
   // -------------------------------------------------------------------
   if (rules.minimumWageDaily === null) {
-    // A province with no notification on file is a configuration gap, and
-    // the run must say so rather than pass silently — an unchecked wage is
-    // indistinguishable, on the payslip, from a checked one.
-    notes.push(`payroll.note.minimum_wage_not_on_file:${input.employee.provinceCode}`)
+    // FAILS CLOSED (2026-08-04). This used to push a note and carry on,
+    // which meant an unverified wage was paid on a payslip indistinguishable
+    // from a checked one — the note was the ONLY difference, and nothing
+    // required anyone to read it. "We could not check the floor" must not be
+    // a softer outcome than "the wage was below the floor" (PAY-010, which
+    // throws). See `minimumWageNotOnFile`'s doc comment and the roadmap's
+    // unverified-statutory-figures section (Spec §12 V4).
+    throw minimumWageNotOnFile(input.employee.provinceCode, minimumWageRuleKey(input.employee.provinceCode))
   } else {
     const floor = rules.minimumWageDaily
     const outcome = checkMinimumWage(basis, basePay, floor.value, rules.minWageMonthlyDivisor.value, rules.otHourlyBaseHours.value)

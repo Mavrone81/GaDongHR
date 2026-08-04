@@ -33,8 +33,26 @@ function parsePunch(payload: unknown): AttendancePunchPayload {
   return { idemKey, employeeId, punchedAt, direction }
 }
 
-// ---------- roster.published (per-entry) ----------
+// ---------- roster.entry.published (one per roster entry) ----------
 
+/**
+ * `roster.entry.published` — ONE event per roster entry, emitted by
+ * `svc-scheduler` alongside the terse `roster.published` summary in the same
+ * transaction.
+ *
+ * **Renamed 2026-08-04 (integration reconciliation), fixing a production
+ * break.** This parser used to read topic `roster.published`, which
+ * `svc-scheduler` publishes as `{rosterId, orgUnitId, dateRange,
+ * entryCount}` — a summary with no per-entry data at all. Every publish
+ * would have thrown `missing or invalid "employeeId"` here,
+ * `timesheet.roster_ref` would never have populated, and both services'
+ * unit tests would have gone on passing because each asserted its own
+ * payload shape against its own fixture and nothing ran the two together.
+ *
+ * `isHoliday` in particular is load-bearing rather than decorative: it is
+ * what `ot-classifier.ts` uses to classify holiday work into `ot_2x`/`ot_3x`,
+ * so a missing roster_ref row silently zeroes every holiday OT premium.
+ */
 export interface RosterEntryPublishedPayload {
   employeeId: string
   workDate: string
@@ -47,16 +65,16 @@ export interface RosterEntryPublishedPayload {
 }
 
 function parseRosterEntry(payload: unknown): RosterEntryPublishedPayload {
-  if (!isRecord(payload)) throw new Error('EventsConsumer: roster.published entry payload is not an object')
+  if (!isRecord(payload)) throw new Error('EventsConsumer: roster.entry.published payload is not an object')
   return {
-    employeeId: requireString(payload, 'employeeId', 'roster.published'),
-    workDate: requireString(payload, 'workDate', 'roster.published'),
-    scheduledStart: requireString(payload, 'scheduledStart', 'roster.published'),
-    scheduledEnd: requireString(payload, 'scheduledEnd', 'roster.published'),
+    employeeId: requireString(payload, 'employeeId', 'roster.entry.published'),
+    workDate: requireString(payload, 'workDate', 'roster.entry.published'),
+    scheduledStart: requireString(payload, 'scheduledStart', 'roster.entry.published'),
+    scheduledEnd: requireString(payload, 'scheduledEnd', 'roster.entry.published'),
     graceMin: typeof payload['graceMin'] === 'number' ? payload['graceMin'] : 0,
     hazardous: payload['hazardous'] === true,
     isHoliday: payload['isHoliday'] === true,
-    rosterEntryId: requireString(payload, 'rosterEntryId', 'roster.published'),
+    rosterEntryId: requireString(payload, 'rosterEntryId', 'roster.entry.published'),
   }
 }
 
