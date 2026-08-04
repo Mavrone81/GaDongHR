@@ -25,7 +25,11 @@ describe('App renders readable text even when svc-i18n is completely unreachable
 
     render(<App />)
 
-    const signInButton = await screen.findByRole('button')
+    // `findByRole('button', { name: ... })`, not a bare `findByRole('button')`,
+    // because the login screen now also carries the pre-login language
+    // switcher (task brief) — several buttons, not one — so an unfiltered
+    // query would throw on ambiguity rather than actually testing anything.
+    const signInButton = await screen.findByRole('button', { name: 'Sign in' })
     const heading = await screen.findByRole('heading')
 
     expect(signInButton.textContent?.trim()).not.toBe('')
@@ -44,7 +48,7 @@ describe('App renders readable text even when svc-i18n is completely unreachable
 
     render(<App />)
 
-    await screen.findByRole('button')
+    await screen.findByRole('button', { name: 'Sign in' })
 
     for (const button of screen.getAllByRole('button')) {
       expect(button.textContent?.trim()).not.toBe('')

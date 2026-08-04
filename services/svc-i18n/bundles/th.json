@@ -24,6 +24,8 @@
       "username": "ชื่อผู้ใช้",
       "password": "รหัสผ่าน",
       "submit": "เข้าสู่ระบบ",
+      "statement": "ลงเวลาเข้า-ออกงาน ยื่นคำขอลา และดูสลิปเงินเดือนของคุณได้ในที่เดียว",
+      "footer": "นี่คือหน้าจอเข้าสู่ระบบของ {host}",
       "error": {
         "invalid_credentials": "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"
       }
@@ -184,6 +186,11 @@
   },
   "shell": {
     "brand": "GaDongHR",
+    "brandMark": {
+      "alt": "ตราสัญลักษณ์รูปกระดองของ GaDongHR",
+      "wordmarkGadong": "GaDong",
+      "wordmarkHr": "HR"
+    },
     "nav": {
       "statutoryRules": "กฎเกณฑ์ตามกฎหมาย",
       "audit": "การตรวจสอบ",
@@ -194,7 +201,8 @@
     "locale": {
       "th": "ไทย",
       "en": "English",
-      "zh": "中文"
+      "zh": "中文",
+      "chooseLanguage": "เลือกภาษาของคุณ"
     },
     "comingSoon": {
       "title": "เร็วๆ นี้",

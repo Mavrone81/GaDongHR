@@ -24,6 +24,8 @@
       "username": "Username",
       "password": "Password",
       "submit": "Sign in",
+      "statement": "Clock in, request leave and see your payslip — all in one place.",
+      "footer": "This is the sign-in for {host}.",
       "error": {
         "invalid_credentials": "Incorrect username or password"
       }
@@ -184,6 +186,11 @@
   },
   "shell": {
     "brand": "GaDongHR",
+    "brandMark": {
+      "alt": "GaDongHR shell emblem",
+      "wordmarkGadong": "GaDong",
+      "wordmarkHr": "HR"
+    },
     "nav": {
       "statutoryRules": "Statutory Rules",
       "audit": "Audit",
@@ -194,7 +201,8 @@
     "locale": {
       "th": "ไทย",
       "en": "English",
-      "zh": "中文"
+      "zh": "中文",
+      "chooseLanguage": "Choose your language"
     },
     "comingSoon": {
       "title": "Coming soon",

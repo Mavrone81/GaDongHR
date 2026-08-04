@@ -24,6 +24,8 @@
       "username": "用户名",
       "password": "密码",
       "submit": "登录",
+      "statement": "打卡、请假、查看工资条——都在这一个系统里完成。",
+      "footer": "这是 {host} 的登录页面。",
       "error": {
         "invalid_credentials": "用户名或密码错误"
       }
@@ -184,6 +186,11 @@
   },
   "shell": {
     "brand": "GaDongHR",
+    "brandMark": {
+      "alt": "GaDongHR 甲壳徽标",
+      "wordmarkGadong": "GaDong",
+      "wordmarkHr": "HR"
+    },
     "nav": {
       "statutoryRules": "法定规则",
       "audit": "审计",
@@ -194,7 +201,8 @@
     "locale": {
       "th": "ไทย",
       "en": "English",
-      "zh": "中文"
+      "zh": "中文",
+      "chooseLanguage": "选择您的语言"
     },
     "comingSoon": {
       "title": "即将推出",
