@@ -1,9 +1,47 @@
 import 'reflect-metadata'
 import { Module } from '@nestjs/common'
+import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_FILTER } from '@nestjs/core'
-import { GadongErrorFilter, createPool } from '@gadong/kernel'
+import {
+  AuditEmitter,
+  AuthzClient,
+  CryptoClient,
+  GadongErrorFilter,
+  PermissionGuard,
+  createOidcMiddlewareHandler,
+  createPool,
+} from '@gadong/kernel'
+import type { OidcMiddlewareHandler } from '@gadong/kernel'
+import type { AuthzTransport, CryptoTransport, Queryable } from '@gadong/kernel'
 import { AttendanceController, CRYPTO_HEALTH, DB_POOL, FACE_ENGINE_HEALTH } from './attendance.controller'
 import type { HealthCheckPort } from './attendance.controller'
+import { EnrolmentController } from './enrolment.controller'
+import { PunchController } from './punch.controller'
+import { DeviceController } from './device.controller'
+import { SecurityController } from './security.controller'
+import { ConsentStateRepository } from './consent-state.repository'
+import { EnrolmentRepository } from './enrolment.repository'
+import { AlternativeCredentialRepository } from './alternative-credential.repository'
+import { DeviceRepository } from './device.repository'
+import { PunchRepository } from './punch.repository'
+import { SecurityEventRepository } from './security-event.repository'
+import { EnrolmentService } from './enrolment.service'
+import { DeviceService } from './device.service'
+import { PunchService } from './punch.service'
+import { TemplateDeletionService } from './template-deletion.service'
+import { ConsentEventHandler } from './consent-event.handler'
+import { EmployeeEventHandler } from './employee-event.handler'
+import { DeviceAuthGuard } from './device-auth.guard'
+import type { FaceEngineAdapter } from './face-engine.adapter'
+import { createComprefaceAdapter } from './face-engine.compreface.adapter'
+import type { LivenessChecker } from './liveness.checker'
+import type { ConfigClient } from './config-client'
+import { createHttpConfigClient } from './config-client'
+
+export const FACE_ENGINE = Symbol('FACE_ENGINE')
+export const LIVENESS_CHECKER = Symbol('LIVENESS_CHECKER')
+export const CONFIG_CLIENT = Symbol('CONFIG_CLIENT')
+export const CREDENTIAL_PEPPER = Symbol('CREDENTIAL_PEPPER')
 
 function requiredEnv(name: string): string {
   const value = process.env[name]
@@ -11,14 +49,26 @@ function requiredEnv(name: string): string {
   return value
 }
 
-/**
- * A `HealthCheckPort` backed by a plain `fetch` reachability probe against
- * `url` — "is anyone answering", not a deep protocol check. Any thrown
- * error (DNS failure, connection refused, timeout) or non-2xx response
- * reports `down` rather than propagating, matching every other service's
- * `checkDb`/`checkSmtp`-style health checks (`/health` must never itself
- * throw and take the whole endpoint down).
- */
+function createHttpAuthzTransport(baseUrl: string): AuthzTransport {
+  return {
+    async post(path, body) {
+      const res = await fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const text = await res.text()
+      return text.length > 0 ? (JSON.parse(text) as unknown) : {}
+    },
+  }
+}
+
+function createHttpCryptoTransport(baseUrl: string): CryptoTransport {
+  return {
+    async post(path, body) {
+      const res = await fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const text = await res.text()
+      return text.length > 0 ? (JSON.parse(text) as unknown) : {}
+    },
+  }
+}
+
 function createHttpHealthCheck(url: string): HealthCheckPort {
   return {
     async check() {
@@ -32,56 +82,149 @@ function createHttpHealthCheck(url: string): HealthCheckPort {
   }
 }
 
+/** No hard-coded liveness engine in this build (P0 scope: the injected interface is what makes the future real implementation swap-in cheap, per the task brief). Every call fails closed — never silently reports `passed: true` for an engine that was never actually consulted. */
+function createUnconfiguredLivenessChecker(): LivenessChecker {
+  const fail = (): never => {
+    throw new Error('svc-attendance: no LivenessChecker configured — LIVENESS_URL is required in production')
+  }
+  return { passiveCheck: fail, activeChallenge: fail }
+}
+
+function createOidcMiddleware(): OidcMiddlewareHandler {
+  return createOidcMiddlewareHandler({
+    issuer: requiredEnv('OIDC_ISSUER'),
+    audience: requiredEnv('OIDC_AUDIENCE'),
+    jwksUri: requiredEnv('OIDC_JWKS_URI'),
+  })
+}
+
 /**
- * `AppModule` for Task 14: schema, migrations, and `GET /health` only — no
- * `PermissionGuard`/`OidcMiddleware` wiring (see `attendance.controller.ts`
- * for why), no repository/service layer (there is no business logic yet to
- * back one). Phase 3 extends this module when enrolment/matching/punch
- * ingestion land.
+ * Phase 3 (M4 build): supersedes the Task 14 skeleton's guard-free
+ * `AppModule` (health/schema only). `PermissionGuard` is now REAL
+ * enforcement, but deliberately NOT mounted as a global `APP_GUARD` the way
+ * `svc-onboarding`/`svc-leave`/`svc-claims` mount it — see
+ * `enrolment.controller.ts`'s header comment: `AttendanceController`'s
+ * pre-existing `GET /health` route has no `@Public()` today (Task 14) and
+ * this build must not force one onto it, so every BUSINESS controller
+ * instead applies `PermissionGuard` itself via `@UseGuards` (class- or
+ * method-level — see `punch.controller.ts`'s header comment on why the two
+ * kiosk routes need it at method level, after `DeviceAuthGuard`). `/health`
+ * stays exactly as unguarded as it was before this build.
+ *
+ * `OidcMiddleware` is scoped to the human-facing controllers only
+ * (`configure()` below) — the two kiosk-only punch routes authenticate via
+ * `DeviceAuthGuard` instead, and `AttendanceController`'s health route
+ * needs neither.
  */
 @Module({
-  controllers: [AttendanceController],
+  controllers: [AttendanceController, EnrolmentController, PunchController, DeviceController, SecurityController],
   providers: [
-    // Task 16e, defect 2: maps a thrown `GadongError` onto its declared
-    // `httpStatus` and `{code, message_i18n_key, details}` envelope — see
-    // kernel `http/gadong-error.filter.ts`. Registered here even though this
-    // service mounts no `PermissionGuard` yet (no business routes exist —
-    // see this module's own header comment) so a future route that throws a
-    // `GadongError` is correctly mapped from the day it lands, not left for
-    // whoever adds the first business route to remember.
     { provide: APP_FILTER, useClass: GadongErrorFilter },
     {
+      provide: AuthzClient,
+      useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
+    },
+    {
+      provide: CryptoClient,
+      useFactory: () => new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000')),
+    },
+    {
       provide: DB_POOL,
-      // `createPool` pins `search_path` to `attendance` so every
-      // unqualified table name (and the fully-qualified `attendance.*`
-      // names future repositories will use) resolves in this service's own
-      // schema and nowhere else (global-constraints: "every service owns
-      // one schema").
       useFactory: () => createPool(requiredEnv('DATABASE_URL'), 'attendance'),
     },
     {
       provide: CRYPTO_HEALTH,
-      // `svc-crypto` (Task 6) is a real dependency of this service from
-      // day one even before Phase 3's enrolment code lands: `device.
-      // device_secret` is envelope-encrypted through it. No default
-      // hard-coded to a guessable production hostname (carried-forward
-      // binding: fail closed) — `CRYPTO_URL` matches every other service's
-      // env var name for the same dependency (see `services/svc-docs/src/
-      // app.module.ts`).
       useFactory: () => createHttpHealthCheck(`${process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000'}/health`),
     },
     {
       provide: FACE_ENGINE_HEALTH,
-      // CompreFace itself does not exist in this environment yet (Phase 3,
-      // gated on the FAR/FRR benchmark — roadmap "PRD Q2"); this is a bare
-      // reachability probe against whatever `FACE_ENGINE_URL` deploy
-      // configuration eventually points at, not a call into any CompreFace
-      // API. It exists now so operators can see "the face engine
-      // dependency is unreachable" in `/health` from the day this
-      // container first deploys, rather than that signal only appearing
-      // once Phase 3's business logic starts calling it.
       useFactory: () => createHttpHealthCheck(process.env['FACE_ENGINE_URL'] ?? 'http://compreface-api:8000'),
     },
+    {
+      // CompreFace cannot run in this environment (task CONSTRAINTS) — this
+      // is real wiring for a real deployment, never exercised by this
+      // build's own test suite (which proves every consumer against
+      // `testing/fake-face-engine.ts` instead — see `face-engine.adapter.ts`).
+      provide: FACE_ENGINE,
+      useFactory: (): FaceEngineAdapter =>
+        createComprefaceAdapter(process.env['FACE_ENGINE_URL'] ?? 'http://compreface-api:8000', process.env['FACE_ENGINE_API_KEY'] ?? ''),
+    },
+    {
+      provide: LIVENESS_CHECKER,
+      useFactory: (): LivenessChecker => createUnconfiguredLivenessChecker(),
+    },
+    {
+      provide: CONFIG_CLIENT,
+      useFactory: (): ConfigClient => createHttpConfigClient(process.env['CONFIG_URL'] ?? 'http://svc-config:3000'),
+    },
+    {
+      // Pepper for PIN/QR/badge hashing (`credential-hash.ts`) — a secret,
+      // not a statutory/governed figure, so (unlike the match threshold)
+      // this is deliberately NOT read from `svc-config`; it is deployment
+      // secret material, read from the environment like `DATABASE_URL`.
+      provide: CREDENTIAL_PEPPER,
+      useFactory: () => requiredEnv('ATTENDANCE_CREDENTIAL_PEPPER'),
+    },
+    { provide: AuditEmitter, useFactory: () => new AuditEmitter() },
+    { provide: ConsentStateRepository, useFactory: (pool: Queryable) => new ConsentStateRepository(pool), inject: [DB_POOL] },
+    { provide: EnrolmentRepository, useFactory: (pool: Queryable) => new EnrolmentRepository(pool), inject: [DB_POOL] },
+    { provide: AlternativeCredentialRepository, useFactory: (pool: Queryable) => new AlternativeCredentialRepository(pool), inject: [DB_POOL] },
+    { provide: DeviceRepository, useFactory: (pool: Queryable) => new DeviceRepository(pool), inject: [DB_POOL] },
+    { provide: PunchRepository, useFactory: (pool: Queryable) => new PunchRepository(pool), inject: [DB_POOL] },
+    { provide: SecurityEventRepository, useFactory: (pool: Queryable) => new SecurityEventRepository(pool), inject: [DB_POOL] },
+    {
+      provide: TemplateDeletionService,
+      useFactory: (enrolmentRepo: EnrolmentRepository, faceEngine: FaceEngineAdapter, audit: AuditEmitter) =>
+        new TemplateDeletionService(enrolmentRepo, faceEngine, audit),
+      inject: [EnrolmentRepository, FACE_ENGINE, AuditEmitter],
+    },
+    {
+      provide: EnrolmentService,
+      useFactory: (
+        consentState: ConsentStateRepository,
+        enrolmentRepo: EnrolmentRepository,
+        altCredentialRepo: AlternativeCredentialRepository,
+        faceEngine: FaceEngineAdapter,
+        audit: AuditEmitter,
+        pepper: string,
+      ) => new EnrolmentService(consentState, enrolmentRepo, altCredentialRepo, faceEngine, audit, pepper),
+      inject: [ConsentStateRepository, EnrolmentRepository, AlternativeCredentialRepository, FACE_ENGINE, AuditEmitter, CREDENTIAL_PEPPER],
+    },
+    {
+      provide: DeviceService,
+      useFactory: (deviceRepo: DeviceRepository, crypto: CryptoClient, audit: AuditEmitter) => new DeviceService(deviceRepo, crypto, audit),
+      inject: [DeviceRepository, CryptoClient, AuditEmitter],
+    },
+    {
+      provide: PunchService,
+      useFactory: (
+        punchRepo: PunchRepository,
+        enrolmentRepo: EnrolmentRepository,
+        altCredentialRepo: AlternativeCredentialRepository,
+        securityEventRepo: SecurityEventRepository,
+        faceEngine: FaceEngineAdapter,
+        liveness: LivenessChecker,
+        config: ConfigClient,
+        pepper: string,
+      ) => new PunchService(punchRepo, enrolmentRepo, altCredentialRepo, securityEventRepo, faceEngine, liveness, config, pepper),
+      inject: [PunchRepository, EnrolmentRepository, AlternativeCredentialRepository, SecurityEventRepository, FACE_ENGINE, LIVENESS_CHECKER, CONFIG_CLIENT, CREDENTIAL_PEPPER],
+    },
+    {
+      provide: ConsentEventHandler,
+      useFactory: (consentState: ConsentStateRepository, templateDeletion: TemplateDeletionService) => new ConsentEventHandler(consentState, templateDeletion),
+      inject: [ConsentStateRepository, TemplateDeletionService],
+    },
+    {
+      provide: EmployeeEventHandler,
+      useFactory: (templateDeletion: TemplateDeletionService) => new EmployeeEventHandler(templateDeletion),
+      inject: [TemplateDeletionService],
+    },
+    PermissionGuard,
+    DeviceAuthGuard,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(createOidcMiddleware()).forRoutes(EnrolmentController, PunchController, DeviceController, SecurityController)
+  }
+}
