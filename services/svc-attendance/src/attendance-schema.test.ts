@@ -197,7 +197,7 @@ describe('attendance schema migration — no column can hold a face embedding', 
     expect(source).not.toMatch(/face_subject_ref:\s*\{[^}]*type:\s*'bytea'/)
   })
 
-  it('the ONLY bytea column anywhere in the attendance schema is device.device_secret — enumerated explicitly', () => {
+  it('the ONLY bytea columns anywhere in the attendance schema are device.device_secret and alternative_credential.credential_hash — enumerated explicitly', () => {
     const source = migrationSource()
     // Matches `<column_name>: { type: 'bytea', ... }` — the exact shape
     // every column definition in this codebase's migrations uses.
@@ -210,7 +210,10 @@ describe('attendance schema migration — no column can hold a face embedding', 
     }
     // Explicit enumeration, not just a length check — this is the test
     // that keeps a face embedding out of the database (Task 14 brief).
-    expect(byteaColumns).toEqual(['device_secret'])
+    // `credential_hash` (Phase 3, `1754400000000_attendance-phase3.js`) is a
+    // keyed HMAC over a PIN/QR/badge code — never a raw code, never an
+    // embedding; see that migration's file header.
+    expect(byteaColumns).toEqual(['device_secret', 'credential_hash'])
   })
 
   it('there is no column anywhere in this schema named anything embedding/template-shaped that is binary', () => {
