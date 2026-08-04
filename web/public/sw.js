@@ -14,12 +14,51 @@ const CACHE_NAME = 'gadonghr-shell-v2'
 const SHELL_ASSETS = ['/', '/manifest.webmanifest', '/icon.svg']
 
 self.addEventListener('install', (event) => {
+  // `skipWaiting()` is the other half of the v1 -> v2 fix, not an
+  // unrelated hardening. Without it, a corrected worker installs and then
+  // sits in `waiting` until every tab with the origin open is closed —
+  // standard SW lifecycle, meant to avoid two versions of a page running
+  // at once. But EVERY tab still open right now is exactly the tab that
+  // registered the OLD cache-first worker during the broken window and is
+  // showing the blank page this fix exists to repair; they don't reload
+  // their way out, they wait to *close* their way out, which for a
+  // sign-in page nobody can get past means never. Calling it here lets
+  // the new worker become `active` immediately; `clients.claim()` below
+  // (plus the controllerchange-triggered reload in registerServiceWorker.ts)
+  // is what makes that active worker actually start controlling — and
+  // repairing — those already-open tabs instead of only new ones.
+  self.skipWaiting()
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)))
 })
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))),
+    Promise.all([
+      // `clients.claim()` takes control of every open, in-scope tab right
+      // now, instead of only tabs opened AFTER this activation — the
+      // default. Pairs with `skipWaiting()` above: that gets this worker
+      // to `active` without waiting for tabs to close; this makes it
+      // actually control them once it's there. `registerServiceWorker.ts`
+      // listens for the `controllerchange` this fires and reloads the
+      // page exactly once (guarded via `sessionStorage`, not an in-memory
+      // flag, because the reload re-executes that whole module) — taking
+      // control alone does not make an already-rendered dead document
+      // re-fetch itself.
+      self.clients.claim(),
+      // Deletes every cache whose name isn't the CURRENT `CACHE_NAME` —
+      // for a browser that registered the OLD worker, that's the entire
+      // `gadonghr-shell-v1` cache, `/` entry included: `caches.delete`
+      // removes the whole named cache object, not selected entries within
+      // it, so there is no separate step needed to target `/`
+      // specifically. This is also WHY this worker's `activate` runs at
+      // all for those browsers in the first place — CACHE_NAME's v1 -> v2
+      // bump changed this file's bytes, which is what makes an
+      // already-registered worker with otherwise-identical logic notice
+      // an update, install, and reach this handler; without that bump,
+      // `activate` here would never re-run and the poisoned v1 cache
+      // would keep answering forever regardless of `clients.claim()`.
+      caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))),
+    ]),
   )
 })
 
