@@ -36,7 +36,98 @@
       "method": "GET",
       "path": "health",
       "exempt": "operational",
-      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser. No business routes exist yet — Phase 3 adds them."
+      "reason": "Liveness/readiness probe consumed by compose, the deploy script and monitoring, not a browser."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "GET",
+      "path": "my/days",
+      "exempt": "consumed-not-displayed",
+      "reason": "M3 Phase 3 (consolidation, OT classification, exception workflow, period locking) delivered the API and business logic only — the timesheet UI screens (employee/manager/HR views) are a later phase's scope, not built in this task."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "GET",
+      "path": "teams/:orgUnit/days",
+      "exempt": "consumed-not-displayed",
+      "reason": "See my/days above — same M3 Phase 3 scope note, manager team view."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "GET",
+      "path": "days/:employeeId",
+      "exempt": "consumed-not-displayed",
+      "reason": "See my/days above — same M3 Phase 3 scope note, HR org-wide view."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "GET",
+      "path": "exceptions",
+      "exempt": "consumed-not-displayed",
+      "reason": "See my/days above — same M3 Phase 3 scope note, manager/HR exception queue."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "POST",
+      "path": "exceptions/:id/propose",
+      "exempt": "consumed-not-displayed",
+      "reason": "See my/days above — same M3 Phase 3 scope note, manager's proposed correction."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "POST",
+      "path": "exceptions/:id/confirm",
+      "exempt": "consumed-not-displayed",
+      "reason": "See my/days above — same M3 Phase 3 scope note, HR confirmation (audited who/when/why)."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "POST",
+      "path": "manual-punch",
+      "exempt": "consumed-not-displayed",
+      "reason": "See my/days above — same M3 Phase 3 scope note, HR manual punch entry."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "GET",
+      "path": "periods",
+      "exempt": "consumed-not-displayed",
+      "reason": "See my/days above — same M3 Phase 3 scope note, period list."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "POST",
+      "path": "periods",
+      "exempt": "consumed-not-displayed",
+      "reason": "See my/days above — same M3 Phase 3 scope note, period creation."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "POST",
+      "path": "periods/:id/lock",
+      "exempt": "consumed-not-displayed",
+      "reason": "See my/days above — same M3 Phase 3 scope note, HR period lock (publishes timesheet.locked)."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "POST",
+      "path": "periods/:id/unlock",
+      "exempt": "consumed-not-displayed",
+      "reason": "See my/days above — same M3 Phase 3 scope note, Payroll Approver unlock (publishes timesheet.unlocked, forces a variance report)."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "GET",
+      "path": "periods/:id/export",
+      "exempt": "consumed-not-displayed",
+      "reason": "See my/days above — same M3 Phase 3 scope note, locked-version snapshot export."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "GET",
+      "path": "ot/summary",
+      "exempt": "consumed-not-displayed",
+      "reason": "See my/days above — same M3 Phase 3 scope note, OT-by-rate-class summary."
     },
     {
       "service": "svc-i18n",

@@ -157,6 +157,21 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       // papered over here.
       'roster.read',
       'ot.request',
+      // M3 reconciliation (2026-08-04): `timesheet.read` powers `GET
+      // /my/days` in svc-timesheet — an employee viewing their own
+      // consolidated day records/OT breakdown (PRD M3-5: "Employee sees own
+      // timesheet"). `TimesheetController.myDays` is self-scoped by
+      // construction (`employeeId` is always `req.userId`, never a request
+      // param), matching the roadmap's "every grant carries an org scope
+      // (self, ...)" — a real grant of this permission to an `employee-ess`
+      // user carries no `org_scope_unit_id`, resolving to `scope: 'self'`
+      // at `svc-authz`'s `decide()` (see `authz.service.ts`). Before this
+      // fix `timesheet.read` was granted only to `line-manager`/`hr-officer`
+      // — the exact Task 14c defect shape (a correctly-guarded route
+      // unreachable by the role it was built for) `permission-reachability
+      // .test.ts` exists to catch, surfaced by svc-timesheet's Phase 3
+      // build (M3 task).
+      'timesheet.read',
       // Task 14c: notify.notification.* are self-scoped by construction —
       // `NotifyController` derives the recipient solely from `req.userId`,
       // never a request param, so every human role gets these two, not a
@@ -211,6 +226,20 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       'leave.balance.read',
       'timesheet.read',
       'timesheet.correct',
+      // M3 reconciliation (2026-08-04): `timesheet.lock` powers `POST
+      // /periods/:id/lock` in svc-timesheet (PRD M3-4: "HR locks a
+      // timesheet period before payroll pull"). Declared in
+      // `PERMISSION_CATALOG` since before this task but granted to NO
+      // role — again the Task 14c defect shape, surfaced now because
+      // svc-timesheet's Phase 3 build is the first code anywhere in this
+      // repo to actually reference it via `@RequirePermission`.
+      // `timesheet.unlock` (a DIFFERENT, deliberately narrower permission —
+      // roadmap: "timesheet unlock: requires timesheet.unlock (Payroll
+      // Approver only) + reason") is already correctly scoped to
+      // `payroll-approver` only, below — HR can lock, but only Payroll
+      // Approver can unlock, matching the roadmap's segregation-of-duties
+      // list verbatim.
+      'timesheet.lock',
       'holiday.manage',
       // M6 reconciliation (2026-08-04): `claim.admin` (claim type/band
       // policy administration) follows the exact same pattern already

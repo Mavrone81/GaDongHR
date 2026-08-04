@@ -4,15 +4,28 @@ import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_FILTER, APP_GUARD } from '@nestjs/core'
 import { AuthzClient, GadongErrorFilter, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
 import type { OidcMiddlewareHandler } from '@gadong/kernel'
-import type { AuthzTransport } from '@gadong/kernel'
+import type { AuthzTransport, Queryable } from '@gadong/kernel'
+import { ConfigClient } from './config-client'
+import type { ConfigTransport } from './config-client'
+import { ConsolidationService } from './consolidation.service'
+import { CorrectionAuditRepository } from './correction-audit.repository'
+import { DayRecordRepository } from './day-record.repository'
+import { EmployeeRefRepository } from './employee-ref.repository'
+import { EventsConsumer } from './events.consumer'
+import { ExceptionRepository } from './exception.repository'
+import { ExceptionsService } from './exceptions.service'
+import { LeaveRefRepository } from './leave-ref.repository'
+import { OtApprovalRefRepository } from './ot-approval-ref.repository'
+import { PeriodRepository } from './period.repository'
+import { PeriodService } from './period.service'
+import { RosterRefRepository } from './roster-ref.repository'
 import { DB_POOL, TimesheetController } from './timesheet.controller'
+import { ViewsService } from './views.service'
 
 /**
  * `svc-authz` real HTTP wiring — identical shape to `services/svc-config`'s
  * and `services/svc-audit`'s `createHttpAuthzTransport`: `AuthzClient.decide`
- * treats an unreachable transport as a denial (kernel `authz/client.ts`),
- * the correct fail-closed behaviour, not a placeholder needing revisiting
- * once `svc-authz` (Task 8) is live.
+ * treats an unreachable transport as a denial (kernel `authz/client.ts`).
  */
 function createHttpAuthzTransport(baseUrl: string): AuthzTransport {
   return {
@@ -22,6 +35,17 @@ function createHttpAuthzTransport(baseUrl: string): AuthzTransport {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       })
+      const text = await res.text()
+      return text.length > 0 ? (JSON.parse(text) as unknown) : {}
+    },
+  }
+}
+
+/** `svc-config` HTTP wiring for `ConfigClient` — every statutory figure `OtClassifier`/`ConsolidationService` evaluates against comes from here at runtime (brief CONSTRAINTS: never hard-coded). */
+function createHttpConfigTransport(baseUrl: string): ConfigTransport {
+  return {
+    async get(path) {
+      const res = await fetch(`${baseUrl}${path}`)
       const text = await res.text()
       return text.length > 0 ? (JSON.parse(text) as unknown) : {}
     },
@@ -38,8 +62,7 @@ function requiredEnv(name: string): string {
  * `OidcMiddleware` populates `request.userId` from a verified bearer token's
  * `sub` claim, ahead of `PermissionGuard` reading it — see
  * `services/svc-config/src/app.module.ts`'s `createOidcMiddleware` comment
- * for the full story behind why this exists (Task 13c: a guard reading a
- * field nothing ever set makes every guarded route unreachable).
+ * for the full story.
  */
 function createOidcMiddleware(): OidcMiddlewareHandler {
   return createOidcMiddlewareHandler({
@@ -50,50 +73,90 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
 }
 
 /**
- * `svc-timesheet` is the M3 junction service — every route
- * M3-TIMESHEET.md's API manual defines (`timesheet.read`, `timesheet.correct`,
- * `timesheet.lock`, `timesheet.unlock`, …) is permission-scoped, so — like
- * `svc-config` and `svc-audit`, and unlike `svc-crypto` (service-to-service
- * only) or `svc-i18n` (must render before any principal exists) — this
- * module mounts the kernel's `PermissionGuard` as `APP_GUARD`: deny-by-
- * default for every route not explicitly exempted. Today `GET /health` is
- * the only route that exists (Task 14 brief scope — Phase 3 owns the rest),
- * so it is also the only one currently reachable, but the guard is wired
- * now rather than left for Phase 3 to add, matching this task's brief to
- * follow `svc-config`'s NestJS wiring exactly.
+ * `svc-timesheet` — the M3 junction service. Every route
+ * M3-TIMESHEET.md's API manual defines is permission-scoped, so — like
+ * `svc-config`/`svc-leave`/`svc-scheduler` — this module mounts the
+ * kernel's `PermissionGuard` as `APP_GUARD`: deny-by-default for every
+ * route not explicitly exempted (`GET /health` is the only one).
+ *
+ * `EventsConsumer` is wired as a provider even though no message broker is
+ * subscribed to it anywhere in this codebase yet — matching
+ * `services/svc-scheduler`'s `EventsService`/`services/svc-leave`'s
+ * `EmployeeRefConsumer`: "ready for a future subscriber, tested directly
+ * today".
  */
 @Module({
   controllers: [TimesheetController],
   providers: [
     { provide: APP_GUARD, useClass: PermissionGuard },
-    // Task 16e, defect 2: maps a thrown `GadongError` (most importantly the
-    // ones `PermissionGuard` above throws directly, before any controller's
-    // own `try`/`catch` ever runs) onto its declared `httpStatus` and
-    // `{code, message_i18n_key, details}` envelope — see kernel
-    // `http/gadong-error.filter.ts`. Global (`APP_FILTER`), not a per-route
-    // `@UseFilters`, for the same reason `PermissionGuard` is global: a
-    // route-scoped filter would never see an exception thrown by a
-    // globally-mounted guard.
     { provide: APP_FILTER, useClass: GadongErrorFilter },
     {
       provide: AuthzClient,
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
     },
     {
+      provide: ConfigClient,
+      useFactory: () => new ConfigClient(createHttpConfigTransport(process.env['CONFIG_URL'] ?? 'http://svc-config:3000')),
+    },
+    {
       provide: DB_POOL,
       // `createPool` pins `search_path` to `timesheet` so every
       // unqualified table name resolves in this service's own schema and
-      // nowhere else (roadmap "Database conventions": "Each service's DB
-      // role is granted only its own schema").
+      // nowhere else (roadmap "Database conventions").
       useFactory: () => createPool(requiredEnv('DATABASE_URL'), 'timesheet'),
+    },
+    { provide: DayRecordRepository, useFactory: (pool: Queryable) => new DayRecordRepository(pool), inject: [DB_POOL] },
+    { provide: ExceptionRepository, useFactory: (pool: Queryable) => new ExceptionRepository(pool), inject: [DB_POOL] },
+    { provide: PeriodRepository, useFactory: (pool: Queryable) => new PeriodRepository(pool), inject: [DB_POOL] },
+    { provide: RosterRefRepository, useFactory: (pool: Queryable) => new RosterRefRepository(pool), inject: [DB_POOL] },
+    { provide: LeaveRefRepository, useFactory: (pool: Queryable) => new LeaveRefRepository(pool), inject: [DB_POOL] },
+    { provide: OtApprovalRefRepository, useFactory: (pool: Queryable) => new OtApprovalRefRepository(pool), inject: [DB_POOL] },
+    { provide: EmployeeRefRepository, useFactory: (pool: Queryable) => new EmployeeRefRepository(pool), inject: [DB_POOL] },
+    { provide: CorrectionAuditRepository, useFactory: (pool: Queryable) => new CorrectionAuditRepository(pool), inject: [DB_POOL] },
+    {
+      provide: ConsolidationService,
+      useFactory: (
+        dayRecords: DayRecordRepository,
+        exceptions: ExceptionRepository,
+        rosterRefs: RosterRefRepository,
+        leaveRefs: LeaveRefRepository,
+        otApprovalRefs: OtApprovalRefRepository,
+        employeeRefs: EmployeeRefRepository,
+        correctionAudits: CorrectionAuditRepository,
+        configClient: ConfigClient,
+      ) => new ConsolidationService(dayRecords, exceptions, rosterRefs, leaveRefs, otApprovalRefs, employeeRefs, correctionAudits, configClient),
+      inject: [DayRecordRepository, ExceptionRepository, RosterRefRepository, LeaveRefRepository, OtApprovalRefRepository, EmployeeRefRepository, CorrectionAuditRepository, ConfigClient],
+    },
+    {
+      provide: EventsConsumer,
+      useFactory: (consolidation: ConsolidationService, employeeRefs: EmployeeRefRepository) => new EventsConsumer(consolidation, employeeRefs),
+      inject: [ConsolidationService, EmployeeRefRepository],
+    },
+    {
+      provide: ExceptionsService,
+      useFactory: (
+        exceptions: ExceptionRepository,
+        dayRecords: DayRecordRepository,
+        periods: PeriodRepository,
+        correctionAudits: CorrectionAuditRepository,
+        consolidation: ConsolidationService,
+      ) => new ExceptionsService(exceptions, dayRecords, periods, correctionAudits, consolidation),
+      inject: [ExceptionRepository, DayRecordRepository, PeriodRepository, CorrectionAuditRepository, ConsolidationService],
+    },
+    {
+      provide: PeriodService,
+      useFactory: (periods: PeriodRepository, exceptions: ExceptionRepository) => new PeriodService(periods, exceptions),
+      inject: [PeriodRepository, ExceptionRepository],
+    },
+    {
+      provide: ViewsService,
+      useFactory: (dayRecords: DayRecordRepository, employeeRefs: EmployeeRefRepository, exceptions: ExceptionRepository) =>
+        new ViewsService(dayRecords, employeeRefs, exceptions),
+      inject: [DayRecordRepository, EmployeeRefRepository, ExceptionRepository],
     },
   ],
 })
 export class AppModule implements NestModule {
-  // Functional middleware, not the `OidcMiddleware` class — see kernel
-  // `authz/oidc.middleware.ts`'s `createOidcMiddlewareHandler` doc for why
-  // `consumer.apply(OidcMiddleware)` fails with
-  // `UnknownDependenciesException` (Task 16d incident).
   configure(consumer: MiddlewareConsumer): void {
     consumer.apply(createOidcMiddleware()).forRoutes('*')
   }
