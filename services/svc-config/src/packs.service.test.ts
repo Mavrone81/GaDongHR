@@ -5,6 +5,8 @@ import { RulesRepository } from './rules.repository'
 import { PacksService, computePackSignature } from './packs.service'
 import type { SignedPack } from './packs.service'
 import { FakeConfigDb } from './testing/fake-db'
+import { signPack } from './scripts/sign-pack'
+import type { UnsignedPack } from './scripts/sign-pack'
 
 const SIGNING_KEY = 'test-signing-key'
 
@@ -177,18 +179,32 @@ describe('PacksService.importPack — floor validation blocks a bad pack', () =>
 })
 
 describe('The real seed packs shipped with this service', () => {
-  const SEED_SIGNING_KEY = 'gadonghr-dev-pack-signing-key'
+  // Stands in for "the deploying environment's CONFIG_PACK_SIGNING_KEY" —
+  // deliberately NOT baked into the seed files themselves (see
+  // `scripts/sign-pack.ts`'s header): `services/svc-config/seed/*.json`
+  // ship with no `signature` field at all, because a value baked in at
+  // authoring time can only ever verify under the one key that produced
+  // it — which is exactly the bug that shipped `CFG-401` to every real
+  // deployment (production's `CONFIG_PACK_SIGNING_KEY` is independently
+  // generated, never equal to whatever key an earlier author's machine
+  // used). These tests sign the real, unsigned seed content at test time
+  // via `signPack` — the same function `deploy/scripts/seed.sh` calls —
+  // proving the shipped pipeline (sign-then-import), not a fixed value
+  // that happens to match one hardcoded key.
+  const DEPLOYMENT_SIGNING_KEY = 'gadonghr-dev-pack-signing-key'
 
-  function loadPack(fileName: string): SignedPack {
+  function loadUnsignedPack(fileName: string): UnsignedPack {
     const text = readFileSync(join(__dirname, '..', 'seed', fileName), 'utf8')
-    return JSON.parse(text) as SignedPack
+    return JSON.parse(text) as UnsignedPack
   }
 
-  it('TH-STATUTORY-v1.json is correctly signed and loads with zero floor/ceiling violations', async () => {
+  it('TH-STATUTORY-v1.json has no baked-in signature (see scripts/sign-pack.ts header) and, once signed for the deploying environment, loads with zero floor/ceiling violations', async () => {
     const db = new FakeConfigDb()
     const conn = db.connect()
-    const service = new PacksService(new RulesRepository(conn), SEED_SIGNING_KEY)
-    const pack = loadPack('TH-STATUTORY-v1.json')
+    const service = new PacksService(new RulesRepository(conn), DEPLOYMENT_SIGNING_KEY)
+    const unsigned = loadUnsignedPack('TH-STATUTORY-v1.json')
+    expect(unsigned).not.toHaveProperty('signature')
+    const pack = signPack(unsigned, DEPLOYMENT_SIGNING_KEY)
 
     await conn.query('BEGIN')
     const result = await service.importPack(conn, pack)
@@ -199,11 +215,13 @@ describe('The real seed packs shipped with this service', () => {
     expect(db.debugRules()).toHaveLength(pack.records.length)
   })
 
-  it('TH-HOLIDAYS-2026.json is correctly signed and loads with at least 13 holidays selected', async () => {
+  it('TH-HOLIDAYS-2026.json has no baked-in signature and, once signed for the deploying environment, loads with at least 13 holidays selected', async () => {
     const db = new FakeConfigDb()
     const conn = db.connect()
-    const service = new PacksService(new RulesRepository(conn), SEED_SIGNING_KEY)
-    const pack = loadPack('TH-HOLIDAYS-2026.json')
+    const service = new PacksService(new RulesRepository(conn), DEPLOYMENT_SIGNING_KEY)
+    const unsigned = loadUnsignedPack('TH-HOLIDAYS-2026.json')
+    expect(unsigned).not.toHaveProperty('signature')
+    const pack = signPack(unsigned, DEPLOYMENT_SIGNING_KEY)
 
     await conn.query('BEGIN')
     const result = await service.importPack(conn, pack)
@@ -214,12 +232,25 @@ describe('The real seed packs shipped with this service', () => {
     expect(holidayList.length).toBeGreaterThanOrEqual(13)
   })
 
-  it('running the seeder (both real packs) twice produces identical row count and identical content hash', async () => {
+  it('a pack signed for one environment fails verification in another — the actual production failure, reproduced against the real TH-STATUTORY-v1 content', async () => {
     const db = new FakeConfigDb()
     const conn = db.connect()
-    const service = new PacksService(new RulesRepository(conn), SEED_SIGNING_KEY)
-    const statutory = loadPack('TH-STATUTORY-v1.json')
-    const holidays = loadPack('TH-HOLIDAYS-2026.json')
+    const productionService = new PacksService(new RulesRepository(conn), 'a-different-real-deployments-key')
+    const signedForDev = signPack(loadUnsignedPack('TH-STATUTORY-v1.json'), DEPLOYMENT_SIGNING_KEY)
+
+    await conn.query('BEGIN')
+    await expect(productionService.importPack(conn, signedForDev)).rejects.toMatchObject({ code: 'CFG-401' })
+    await conn.query('ROLLBACK')
+
+    expect(db.debugRules()).toHaveLength(0)
+  })
+
+  it('running the seeder (both real packs, signed for the deploying environment) twice produces identical row count and identical content hash', async () => {
+    const db = new FakeConfigDb()
+    const conn = db.connect()
+    const service = new PacksService(new RulesRepository(conn), DEPLOYMENT_SIGNING_KEY)
+    const statutory = signPack(loadUnsignedPack('TH-STATUTORY-v1.json'), DEPLOYMENT_SIGNING_KEY)
+    const holidays = signPack(loadUnsignedPack('TH-HOLIDAYS-2026.json'), DEPLOYMENT_SIGNING_KEY)
 
     async function seedOnce(): Promise<void> {
       await conn.query('BEGIN')
