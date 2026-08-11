@@ -1,7 +1,6 @@
 {
   "pack_id": "TH-STATUTORY-v1",
   "version": 1,
-  "signature": "4a32Z0rxkz7WENNXyf1XdQiXlDZPzOwODH0urD4zfpA=",
   "records": [
     {
       "rule_key": "leave.annual.min_days",

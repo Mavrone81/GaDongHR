@@ -22,7 +22,7 @@
 | `CONSENT-FORMS-<ver>` | Privacy notice + biometric consent templates th/en/zh (PDPA doc §9) | Product + counsel | On counsel review |
 | `FIXTURE-SIAMTEST` (test profile only) | Siam Test Co. tenant (Test Strategy §3) | Product | Per release |
 
-Pack format: signed JSON (`{pack_id, version, signature, records[]}`); import runs through the same governance approval as manual rule edits; seeder is idempotent by `(pack_id, version)`.
+Pack format on the wire (`POST /packs/import`): signed JSON `{pack_id, version, signature, records[]}`. The committed source files under `services/svc-config/seed/*.json` carry NO `signature` field — only `{pack_id, version, records[]}` — because a signature baked in at authoring time verifies only under the one `CONFIG_PACK_SIGNING_KEY` that produced it, and every deployment generates its own. `deploy/scripts/seed.sh` signs each pack for the target environment's own key, via `services/svc-config/src/scripts/sign-pack.ts`, immediately before import — never at authoring/commit time. Import runs through the same governance approval as manual rule edits; seeder is idempotent by `(pack_id, version)`.
 
 ## 2. `TH-HOLIDAYS-2026` (private-sector default set — company confirms in wizard; lunar-calendar dates depend on annual announcements → marked VERIFY)
 

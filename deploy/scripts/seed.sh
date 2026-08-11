@@ -65,6 +65,28 @@
 # `PackImportResult` is `{status: 'imported' | 'duplicate', ...}` —
 # re-POSTing an already-imported pack is a documented no-op, which is what
 # makes this half idempotent too.
+#
+# SIGNING: `services/svc-config/seed/*.json` files carry NO `signature`
+# field — they are `{pack_id, version, records[]}` only. A signature baked
+# in at authoring time can only ever verify under the one
+# `CONFIG_PACK_SIGNING_KEY` that produced it, and every deployment
+# generates its own independently (`deploy/.env`'s
+# `CONFIG_PACK_SIGNING_KEY=CHANGE_ME`), so a committed signature would be
+# valid nowhere but its author's machine — this was a real production bug
+# (`CFG-401 config.error.pack_signature_invalid` on every real import;
+# `config.statutory_rule` stuck at 0 rows). The block below signs each
+# pack for THIS environment's own key — already present in svc-config's
+# container environment (`docker-compose.yml`'s `CONFIG_PACK_SIGNING_KEY:
+# ${CONFIG_PACK_SIGNING_KEY}`, the same value the running service verifies
+# against) — immediately before POSTing it, via
+# `services/svc-config/src/scripts/sign-pack.ts` (compiled to
+# `dist/scripts/sign-pack.js` in the image). It imports
+# `computePackSignature` from `packs.service.ts` rather than
+# reimplementing the HMAC/canonicalisation, so signing and verifying can
+# never drift apart. Re-signing is cheap and deterministic and does not
+# affect idempotency — the pack content (and therefore the
+# `(pack_id, version)` idempotency key) is unchanged run to run; only the
+# signature value is (re)computed.
 
 set -euo pipefail
 
@@ -171,8 +193,15 @@ if ! compose exec -T \
   -e KC_ADMIN_PASSWORD="$KC_ADMIN_PASSWORD" \
   -e KEYCLOAK_SEEDER_CLIENT_SECRET="$KEYCLOAK_SEEDER_CLIENT_SECRET" \
   svc-config node - <<'JS'
-const { readdirSync, readFileSync } = require('node:fs')
+const { readdirSync } = require('node:fs')
 const { join } = require('node:path')
+// Compiled from services/svc-config/src/scripts/sign-pack.ts — imports
+// `computePackSignature` from packs.service.ts itself (not a
+// reimplementation), so what this script signs with is exactly what
+// `PacksService.importPack` verifies with. See seed.sh's own header
+// ("SIGNING:") for why re-signing here, not a baked-in `signature`, is
+// the fix.
+const { signPackFile } = require(join(__dirname, 'dist', 'scripts', 'sign-pack.js'))
 
 const KC_BASE = 'http://keycloak:8080/auth'
 const REALM = 'gadonghr'
@@ -263,9 +292,15 @@ async function main() {
     console.log('No seed pack files found in', seedDir)
     return
   }
+  const signingKey = process.env.CONFIG_PACK_SIGNING_KEY
+  if (!signingKey) {
+    throw new Error('CONFIG_PACK_SIGNING_KEY is not set in the svc-config container environment — cannot sign packs for import.')
+  }
   let failed = false
   for (const file of files) {
-    const pack = JSON.parse(readFileSync(join(seedDir, file), 'utf8'))
+    // Sign fresh, for THIS environment's key, every run — the seed file
+    // on disk has no `signature` field (see seed.sh's "SIGNING:" header).
+    const pack = signPackFile(join(seedDir, file), signingKey)
     const res = await fetch('http://127.0.0.1:3000/packs/import', {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${seederToken}` },
