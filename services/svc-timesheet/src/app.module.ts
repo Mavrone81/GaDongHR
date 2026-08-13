@@ -79,11 +79,11 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
  * kernel's `PermissionGuard` as `APP_GUARD`: deny-by-default for every
  * route not explicitly exempted (`GET /health` is the only one).
  *
- * `EventsConsumer` is wired as a provider even though no message broker is
- * subscribed to it anywhere in this codebase yet — matching
- * `services/svc-scheduler`'s `EventsService`/`services/svc-leave`'s
- * `EmployeeRefConsumer`: "ready for a future subscriber, tested directly
- * today".
+ * `EventsConsumer` is a plain provider here — the actual subscription
+ * (queue bind + dispatch loop) is wired in `main.ts`'s `wireEventBus`
+ * (event-bus task), not here: `AppModule` only needs to construct the
+ * dependency graph `main.ts` later pulls `EventsConsumer` out of via
+ * `app.get()`.
  */
 @Module({
   controllers: [TimesheetController],

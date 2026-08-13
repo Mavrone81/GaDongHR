@@ -1,0 +1,24 @@
+# Event-bus real-broker test overlay (event-bus task).
+#
+# Publishes host ports on the SAME `postgres`/`rabbitmq` service
+# definitions `docker-compose.yml` already declares — no service is added,
+# renamed or reconfigured beyond `ports:`, so this file cannot affect
+# `deploy/compose-validation.test.ts` (which only ever merges
+# `docker-compose.yml` + `docker-compose.prod.yml`, never this file) and
+# stays true to the base file's own rule that only `traefik` publishes a
+# port in the real deployment — this overlay exists ONLY for a developer/CI
+# machine to reach the broker and database from outside the compose network
+# while running `packages/kernel/src/bus/*.real-broker.test.ts` and the
+# per-service equivalents. Never applied in `docker-compose.prod.yml`'s
+# deploy path.
+#
+# Usage (see `deploy/.env.eventbus-test.local.example`):
+#   docker compose -f docker-compose.yml -f docker-compose.eventbus-test.yml \
+#     --env-file .env.eventbus-test.local up -d postgres rabbitmq
+services:
+  postgres:
+    ports: ["${EVENTBUS_TEST_POSTGRES_PORT:-15432}:5432"]
+  rabbitmq:
+    ports:
+      - "${EVENTBUS_TEST_RABBITMQ_PORT:-15672}:5672"
+      - "${EVENTBUS_TEST_RABBITMQ_MGMT_PORT:-15673}:15672"

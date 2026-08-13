@@ -72,6 +72,16 @@ x-oidc-env: &oidc-env
   OIDC_AUDIENCE: gadonghr-services
   OIDC_JWKS_URI: http://keycloak:8080/auth/realms/gadonghr/protocol/openid-connect/certs
 
+# event-bus task: every service that owns an `outbox` table (a producer) or
+# subscribes to `gadong.events` (a consumer) needs this. `RABBITMQ_USER`/
+# `RABBITMQ_PASSWORD` already existed below (the `rabbitmq` service's own
+# credentials) with nothing reading them — this is that missing wiring,
+# not a new credential. Container-internal address, same reasoning as
+# `AUTHZ_URL`/`CRYPTO_URL`/`OIDC_JWKS_URI` above: no reason for a
+# service-to-broker connection to round-trip through Traefik.
+x-rabbitmq-env: &rabbitmq-env
+  RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+
 services:
   # ==================== Edge ====================
   traefik:
@@ -398,7 +408,7 @@ services:
     <<: *node-defaults
     mem_limit: 192m
     environment:
-      <<: *oidc-env
+      <<: [*oidc-env, *rabbitmq-env]
       NODE_ENV: ${NODE_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgresql://config:${DB_PASSWORD_CONFIG}@postgres:5432/${POSTGRES_DB}
@@ -408,6 +418,7 @@ services:
       postgres: { condition: service_healthy }
       svc-authz: { condition: service_healthy }
       keycloak: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     healthcheck: *http-health
     # Task 16f: routing moved to Traefik's file provider — see
     # `traefik/dynamic/routes.yml`'s `svc-config` router/service/middleware
@@ -444,7 +455,7 @@ services:
     <<: *node-defaults
     mem_limit: 96m
     environment:
-      <<: *oidc-env
+      <<: [*oidc-env, *rabbitmq-env]
       NODE_ENV: ${NODE_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgresql://audit:${DB_PASSWORD_AUDIT}@postgres:5432/${POSTGRES_DB}
@@ -453,6 +464,7 @@ services:
       postgres: { condition: service_healthy }
       svc-authz: { condition: service_healthy }
       keycloak: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     healthcheck: *http-health
     # Task 16f: routing moved to Traefik's file provider — see
     # `traefik/dynamic/routes.yml`'s `svc-audit` router/service/middleware
@@ -483,7 +495,7 @@ services:
     <<: *node-defaults
     mem_limit: 160m
     environment:
-      <<: *oidc-env
+      <<: [*oidc-env, *rabbitmq-env]
       NODE_ENV: ${NODE_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgresql://notify:${DB_PASSWORD_NOTIFY}@postgres:5432/${POSTGRES_DB}
@@ -499,6 +511,7 @@ services:
       postgres: { condition: service_healthy }
       svc-authz: { condition: service_healthy }
       keycloak: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     healthcheck: *http-health
     # Task 16f: routing moved to Traefik's file provider — see
     # `traefik/dynamic/routes.yml`'s `svc-notify` router/service/middleware
@@ -512,7 +525,7 @@ services:
     # deploy/README.md's memory budget table for the arithmetic.
     mem_limit: 512m
     environment:
-      <<: *oidc-env
+      <<: [*oidc-env, *rabbitmq-env]
       NODE_ENV: ${NODE_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgresql://docs:${DB_PASSWORD_DOCS}@postgres:5432/${POSTGRES_DB}
@@ -530,6 +543,7 @@ services:
       svc-crypto: { condition: service_healthy }
       minio: { condition: service_healthy }
       keycloak: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     healthcheck: *http-health
     # Task 16f: routing moved to Traefik's file provider — see
     # `traefik/dynamic/routes.yml`'s `svc-docs` router/service/middleware

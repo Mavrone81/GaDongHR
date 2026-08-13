@@ -5,6 +5,14 @@ module.exports = {
   // is configuration, not application code — see that file's header).
   roots: ['<rootDir>/packages', '<rootDir>/services', '<rootDir>/deploy', '<rootDir>/web'],
   testMatch: ['**/*.test.ts'],
+  // event-bus task: `*.realbroker.test.ts` needs a real RabbitMQ + Postgres
+  // (`deploy/docker-compose.eventbus-test.yml`) and must NOT run as part of
+  // the default `pnpm test` every other one of the 2,587 tests runs under —
+  // that suite has never touched a real broker or database and this repo's
+  // CI/dev machines don't all have the broker stack up. Run explicitly with
+  // `pnpm test:realbroker` (`jest.realbroker.config.js`), which targets
+  // exactly this pattern instead of ignoring it.
+  testPathIgnorePatterns: ['/node_modules/', '\\.realbroker\\.test\\.ts$'],
   collectCoverageFrom: ['packages/**/src/**/*.ts', 'services/**/src/**/*.ts'],
   // `preset: 'ts-jest'` (the previous config) transforms with an empty ts-jest
   // options object, which makes ts-jest resolve its tsconfig by searching

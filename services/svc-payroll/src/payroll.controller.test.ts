@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { HttpException } from '@nestjs/common'
-import { CryptoClient, PERMISSION_METADATA_KEY, PUBLIC_METADATA_KEY } from '@gadong/kernel'
+import { CryptoClient, PERMISSION_METADATA_KEY, PUBLIC_METADATA_KEY, writeOutbox } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { PayrollController } from './payroll.controller'
 import type { HealthCheckPort } from './payroll.controller'
@@ -148,6 +148,15 @@ describe('GET /health', () => {
   it('degrades when svc-config is down: with no statutory figures the engine cannot compute anything', async () => {
     const { controller } = await controllerHarness({ config: 'down' })
     expect(await controller.health()).toMatchObject({ status: 'degraded', dependencies: { config: 'down' } })
+  })
+
+  it('reports outbox depth (event-bus health/metrics) — a fresh, undrained row is visible but not yet "stale"', async () => {
+    const { controller, tx } = await controllerHarness()
+    await writeOutbox(tx, 'payroll', 'payroll.committed', { runId: 'r1' })
+
+    const health = await controller.health()
+    expect(health.outbox).toMatchObject({ pending: 1, stale: false })
+    expect(health.status).toBe('ok') // freshly-written, well under the staleness threshold
   })
 })
 

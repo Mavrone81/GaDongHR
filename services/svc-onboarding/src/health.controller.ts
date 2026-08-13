@@ -1,5 +1,5 @@
 import { Controller, Get, Inject } from '@nestjs/common'
-import { Public, buildHealth } from '@gadong/kernel'
+import { Public, buildHealth, outboxDepth } from '@gadong/kernel'
 import type { HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { DB_POOL } from './employee.controller'
@@ -53,7 +53,19 @@ export class HealthController {
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
     const crypto = await this.cryptoProbe.check()
-    return buildHealth('svc-onboarding', { db, crypto })
+    // "A stuck outbox must be observable" (event-bus task) — this service
+    // is `employee.*`/`consent.*`'s only producer; if its relay stalls,
+    // onboarding a new hire silently never reaches payroll/timesheet/leave/
+    // scheduler/claims/attendance, which is exactly the defect this task
+    // fixes. See `svc-payroll`'s identical wiring/reasoning.
+    let outbox: { pending: number; oldestAgeSeconds: number | null } | undefined
+    let outboxQuery: 'up' | 'down' = 'up'
+    try {
+      outbox = await outboxDepth(this.pool, 'onboarding')
+    } catch {
+      outboxQuery = 'down'
+    }
+    return buildHealth('svc-onboarding', { db, crypto, ...(outboxQuery === 'down' ? { outboxQuery } : {}) }, process.env, outbox)
   }
 
   private async checkDb(): Promise<'up' | 'down'> {

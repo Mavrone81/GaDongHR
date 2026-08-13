@@ -287,6 +287,13 @@ export class FakeOnboardingConnection implements Queryable {
     if (/\bonboarding\.probation\b/i.test(s)) return this.handleProbation(s, params)
     if (/INSERT INTO\s+\S*outbox\b/i.test(s)) return this.handleOutboxInsert(params)
     if (/INSERT INTO\s+\S*processed_events\b/i.test(s)) return this.handleProcessedEventsInsert(s, params)
+    // kernel `outboxDepth` (event-bus health/metrics) — fixed SQL text this fake doesn't own, same precedent as the two lines above.
+    if (/^SELECT\s+count\(\*\)/i.test(s) && /FROM\s+\S*outbox\b/i.test(s)) {
+      const pending = this.db.debugOutboxRows().filter((r) => r.published_at === null)
+      const oldestAgeSeconds =
+        pending.length === 0 ? null : Math.max(0, (Date.now() - Math.min(...pending.map((r) => r.created_at.getTime()))) / 1000)
+      return { rows: [{ pending: pending.length, oldest_age_seconds: oldestAgeSeconds }] }
+    }
 
     throw new Error(`FakeOnboardingDb: unrecognised query: ${s}`)
   }
