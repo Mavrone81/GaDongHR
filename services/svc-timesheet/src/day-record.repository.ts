@@ -194,4 +194,57 @@ export class DayRecordRepository {
     )
     return rows.map(mapRow)
   }
+
+  /**
+   * Per-employee totals for `[from, to]` (a LOCKED period's own date range —
+   * `PeriodService.totals` is the only caller, see that method's doc for
+   * the lock-version contract this feeds). One row per employee who has at
+   * least one `day_record` in range; an employee with none simply does not
+   * appear (`svc-payroll`'s `HttpTimesheetClient.getLockedTotals` builds a
+   * `Map` from these rows, so an absent employee correctly resolves to
+   * `ZERO_TIMESHEET` on the caller's side, not a row of zeroes here).
+   *
+   * `daysWorked` counts a day as "worked" when `worked_hours > 0` — matching
+   * `gross-to-net.ts`'s `basePayEarned` use of the figure (a daily-rate
+   * employee is paid per day actually worked, not per `day_record` row that
+   * merely exists, e.g. an unworked leave day). Every other column is a
+   * plain SUM, aggregated server-side so the exact-rational discipline
+   * (`hours.ts`'s header) is preserved — Postgres `numeric` SUM/COUNT never
+   * touches a float, and `pg` returns both back as strings (no type parser
+   * installed for `numeric`/`int8` — see `packages/kernel/src/db/pool.ts`),
+   * exactly like every other hours figure this repository returns.
+   */
+  async totalsByEmployeeInRange(from: string, to: string): Promise<EmployeeTotalsRow[]> {
+    const { rows } = await this.db.query(
+      `SELECT employee_id,
+              COUNT(*) FILTER (WHERE worked_hours::numeric > 0) AS days_worked,
+              COALESCE(SUM(worked_hours), 0) AS hours_worked,
+              COALESCE(SUM(ot_15x), 0) AS ot_workday_hours,
+              COALESCE(SUM(ot_2x), 0) AS ot_holiday_work_hours,
+              COALESCE(SUM(ot_3x), 0) AS ot_holiday_ot_hours
+       FROM timesheet.day_record
+       WHERE work_date BETWEEN $1 AND $2
+       GROUP BY employee_id
+       ORDER BY employee_id`,
+      [from, to],
+    )
+    return rows.map((row) => ({
+      employeeId: String(row['employee_id']),
+      daysWorked: String(row['days_worked']),
+      hoursWorked: String(row['hours_worked']),
+      otWorkdayHours: String(row['ot_workday_hours']),
+      otHolidayWorkHours: String(row['ot_holiday_work_hours']),
+      otHolidayOtHours: String(row['ot_holiday_ot_hours']),
+    }))
+  }
+}
+
+/** One employee's aggregated totals over a date range — the exact shape `svc-payroll`'s `TimesheetTotals` (`ports.ts`) expects on the wire, computed here rather than re-derived client-side. */
+export interface EmployeeTotalsRow {
+  employeeId: string
+  daysWorked: string
+  hoursWorked: string
+  otWorkdayHours: string
+  otHolidayWorkHours: string
+  otHolidayOtHours: string
 }

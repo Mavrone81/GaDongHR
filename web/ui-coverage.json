@@ -41,6 +41,13 @@
     {
       "service": "svc-timesheet",
       "method": "GET",
+      "path": "periods/:id/totals",
+      "exempt": "service-to-service",
+      "reason": "Machine-only aggregate (every employee's OT hours for a period, unscoped) for svc-payroll's HttpTimesheetClient.getLockedTotals (ports.ts); guarded by timesheet.totals.read, a permission granted to no human role, ever — never reachable from a browser or by a human session."
+    },
+    {
+      "service": "svc-timesheet",
+      "method": "GET",
       "path": "my/days",
       "permission": "timesheet.read",
       "screen": "/ess/timesheet",

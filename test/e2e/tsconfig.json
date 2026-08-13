@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "outDir": "./.tsbuild"
+  },
+  "ts-node": {
+    "transpileOnly": true
+  },
+  "include": ["**/*.ts"]
+}

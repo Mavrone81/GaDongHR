@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { BIOMETRIC_TEMPLATE_READ, ROLE_TEMPLATES } from './roles'
+import { BIOMETRIC_TEMPLATE_READ, PAYROLL_TIMESHEET_TOTALS_READ, ROLE_TEMPLATES } from './roles'
 
 /**
  * The general form of Task 14c's defect: `notify.notification.read`,
@@ -34,16 +34,28 @@ const REPO_ROOT = join(__dirname, '..', '..', '..', '..')
 const SERVICES_DIR = join(REPO_ROOT, 'services')
 
 /**
- * The ONLY permission this test allows to be referenced by a decorator and
- * granted to zero roles. `biometric.template.read` is a machine-only grant
- * to svc-attendance (Security doc §4.2, absolute) — no human role may ever
- * carry it, and no route in this codebase actually guards itself with it via
- * `@RequirePermission` today (svc-attendance calls it a different way,
- * machine-to-machine), but the exemption is asserted by name regardless of
- * whether a decorator currently references it, so this test cannot be
- * "fixed" into failure by a future PR that adds one.
+ * The ONLY permissions this test allows to be referenced by a decorator and
+ * granted to zero roles — each a single named constant, never a pattern or
+ * a wildcard (this file's own header). `biometric.template.read` is a
+ * machine-only grant to svc-attendance (Security doc §4.2, absolute) — no
+ * human role may ever carry it, and no route in this codebase actually
+ * guards itself with it via `@RequirePermission` today (svc-attendance
+ * calls it a different way, machine-to-machine), but the exemption is
+ * asserted by name regardless of whether a decorator currently references
+ * it, so this test cannot be "fixed" into failure by a future PR that adds
+ * one.
+ *
+ * `timesheet.totals.read` is the svc-payroll seam fix's own machine-only
+ * grant (`roles.ts`'s doc on `PAYROLL_TIMESHEET_TOTALS_READ`) — UNLIKE
+ * `biometric.template.read`, it IS currently referenced by a real
+ * `@RequirePermission` (`timesheet.controller.ts`'s `periodTotals`), so
+ * removing this exemption without also removing that decorator use would
+ * correctly fail this test — the exemption only says "zero ROLE_TEMPLATES
+ * grants are fine here", not "this permission is unused".
  */
 const BIOMETRIC_EXEMPTION = BIOMETRIC_TEMPLATE_READ
+const PAYROLL_TOTALS_EXEMPTION = PAYROLL_TIMESHEET_TOTALS_READ
+const UNREACHABLE_BY_DESIGN = new Set([BIOMETRIC_EXEMPTION, PAYROLL_TOTALS_EXEMPTION])
 
 /**
  * Every `.ts` file under `services/<name>/src/`, recursively, excluding
@@ -139,12 +151,20 @@ describe('Every permission referenced by @RequirePermission is grantable (Task 1
     expect(required.has('document.read')).toBe(true)
   })
 
-  it('every @RequirePermission code (except the biometric.template.read exemption) is granted to at least one role template', () => {
-    const unreachable = [...required].filter((code) => code !== BIOMETRIC_EXEMPTION && !granted.has(code)).sort()
+  it('every @RequirePermission code (except the two machine-only exemptions) is granted to at least one role template', () => {
+    const unreachable = [...required].filter((code) => !UNREACHABLE_BY_DESIGN.has(code) && !granted.has(code)).sort()
     expect(unreachable).toEqual([])
+  })
+
+  it('parser sanity: timesheet.totals.read is actually found in source (the exemption is not exempting a dead reference)', () => {
+    expect(required.has(PAYROLL_TOTALS_EXEMPTION)).toBe(true)
   })
 
   it('the biometric.template.read exemption itself is still granted to zero roles — the exemption must not become a loophole', () => {
     expect(granted.has(BIOMETRIC_EXEMPTION)).toBe(false)
+  })
+
+  it('the timesheet.totals.read exemption itself is still granted to zero roles — machine-only, never a human role', () => {
+    expect(granted.has(PAYROLL_TOTALS_EXEMPTION)).toBe(false)
   })
 })

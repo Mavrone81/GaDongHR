@@ -1,5 +1,7 @@
 import { GadongError, writeOutbox } from '@gadong/kernel'
 import type { Queryable } from '@gadong/kernel'
+import type { EmployeeTotalsRow } from './day-record.repository'
+import { DayRecordRepository } from './day-record.repository'
 import { ExceptionRepository } from './exception.repository'
 import type { PeriodRow } from './period.repository'
 import { PeriodRepository } from './period.repository'
@@ -29,8 +31,27 @@ function periodRangeOverlap(from: string, to: string): GadongError {
   return new GadongError('TSH-054', 'timesheet.error.period_range_overlap', 409, [{ from, to }])
 }
 
+/**
+ * `TSH-055` — the seam `svc-payroll/src/ports.ts`'s `HttpTimesheetClient`
+ * exists specifically to defend: a `lockVersion` that no longer matches
+ * `timesheet.period.lock_version` (because the period was unlocked,
+ * corrected and re-locked since the caller last saw it) must FAIL, never
+ * silently hand back the CURRENT hours under the OLD version number. A
+ * payroll run pins itself to one immutable set of hours (`PeriodService`'s
+ * own class doc) — this is what makes that pin detectable rather than
+ * theoretical.
+ */
+function lockVersionMismatch(periodId: string, requested: number, current: number): GadongError {
+  return new GadongError('TSH-055', 'timesheet.error.lock_version_mismatch', 409, [{ periodId, requestedLockVersion: requested, currentLockVersion: current }])
+}
+
 export interface LockResult {
   period: PeriodRow
+}
+
+export interface PeriodTotalsResult {
+  period: PeriodRow
+  totals: EmployeeTotalsRow[]
 }
 
 export interface UnlockResult {
@@ -49,6 +70,7 @@ export class PeriodService {
   constructor(
     private readonly periods: PeriodRepository,
     private readonly exceptions: ExceptionRepository,
+    private readonly dayRecords: DayRecordRepository,
   ) {}
 
   async create(tx: Queryable, from: string, to: string): Promise<PeriodRow> {
@@ -126,5 +148,32 @@ export class PeriodService {
     })
 
     return { period: unlocked, varianceReportRequired: true }
+  }
+
+  /**
+   * `GET /periods/:id/totals?lockVersion=N` — the seam `svc-payroll`'s
+   * `HttpTimesheetClient.getLockedTotals` (`ports.ts`) calls and, until this
+   * method existed, 404'd on every payroll run (there was no `totals` route
+   * at all). Two things must both hold before this hands back a single
+   * number:
+   *
+   *   1. The period must actually BE locked — an `open` period has no
+   *      immutable hours-set for a payroll run to pin itself to at all
+   *      (`periodNotLocked`, same TSH-052 `lockPeriod`'s own docs describe).
+   *   2. The caller's `lockVersion` must equal the period's CURRENT
+   *      `lock_version` exactly — not "less than or equal", not "ignored".
+   *      A stale version (the period was unlocked, corrected and re-locked
+   *      since the caller last read it) is a `lockVersionMismatch` (409),
+   *      never a silent hand-back of the current hours under a version
+   *      number that no longer describes them — see that error's own doc.
+   */
+  async totals(periodId: string, lockVersion: number): Promise<PeriodTotalsResult> {
+    const period = await this.periods.findById(periodId)
+    if (!period) throw periodNotFound(periodId)
+    if (period.status !== 'locked') throw periodNotLocked(periodId)
+    if (period.lockVersion !== lockVersion) throw lockVersionMismatch(periodId, lockVersion, period.lockVersion)
+
+    const totals = await this.dayRecords.totalsByEmployeeInRange(period.from, period.to)
+    return { period, totals }
   }
 }

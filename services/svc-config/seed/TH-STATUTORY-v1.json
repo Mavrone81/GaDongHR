@@ -192,15 +192,9 @@
     },
     {
       "rule_key": "ot.holiday_work.multiplier",
-      "value": {
-        "paid_holiday_employee_addl": 1,
-        "daily_rate_without_holiday_pay": 2
-      },
+      "value": 2,
       "unit": "multiplier",
-      "statutory_floor": {
-        "paid_holiday_employee_addl": 1,
-        "daily_rate_without_holiday_pay": 2
-      },
+      "statutory_floor": 2,
       "statutory_ceiling": null,
       "citation": "LPA s.62. +1x for employees entitled to paid holidays (-> 2x total); 2x for daily-rate without holiday pay",
       "effective_from": "1998-08-19",
@@ -245,7 +239,7 @@
     },
     {
       "rule_key": "sso.rate.employee",
-      "value": 0.05,
+      "value": 5,
       "unit": "percent",
       "statutory_floor": null,
       "statutory_ceiling": null,
@@ -256,7 +250,7 @@
     },
     {
       "rule_key": "sso.rate.employer",
-      "value": 0.05,
+      "value": 5,
       "unit": "percent",
       "statutory_floor": null,
       "statutory_ceiling": null,
@@ -324,7 +318,7 @@
     },
     {
       "rule_key": "ewf.rate.employee",
-      "value": 0.0025,
+      "value": 0.25,
       "unit": "percent",
       "statutory_floor": null,
       "statutory_ceiling": null,
@@ -335,7 +329,7 @@
     },
     {
       "rule_key": "ewf.rate.employee",
-      "value": 0.005,
+      "value": 0.5,
       "unit": "percent",
       "statutory_floor": null,
       "statutory_ceiling": null,
@@ -346,7 +340,7 @@
     },
     {
       "rule_key": "ewf.rate.employer",
-      "value": 0.0025,
+      "value": 0.25,
       "unit": "percent",
       "statutory_floor": null,
       "statutory_ceiling": null,
@@ -357,7 +351,7 @@
     },
     {
       "rule_key": "ewf.rate.employer",
-      "value": 0.005,
+      "value": 0.5,
       "unit": "percent",
       "statutory_floor": null,
       "statutory_ceiling": null,
@@ -562,6 +556,292 @@
       "statutory_ceiling": null,
       "citation": "Revenue Code. Progressive brackets (net annual income, THB) — default pack effective 1 Jan 2026 (verify annually, V5)",
       "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "tax.pit.brackets",
+      "value": [
+        {
+          "upTo": 150000,
+          "rate": 0
+        },
+        {
+          "upTo": 300000,
+          "rate": 5
+        },
+        {
+          "upTo": 500000,
+          "rate": 10
+        },
+        {
+          "upTo": 750000,
+          "rate": 15
+        },
+        {
+          "upTo": 1000000,
+          "rate": 20
+        },
+        {
+          "upTo": 2000000,
+          "rate": 25
+        },
+        {
+          "upTo": 5000000,
+          "rate": 30
+        },
+        {
+          "upTo": null,
+          "rate": 35
+        }
+      ],
+      "unit": "brackets",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code s.48 -- progressive PIT brackets as the single array RULE_KEYS.taxPitBrackets ('tax.pit.brackets') the engine actually resolves (engine/rules.ts); supersedes the now-inert per-bracket pit.bracket.01..08 records above, which no code path reads.",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "tax.expense.rate",
+      "value": 50,
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code -- 50% expense deduction on employment income",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "tax.expense.cap",
+      "value": 100000,
+      "unit": "THB",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code -- expense deduction cap, THB 100,000/year",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "tax.allowance.personal",
+      "value": 60000,
+      "unit": "THB",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code -- personal allowance",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "tax.allowance.spouse",
+      "value": 60000,
+      "unit": "THB",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code -- spouse allowance (non-assessable-income spouse)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "tax.allowance.child",
+      "value": 30000,
+      "unit": "THB",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code -- child allowance, per child",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "tax.allowance.child_second_2018",
+      "value": 60000,
+      "unit": "THB",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code -- 2nd and subsequent child born 2018 onward",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "tax.allowance.parental_care",
+      "value": 30000,
+      "unit": "THB",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Revenue Code -- parental care allowance, per qualifying parent",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "ot.hourly_base.days_divisor",
+      "value": 30,
+      "unit": "days",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "ot.hourly_base.formula divisor -- monthly / 30 / 8 (Spec S4); RULE_KEYS.otHourlyBaseDays, not read from the now-inert ot.hourly_base.formula object record above",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "ot.hourly_base.hours_divisor",
+      "value": 8,
+      "unit": "hours",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "LPA s.23 -- 8-hour working day; RULE_KEYS.otHourlyBaseHours",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "minwage.monthly_equivalent_divisor",
+      "value": 30,
+      "unit": "days",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Spec S8 -- monthly-equivalent /30",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "payroll.periods.per_year",
+      "value": 12,
+      "unit": "count",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Monthly payroll cycle -- annualised-withholding divisor",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "payroll.variance.threshold_percent",
+      "value": 10,
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Company policy -- variance review flag threshold",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "ewf.exemption.provident_fund_registered",
+      "value": true,
+      "unit": "flag",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "EWF exemption for employers with a registered provident fund (Spec S12 V3 -- verify scope); RULE_KEYS.ewfExemptionProvidentFund, distinct key from the pre-existing ewf.exemption record above which nothing reads",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "ewf.wage.base",
+      "value": "sso_capped_wage",
+      "unit": "enum",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "EWF wage base -- not stated in the Spec; RULE_KEYS.ewfWageBase",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "employer.provident_fund.registered",
+      "value": false,
+      "unit": "flag",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Tenant configuration (COMPANY_POLICY)",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "COMPANY_POLICY"
+    },
+    {
+      "rule_key": "pf.rate.min",
+      "value": 2,
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Provident Fund Act B.E. 2530",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "pf.rate.max",
+      "value": 15,
+      "unit": "percent",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Provident Fund Act B.E. 2530",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "STATUTORY_FIXED"
+    },
+    {
+      "rule_key": "employer.name",
+      "value": "Bevora (Thailand) Co., Ltd.",
+      "unit": "text",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Tenant configuration",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "COMPANY_POLICY"
+    },
+    {
+      "rule_key": "employer.sso_number",
+      "value": "1000000000",
+      "unit": "text",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Tenant configuration",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "COMPANY_POLICY"
+    },
+    {
+      "rule_key": "employer.tax_id",
+      "value": "0105500000000",
+      "unit": "text",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Tenant configuration",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "COMPANY_POLICY"
+    },
+    {
+      "rule_key": "employer.disbursement_account",
+      "value": "1234567890",
+      "unit": "text",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Tenant configuration",
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "governance_class": "COMPANY_POLICY"
+    },
+    {
+      "rule_key": "minwage.daily.TH-10",
+      "value": 400,
+      "unit": "THB",
+      "statutory_floor": null,
+      "statutory_ceiling": null,
+      "citation": "Wage Committee notification, Bangkok (Spec S12 V4 -- verify)",
+      "effective_from": "2025-01-01",
       "effective_to": null,
       "governance_class": "STATUTORY_FIXED"
     }

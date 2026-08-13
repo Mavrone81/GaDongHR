@@ -30,7 +30,7 @@ module.exports = [
     // Root tooling configs (eslint.config.js, jest.config.js) are CommonJS,
     // evaluated by Node directly rather than bundled — they need the
     // CommonJS globals that the flat-config defaults don't provide.
-    files: ['*.config.js'],
+    files: ['*.config.js', 'test/e2e/*.config.js'],
     languageOptions: {
       sourceType: 'commonjs',
       globals: {
@@ -68,6 +68,37 @@ module.exports = [
         __dirname: 'readonly',
         exports: 'writable',
       },
+    },
+  },
+  {
+    // test/e2e/oidc-issuer/server.js — the zero-dependency JWKS/token issuer
+    // the e2e harness runs in place of Keycloak (see docker-compose.yml's
+    // header). Same CommonJS-globals need as the migration files above.
+    files: ['test/e2e/oidc-issuer/**/*.js'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: {
+        module: 'writable',
+        require: 'readonly',
+        process: 'readonly',
+        __dirname: 'readonly',
+        exports: 'writable',
+        console: 'readonly',
+        Buffer: 'readonly',
+      },
+    },
+  },
+  {
+    // test/e2e/**/*.ts — the real-stack lifecycle harness (`pnpm test:e2e`).
+    // Not part of the `tsc -b` project-reference graph (it is a standalone
+    // ts-node script, not a workspace package), so it is linted but not
+    // typechecked by `pnpm typecheck` — `pnpm test:e2e` itself typechecks it
+    // via ts-node. `no-console` would fight this script's entire purpose
+    // (a CLI harness that reports its own progress and the report's figures
+    // to stdout).
+    files: ['test/e2e/**/*.ts'],
+    rules: {
+      'no-console': 'off',
     },
   },
 ]

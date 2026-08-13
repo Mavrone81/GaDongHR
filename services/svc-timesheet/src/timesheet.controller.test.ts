@@ -62,7 +62,7 @@ function fullHarness(decision: Decision) {
   const { client: configClient } = defaultTimesheetConfig()
   const consolidation = new ConsolidationService(dayRecords, exceptions, rosterRefs, leaveRefs, otApprovalRefs, employeeRefs, correctionAudits, configClient)
   const exceptionsService = new ExceptionsService(exceptions, dayRecords, periods, correctionAudits, consolidation)
-  const periodService = new PeriodService(periods, exceptions)
+  const periodService = new PeriodService(periods, exceptions, dayRecords)
   const views = new ViewsService(dayRecords, employeeRefs, exceptions)
   const authzClient = fakeAuthzClient(decision)
   const controller = new TimesheetController(pool, authzClient, views, exceptionsService, periodService)
@@ -263,6 +263,63 @@ describe('TimesheetController — end-to-end route wiring (each route reaches th
     const exported = await h.controller.exportPeriod(req, period.period.id)
     expect(exported.lockVersion).toBe(1)
     expect(Array.isArray(exported.rows)).toBe(true)
+  })
+})
+
+describe('TimesheetController.periodTotals — the svc-payroll seam (GET /periods/:id/totals?lockVersion=N)', () => {
+  it('is guarded by the machine-only timesheet.totals.read permission, NOT @Public() — this route returns unscoped personal data, network isolation alone is not an access control', () => {
+    const proto = TimesheetController.prototype as unknown as Record<string, () => unknown>
+    const handler = proto['periodTotals']
+    if (!handler) throw new Error('no such handler: periodTotals')
+    expect(Reflect.getMetadata(PERMISSION_METADATA_KEY, handler)).toBe('timesheet.totals.read')
+    expect(Reflect.getMetadata(PUBLIC_METADATA_KEY, handler)).toBeUndefined()
+  })
+
+  it('returns { totals: [...] } for a locked period at its current lockVersion, in the exact shape ports.ts parses', async () => {
+    const h = fullHarness({ allowed: true, scopeOrgUnitIds: '*' })
+    const req: AuthenticatedRequest = { userId: 'hr-1' }
+    const day = await withTransaction(h.pool, (tx) => h.dayRecords.ensureExists(tx, 'emp-1', '2026-08-03', null))
+    await withTransaction(h.pool, (tx) => h.dayRecords.updateComputed(tx, day.id, { workedHours: '8', lateMin: '0', ot15x: '1.5', ot2x: '0', ot3x: '0', status: 'ok' }))
+    const period = await h.controller.createPeriod({ from: '2026-08-01', to: '2026-08-31' })
+    const lockResult = await h.controller.lockPeriod(req, period.period.id)
+
+    const out = await h.controller.periodTotals(period.period.id, String(lockResult.period.lockVersion))
+
+    expect(out).toEqual({
+      totals: [{ employeeId: 'emp-1', daysWorked: '1', hoursWorked: '8', otWorkdayHours: '1.5', otHolidayWorkHours: '0', otHolidayOtHours: '0' }],
+    })
+  })
+
+  it('a stale lockVersion is rejected with 409 TSH-055, never silently answered with current hours', async () => {
+    const h = fullHarness({ allowed: true, scopeOrgUnitIds: '*' })
+    const req: AuthenticatedRequest = { userId: 'hr-1' }
+    const period = await h.controller.createPeriod({ from: '2026-08-01', to: '2026-08-31' })
+    await h.controller.lockPeriod(req, period.period.id)
+    await h.controller.unlockPeriod(req, period.period.id, { reason: 'correction' })
+    await h.controller.lockPeriod(req, period.period.id) // now lockVersion 2
+
+    await expect(h.controller.periodTotals(period.period.id, '1')).rejects.toMatchObject({
+      response: { code: 'TSH-055' },
+      status: 409,
+    })
+  })
+
+  it('a missing lockVersion query param is a 400, not "assume version 0"', async () => {
+    const h = fullHarness({ allowed: true, scopeOrgUnitIds: '*' })
+    const period = await h.controller.createPeriod({ from: '2026-08-01', to: '2026-08-31' })
+    await expect(h.controller.periodTotals(period.period.id, undefined)).rejects.toMatchObject({
+      response: { code: 'TSH-056' },
+      status: 400,
+    })
+  })
+
+  it('an unlocked (open) period is refused with 409 TSH-052', async () => {
+    const h = fullHarness({ allowed: true, scopeOrgUnitIds: '*' })
+    const period = await h.controller.createPeriod({ from: '2026-08-01', to: '2026-08-31' })
+    await expect(h.controller.periodTotals(period.period.id, '0')).rejects.toMatchObject({
+      response: { code: 'TSH-052' },
+      status: 409,
+    })
   })
 })
 

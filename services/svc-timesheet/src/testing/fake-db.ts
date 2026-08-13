@@ -413,6 +413,33 @@ export class FakeTimesheetConnection implements Queryable {
 
   private selectDayRecord(sql: string, params: unknown[]): Array<Record<string, unknown>> {
     const visible = this.visibleDayRecords()
+    if (/GROUP BY employee_id/i.test(sql)) {
+      const [from, to] = params as [string, string]
+      const byEmployee = new Map<string, DayRecordRow[]>()
+      for (const r of visible) {
+        if (r.work_date < from || r.work_date > to) continue
+        const list = byEmployee.get(r.employee_id) ?? []
+        list.push(r)
+        byEmployee.set(r.employee_id, list)
+      }
+      const sumDecimal = (values: string[]): string => {
+        // Same discipline as the real SQL: sum as exact decimals, never
+        // through a float — good enough fidelity for this fake since every
+        // value it sums is itself a 2-decimal `hours.ts` string.
+        const cents = values.reduce((acc, v) => acc + Math.round(Number.parseFloat(v) * 100), 0)
+        return (cents / 100).toString()
+      }
+      return [...byEmployee.entries()]
+        .sort(([a], [b]) => (a < b ? -1 : 1))
+        .map(([employeeId, rows]) => ({
+          employee_id: employeeId,
+          days_worked: String(rows.filter((r) => Number.parseFloat(r.worked_hours) > 0).length),
+          hours_worked: sumDecimal(rows.map((r) => r.worked_hours)),
+          ot_workday_hours: sumDecimal(rows.map((r) => r.ot_15x)),
+          ot_holiday_work_hours: sumDecimal(rows.map((r) => r.ot_2x)),
+          ot_holiday_ot_hours: sumDecimal(rows.map((r) => r.ot_3x)),
+        }))
+    }
     if (/WHERE id = \$1/i.test(sql)) {
       const [id] = params as [string]
       return visible.filter((r) => r.id === id).map((r) => ({ ...r }))

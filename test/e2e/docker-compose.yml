@@ -1,0 +1,281 @@
+# GaDongHR — real-stack lifecycle e2e harness (hire -> onboard -> schedule
+# -> attendance -> timesheet -> payroll -> payslip).
+#
+# Standalone from deploy/docker-compose.yml on purpose: the production
+# compose file wires Traefik + Keycloak + the web PWA, none of which this
+# harness needs or should touch (this branch shares a checkout with an
+# agent actively editing web/). This file reuses the SAME per-service
+# Dockerfiles deploy/docker-compose.yml uses (multi-stage, real
+# node-pg-migrate migrations run by each service's own main.ts at boot,
+# real NestJS HTTP servers) — nothing here is a stub of application code.
+#
+# What IS substituted, and why:
+#  - Keycloak -> ./oidc-issuer: a zero-dependency RS256 JWKS/token issuer.
+#    Every service's OidcMiddleware still does a real JWKS fetch and a real
+#    jose.jwtVerify signature check (packages/kernel/src/authz/
+#    oidc.middleware.ts) — only the *identity provider* is swapped, the
+#    same way a test suite swaps a real SMTP server for a fake one. See
+#    oidc-issuer/server.js.
+#  - Vault runs in real `-dev` mode (auto-unsealed, fixed root token) so
+#    the harness can provision the transit engine + AppRole for svc-crypto
+#    with no interactive unseal ceremony. svc-crypto's own code path
+#    (Vault transit datakey/decrypt/hmac over AppRole auth) is untouched —
+#    see scripts/vault-init.sh.
+#
+# `docker compose -f test/e2e/docker-compose.yml up` alone is not enough —
+# svc-crypto's AppRole credentials do not exist until scripts/vault-init.sh
+# has run. test/e2e/harness.ts orchestrates the full sequence; see that
+# file and test/e2e/README.md.
+
+name: gadonghr-e2e
+
+x-node-defaults: &node-defaults
+  restart: "no"
+  networks: [e2e-internal]
+
+x-http-health: &http-health
+  test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+  interval: 5s
+  timeout: 5s
+  retries: 30
+  start_period: 10s
+
+x-oidc-env: &oidc-env
+  OIDC_ISSUER: https://e2e.gadonghr.internal/realms/gadonghr
+  OIDC_AUDIENCE: gadonghr-services
+  OIDC_JWKS_URI: http://oidc-issuer:8080/jwks
+
+services:
+  oidc-issuer:
+    build: { context: ./oidc-issuer }
+    <<: *node-defaults
+    environment:
+      OIDC_ISSUER: https://e2e.gadonghr.internal/realms/gadonghr
+      OIDC_AUDIENCE: gadonghr-services
+    ports: ["18081:8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  postgres:
+    image: postgres:16
+    <<: *node-defaults
+    environment:
+      POSTGRES_DB: gadonghr
+      POSTGRES_USER: gadonghr_super
+      POSTGRES_PASSWORD: e2e-postgres-password
+      DB_PASSWORD_ONBOARDING: e2e-pw
+      DB_PASSWORD_SCHEDULER: e2e-pw
+      DB_PASSWORD_TIMESHEET: e2e-pw
+      DB_PASSWORD_ATTENDANCE: e2e-pw
+      DB_PASSWORD_LEAVE: e2e-pw
+      DB_PASSWORD_CLAIMS: e2e-pw
+      DB_PASSWORD_PAYROLL: e2e-pw
+      DB_PASSWORD_AUTHZ: e2e-pw
+      DB_PASSWORD_CONFIG: e2e-pw
+      DB_PASSWORD_AUDIT: e2e-pw
+      DB_PASSWORD_NOTIFY: e2e-pw
+      DB_PASSWORD_DOCS: e2e-pw
+      KC_DB_PASSWORD: e2e-pw
+    volumes:
+      - ../../deploy/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports: ["18542:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gadonghr_super -d gadonghr"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  vault:
+    image: hashicorp/vault:1.17
+    <<: *node-defaults
+    cap_add: [IPC_LOCK]
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: e2e-root-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports: ["18200:8200"]
+    healthcheck:
+      test: ["CMD-SHELL", "VAULT_ADDR=http://127.0.0.1:8200 vault status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  minio:
+    image: minio/minio:latest
+    <<: *node-defaults
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: e2e-minio-user
+      MINIO_ROOT_PASSWORD: e2e-minio-password
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  svc-authz:
+    build: { context: ../.., dockerfile: services/svc-authz/Dockerfile }
+    <<: *node-defaults
+    environment:
+      <<: *oidc-env
+      NODE_ENV: test
+      DATABASE_URL: postgresql://authz:e2e-pw@postgres:5432/gadonghr
+      AUTHZ_URL: http://svc-authz:3000
+    ports: ["18001:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck: *http-health
+
+  svc-config:
+    build: { context: ../.., dockerfile: services/svc-config/Dockerfile }
+    <<: *node-defaults
+    environment:
+      <<: *oidc-env
+      NODE_ENV: test
+      DATABASE_URL: postgresql://config:e2e-pw@postgres:5432/gadonghr
+      AUTHZ_URL: http://svc-authz:3000
+      CONFIG_PACK_SIGNING_KEY: e2e-config-pack-signing-key
+    ports: ["18002:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+    healthcheck: *http-health
+
+  svc-crypto:
+    build: { context: ../.., dockerfile: services/svc-crypto/Dockerfile }
+    <<: *node-defaults
+    environment:
+      NODE_ENV: test
+      VAULT_ADDR: http://vault:8200
+      VAULT_APPROLE_ID: ${VAULT_APPROLE_ID:-unset}
+      VAULT_APPROLE_SECRET_FILE: /run/secrets/vault_approle_secret
+    ports: ["18003:3000"]
+    volumes:
+      - ./runtime/vault_approle_secret:/run/secrets/vault_approle_secret:ro
+    depends_on:
+      vault: { condition: service_healthy }
+    healthcheck: *http-health
+
+  svc-onboarding:
+    build: { context: ../.., dockerfile: services/svc-onboarding/Dockerfile }
+    <<: *node-defaults
+    environment:
+      <<: *oidc-env
+      NODE_ENV: test
+      DATABASE_URL: postgresql://onboarding:e2e-pw@postgres:5432/gadonghr
+      AUTHZ_URL: http://svc-authz:3000
+      CRYPTO_URL: http://svc-crypto:3000
+    ports: ["18004:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+      svc-crypto: { condition: service_healthy }
+    healthcheck: *http-health
+
+  svc-scheduler:
+    build: { context: ../.., dockerfile: services/svc-scheduler/Dockerfile }
+    <<: *node-defaults
+    environment:
+      <<: *oidc-env
+      NODE_ENV: test
+      DATABASE_URL: postgresql://scheduler:e2e-pw@postgres:5432/gadonghr
+      AUTHZ_URL: http://svc-authz:3000
+      CONFIG_URL: http://svc-config:3000
+    ports: ["18005:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+    healthcheck: *http-health
+
+  svc-timesheet:
+    build: { context: ../.., dockerfile: services/svc-timesheet/Dockerfile }
+    <<: *node-defaults
+    environment:
+      <<: *oidc-env
+      NODE_ENV: test
+      DATABASE_URL: postgresql://timesheet:e2e-pw@postgres:5432/gadonghr
+      AUTHZ_URL: http://svc-authz:3000
+      CONFIG_URL: http://svc-config:3000
+    ports: ["18007:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+    healthcheck: *http-health
+
+  # M4 attendance. Only `/punches/code` (PIN/badge) is exercised by the
+  # lifecycle test — `FACE_ENGINE_URL` points nowhere real on purpose
+  # (`/punches/face` is never called, matching deploy/docker-compose.yml's
+  # own header: "compreface-* ... do not add them").
+  svc-attendance:
+    build: { context: ../.., dockerfile: services/svc-attendance/Dockerfile }
+    <<: *node-defaults
+    environment:
+      <<: *oidc-env
+      NODE_ENV: test
+      DATABASE_URL: postgresql://attendance:e2e-pw@postgres:5432/gadonghr
+      AUTHZ_URL: http://svc-authz:3000
+      CRYPTO_URL: http://svc-crypto:3000
+      CONFIG_URL: http://svc-config:3000
+      ATTENDANCE_CREDENTIAL_PEPPER: e2e-attendance-pepper
+      FACE_ENGINE_URL: http://compreface.invalid:8000
+    ports: ["18006:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+      svc-crypto: { condition: service_healthy }
+    healthcheck: *http-health
+
+  svc-docs:
+    build: { context: ../.., dockerfile: services/svc-docs/Dockerfile }
+    <<: *node-defaults
+    environment:
+      <<: *oidc-env
+      NODE_ENV: test
+      DATABASE_URL: postgresql://docs:e2e-pw@postgres:5432/gadonghr
+      AUTHZ_URL: http://svc-authz:3000
+      CRYPTO_URL: http://svc-crypto:3000
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: "9000"
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: e2e-minio-user
+      MINIO_SECRET_KEY: e2e-minio-password
+      DOCS_BUCKET: gadonghr-docs-e2e
+    ports: ["18009:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+      svc-crypto: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    healthcheck: *http-health
+
+  svc-payroll:
+    build: { context: ../.., dockerfile: services/svc-payroll/Dockerfile }
+    <<: *node-defaults
+    environment:
+      <<: *oidc-env
+      NODE_ENV: test
+      DATABASE_URL: postgresql://payroll:e2e-pw@postgres:5432/gadonghr
+      AUTHZ_URL: http://svc-authz:3000
+      CONFIG_URL: http://svc-config:3000
+      CRYPTO_URL: http://svc-crypto:3000
+      TIMESHEET_URL: http://svc-timesheet:3000
+      DOCS_URL: http://svc-docs:3000
+      ONBOARDING_URL: http://svc-onboarding:3000
+    ports: ["18008:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+      svc-crypto: { condition: service_healthy }
+      svc-timesheet: { condition: service_healthy }
+      svc-docs: { condition: service_healthy }
+    healthcheck: *http-health
+
+networks:
+  e2e-internal:
+    name: gadonghr-e2e-internal

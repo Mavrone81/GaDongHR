@@ -23,7 +23,7 @@ function harness() {
   const dayRecords = new DayRecordRepository(db.asPool())
   const exceptions = new ExceptionRepository(db.asPool())
   const periods = new PeriodRepository(db.asPool())
-  const service = new PeriodService(periods, exceptions)
+  const service = new PeriodService(periods, exceptions, dayRecords)
   return { db, pool, dayRecords, exceptions, periods, service }
 }
 
@@ -130,5 +130,73 @@ describe('PeriodService.unlock — TC-M3-013', () => {
     await expect(withTransaction(h.pool, (tx) => h.service.unlock(tx, 'nope', 'payroll-approver-1', 'reason'))).rejects.toMatchObject({
       code: 'TSH-050',
     })
+  })
+})
+
+describe('PeriodService.totals — the svc-payroll seam (ports.ts HttpTimesheetClient.getLockedTotals)', () => {
+  it('aggregates worked hours/days and the three OT buckets per employee, for a locked period at its current lockVersion', async () => {
+    const h = harness()
+    const day1 = await withTransaction(h.pool, (tx) => h.dayRecords.ensureExists(tx, 'emp-1', '2026-08-03', null))
+    await withTransaction(h.pool, (tx) =>
+      h.dayRecords.updateComputed(tx, day1.id, { workedHours: '8', lateMin: '0', ot15x: '1.5', ot2x: '0', ot3x: '0', status: 'ok' }),
+    )
+    const day2 = await withTransaction(h.pool, (tx) => h.dayRecords.ensureExists(tx, 'emp-1', '2026-08-04', null))
+    await withTransaction(h.pool, (tx) =>
+      h.dayRecords.updateComputed(tx, day2.id, { workedHours: '8', lateMin: '0', ot15x: '0', ot2x: '4', ot3x: '2', status: 'ok' }),
+    )
+    // A leave day (no hours actually worked) must not count toward daysWorked.
+    const day3 = await withTransaction(h.pool, (tx) => h.dayRecords.ensureExists(tx, 'emp-1', '2026-08-05', null))
+    await withTransaction(h.pool, (tx) => h.dayRecords.setLeaveCode(tx, day3.id, 'AL'))
+    // A second employee, outside the period's range, must not leak into emp-1's totals.
+    const other = await withTransaction(h.pool, (tx) => h.dayRecords.ensureExists(tx, 'emp-2', '2026-08-03', null))
+    await withTransaction(h.pool, (tx) =>
+      h.dayRecords.updateComputed(tx, other.id, { workedHours: '8', lateMin: '0', ot15x: '0', ot2x: '0', ot3x: '0', status: 'ok' }),
+    )
+
+    const period = await withTransaction(h.pool, (tx) => h.periods.create(tx, '2026-08-01', '2026-08-31'))
+    const { period: locked } = await withTransaction(h.pool, (tx) => h.service.lock(tx, period.id, 'hr-1'))
+
+    const result = await h.service.totals(period.id, locked.lockVersion)
+
+    expect(result.period.id).toBe(period.id)
+    const emp1 = result.totals.find((t) => t.employeeId === 'emp-1')
+    expect(emp1).toMatchObject({
+      daysWorked: '2',
+      hoursWorked: '16',
+      otWorkdayHours: '1.5',
+      otHolidayWorkHours: '4',
+      otHolidayOtHours: '2',
+    })
+    const emp2 = result.totals.find((t) => t.employeeId === 'emp-2')
+    expect(emp2).toMatchObject({ daysWorked: '1', hoursWorked: '8' })
+  })
+
+  it('TSH-050: a nonexistent period is not found', async () => {
+    const h = harness()
+    await expect(h.service.totals('nope', 1)).rejects.toMatchObject({ code: 'TSH-050' })
+  })
+
+  it('TSH-052: an OPEN period (never locked) refuses — there is no immutable hours-set to pin to', async () => {
+    const h = harness()
+    const period = await withTransaction(h.pool, (tx) => h.periods.create(tx, '2026-08-01', '2026-08-31'))
+    await expect(h.service.totals(period.id, 0)).rejects.toMatchObject({ code: 'TSH-052' })
+  })
+
+  it('TSH-055: a STALE lockVersion (period unlocked + re-locked since) is refused, never silently answered with current hours', async () => {
+    const h = harness()
+    const period = await withTransaction(h.pool, (tx) => h.periods.create(tx, '2026-08-01', '2026-08-31'))
+    const firstLock = await withTransaction(h.pool, (tx) => h.service.lock(tx, period.id, 'hr-1'))
+    expect(firstLock.period.lockVersion).toBe(1)
+    await withTransaction(h.pool, (tx) => h.service.unlock(tx, period.id, 'payroll-approver-1', 'correction'))
+    const relock = await withTransaction(h.pool, (tx) => h.service.lock(tx, period.id, 'hr-1'))
+    expect(relock.period.lockVersion).toBe(2)
+
+    // Payroll last saw v1 — must be refused, not silently handed v2's hours.
+    await expect(h.service.totals(period.id, 1)).rejects.toMatchObject({
+      code: 'TSH-055',
+      details: [{ periodId: period.id, requestedLockVersion: 1, currentLockVersion: 2 }],
+    })
+    // The CURRENT version succeeds.
+    await expect(h.service.totals(period.id, 2)).resolves.toMatchObject({ period: { lockVersion: 2 } })
   })
 })

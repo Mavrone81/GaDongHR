@@ -148,6 +148,57 @@ export class TimesheetController {
     return this.runFailClosed(() => withTransaction(this.pool, (tx) => this.periodService.unlock(tx, id, unlockedBy, body.reason)))
   }
 
+  /**
+   * `GET /periods/:id/totals?lockVersion=N` — service-to-service only, but
+   * DELIBERATELY NOT `@Public()`. This route returns every employee's OT
+   * hours for a period, unscoped — real personal data, not health-check
+   * noise — and `@Public()` would make it reachable by anything that can
+   * reach `gadong-internal` (a normal bridge network, not `internal: true`;
+   * network isolation alone is not an access control here). Guarded instead
+   * by `timesheet.totals.read`
+   * (`services/svc-authz/src/seed/roles.ts`'s `PAYROLL_TIMESHEET_TOTALS_READ`),
+   * a machine-only permission granted to NO `ROLE_TEMPLATES` entry, ever —
+   * the same absolute rule as `biometric.template.read`
+   * (`permission-reachability.test.ts`'s second exemption enforces this).
+   *
+   * KNOWN GAP, DELIBERATELY NOT PAPERED OVER: `svc-payroll`'s own
+   * `HttpTimesheetClient.getLockedTotals` (`ports.ts`) sends a plain,
+   * unauthenticated `fetch` — it has no client-credentials token to
+   * present, because no service in this deployment has one yet (Keycloak's
+   * `seeder`/`web` clients are the only two provisioned;
+   * `deploy/keycloak/realm-gadonghr.json` has no `svc-payroll` service
+   * account). So `svc-payroll` calling this route for real still fails
+   * today — now with a real `403`/`401`, not a `404` — until a follow-up
+   * wires `svc-payroll` a real client-credentials grant (the same pattern
+   * `deploy/scripts/seed.sh` already uses for the `seeder` client) and
+   * `ports.ts` presents that token. Opening this route to no auth at all
+   * just to make that caller's omission "work" was considered and
+   * rejected — see the e2e report's seam-defects list.
+   *
+   * `lockVersion` is REQUIRED and validated as an integer before it ever
+   * reaches `PeriodService.totals` — an absent or non-numeric value is a
+   * caller bug, not "assume version 0" (`TSH-056`).
+   */
+  @Get('periods/:id/totals')
+  @RequirePermission('timesheet.totals.read')
+  async periodTotals(@Param('id') id: string, @Query('lockVersion') lockVersion?: string) {
+    const parsed = lockVersion === undefined ? Number.NaN : Number(lockVersion)
+    if (!Number.isInteger(parsed)) {
+      throw new HttpException({ code: 'TSH-056', message_i18n_key: 'timesheet.error.lock_version_invalid', details: [{ lockVersion: lockVersion ?? null }] }, 400)
+    }
+    const result = await this.runFailClosed(() => this.periodService.totals(id, parsed))
+    return {
+      totals: result.totals.map((t) => ({
+        employeeId: t.employeeId,
+        daysWorked: t.daysWorked,
+        hoursWorked: t.hoursWorked,
+        otWorkdayHours: t.otWorkdayHours,
+        otHolidayWorkHours: t.otHolidayWorkHours,
+        otHolidayOtHours: t.otHolidayOtHours,
+      })),
+    }
+  }
+
   /** Locked-version snapshot export (M3-TIMESHEET.md API #10) — scoped identically to the org view (`timesheet.read`'s `Decision.scopeOrgUnitIds`; the roadmap's canonical permission catalog has no separate `timesheet.export` code), a plain row export of every in-scope day_record within the period's range. */
   @Get('periods/:id/export')
   @RequirePermission('timesheet.read')

@@ -145,8 +145,9 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
     },
     {
       provide: PeriodService,
-      useFactory: (periods: PeriodRepository, exceptions: ExceptionRepository) => new PeriodService(periods, exceptions),
-      inject: [PeriodRepository, ExceptionRepository],
+      useFactory: (periods: PeriodRepository, exceptions: ExceptionRepository, dayRecords: DayRecordRepository) =>
+        new PeriodService(periods, exceptions, dayRecords),
+      inject: [PeriodRepository, ExceptionRepository, DayRecordRepository],
     },
     {
       provide: ViewsService,

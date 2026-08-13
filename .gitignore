@@ -7,3 +7,4 @@ coverage/
 .tsbuild/
 .env.local
 .env.*.local
+test/e2e/runtime/

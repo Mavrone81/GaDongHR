@@ -4,6 +4,24 @@ import { AuthzRepository } from '../authz.repository'
 
 export const BIOMETRIC_TEMPLATE_READ = 'biometric.template.read'
 
+/**
+ * The svc-payroll seam fix's own machine-only grant, same shape and same
+ * absolute rule as `BIOMETRIC_TEMPLATE_READ` immediately above: granted to
+ * NO `ROLE_TEMPLATES` entry, ever. `GET /periods/:id/totals`
+ * (`timesheet.controller.ts`) returns every employee's OT hours for a
+ * period, unscoped by org unit — that is a payroll-run input, not a human
+ * timesheet view, and `timesheet.read`'s existing org-scoping semantics
+ * (self / org subtree / '*') do not fit a caller that legitimately needs
+ * every employee at once. A human role holding this would see the same
+ * cross-org aggregate a payroll run sees, with none of `timesheet.read`'s
+ * scoping — see `permission-reachability.test.ts`'s second exemption for
+ * the enforcement, and the e2e report for why `svc-payroll`'s own
+ * `HttpTimesheetClient` (`ports.ts`) cannot yet present a token for this
+ * grant (no client-credentials wiring exists in this deployment today —
+ * a follow-up, not something this permission should be weakened to avoid).
+ */
+export const PAYROLL_TIMESHEET_TOTALS_READ = 'timesheet.totals.read'
+
 export interface PermissionCatalogEntry {
   code: string
   description: string
@@ -121,6 +139,7 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
   { code: 'dsr.manage', description: 'Manage data subject requests' },
   { code: 'retention.approve', description: 'Approve a retention/erasure action' },
   { code: BIOMETRIC_TEMPLATE_READ, description: 'Read a raw biometric face template — machine grant to svc-attendance ONLY, never a human role (Security doc §4.2, absolute)' },
+  { code: PAYROLL_TIMESHEET_TOTALS_READ, description: "Read every employee's aggregated OT/hours totals for a locked timesheet period — machine grant to svc-payroll ONLY, never a human role" },
   // --- additions beyond the roadmap's list (see comment above) ---
   { code: 'config.rule.read', description: 'Read an effective-dated statutory config rule' },
   { code: 'authz.role.read', description: 'Read role and permission catalog data' },
