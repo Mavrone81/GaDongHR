@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import type { Locale } from './locale'
 import { detectInitialLocale, storeLocale } from './locale'
 import { fetchBundle } from '../api/svcI18n'
-import { FALLBACK_EN_BUNDLE } from './fallbackBundle'
+import { FALLBACK_BUNDLE } from './fallbackBundle'
 
 export type Bundle = Record<string, string>
 export type TranslateVars = Record<string, string | number>
@@ -27,10 +27,14 @@ export interface I18nContextValue {
    *      before this app ever sees the response).
    *   2. A separately fetched `en` bundle, for the case the primary fetch
    *      itself is incomplete or failed while an `en` fetch still succeeds.
-   *   3. `FALLBACK_EN_BUNDLE` (`./fallbackBundle.ts`) — the English bundle
+   *   3. `FALLBACK_BUNDLE` (`./fallbackBundle.ts`) — the Thai bundle
    *      compiled INTO this app at build time, used only when every network
-   *      path above failed or is missing the key. This is what keeps the
-   *      login screen legible with zero backend running at all.
+   *      path above failed or is missing the key. Thai, not English,
+   *      because this product's default language is Thai (`i18n/locale.ts`)
+   *      — the last-resort text has to match the audience it exists to
+   *      protect, not silently hand everyone English the one time the
+   *      network is down. This is what keeps the login screen legible with
+   *      zero backend running at all.
    *   4. The raw key string itself — ugly, but diagnosable; never `''`.
    *
    * Never returns an empty string: an empty label is invisible (the exact
@@ -93,11 +97,11 @@ export function I18nProvider({ children }: { children: ReactNode }): React.JSX.E
         // key (that would fire dozens of times for a single dead backend;
         // `t()` below logs nothing at all). This is the "svc-i18n
         // unreachable" case that used to render a blank screen: every
-        // affected `t()` call still resolves through `FALLBACK_EN_BUNDLE`
-        // (bundled at build time) or, failing that, the raw key — never
-        // `''`.
+        // affected `t()` call still resolves through `FALLBACK_BUNDLE`
+        // (bundled at build time, Thai) or, failing that, the raw key —
+        // never `''`.
         console.warn(
-          `[i18n] could not fetch translations for locale "${locale}" from svc-i18n — falling back to the English bundle shipped with the app.`,
+          `[i18n] could not fetch translations for locale "${locale}" from svc-i18n — falling back to the Thai bundle shipped with the app.`,
         )
       }
 
@@ -122,7 +126,7 @@ export function I18nProvider({ children }: { children: ReactNode }): React.JSX.E
 
   const t = useCallback(
     (key: string, vars?: TranslateVars): string => {
-      const value = localeBundle?.[key] ?? englishBundle?.[key] ?? FALLBACK_EN_BUNDLE[key] ?? key
+      const value = localeBundle?.[key] ?? englishBundle?.[key] ?? FALLBACK_BUNDLE[key] ?? key
       return interpolate(value, vars)
     },
     [localeBundle, englishBundle],

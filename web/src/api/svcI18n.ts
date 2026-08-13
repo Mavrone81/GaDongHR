@@ -17,7 +17,7 @@ const client = createApiClient(loadConfig().svcI18nUrl, null)
  * `englishBundle` state as if it were good data — a *successful* fetch
  * that is nonetheless unusable. `I18nContext.tsx`'s `t()` happens to
  * degrade safely either way (a flat-key lookup on a nested object just
- * misses and falls through to `FALLBACK_EN_BUNDLE`), but silently — none
+ * misses and falls through to `FALLBACK_BUNDLE`), but silently — none
  * of the "svc-i18n unreachable" diagnostics (the one `console.warn` naming
  * the locale) fire, because nothing rejected. Validating the shape here
  * and throwing turns that silent, undiagnosable degradation into the

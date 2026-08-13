@@ -87,6 +87,15 @@ export default defineConfig({
       '**/.tsbuild/**',
       '**/cypress/**',
       '**/.{idea,git,cache,output,temp}/**',
+      // `web/e2e/**` is the real-BROWSER Playwright suite
+      // (`playwright.config.ts`'s `testDir`) — deliberately separate from
+      // this Vitest/jsdom suite (task brief: "keep them separate"), run
+      // via `pnpm --filter @gadong/web test:ui`, never `vitest`. Its files
+      // are named `*.spec.ts`, which is inside Vitest's own default
+      // include glob, so without this exclude Vitest tries to load and run
+      // them itself and fails immediately — Playwright's `test.describe`
+      // refuses to run outside its own runner.
+      'e2e/**',
       'ui-coverage.test.ts',
     ],
   },

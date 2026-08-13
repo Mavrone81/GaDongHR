@@ -10,7 +10,7 @@ function jsonResponse(status: number, body: unknown): Response {
  * *succeeds* (200, valid JSON) with a body shape `t()` cannot use. Every
  * other test in this suite covers `fetchBundle` REJECTING (network down,
  * non-2xx, malformed JSON) — `I18nProvider` already warns and falls back
- * to `FALLBACK_EN_BUNDLE` for all of those, and `I18nContext.test.tsx`
+ * to `FALLBACK_BUNDLE` for all of those, and `I18nContext.test.tsx`
  * proves it. A 200 with an unusable body took neither path: `client.request`
  * only `JSON.parse`s and casts, so a still-nested bundle (`svc-i18n`'s own
  * on-disk shape — see `services/svc-i18n/bundles/en.json`), an error

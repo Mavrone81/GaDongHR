@@ -1,0 +1,278 @@
+{
+  "common": {
+    "save": "บันทึก",
+    "cancel": "ยกเลิก",
+    "submit": "ส่ง",
+    "back": "ย้อนกลับ",
+    "next": "ถัดไป",
+    "search": "ค้นหา",
+    "loading": "กำลังโหลด…",
+    "error": "เกิดข้อผิดพลาด",
+    "success": "สำเร็จ",
+    "yes": "ใช่",
+    "no": "ไม่ใช่",
+    "confirm": "ยืนยัน",
+    "delete": "ลบ",
+    "edit": "แก้ไข",
+    "view": "ดู",
+    "close": "ปิด",
+    "required_field": "กรุณากรอกข้อมูลในช่องนี้"
+  },
+  "auth": {
+    "login": {
+      "title": "เข้าสู่ระบบ",
+      "username": "ชื่อผู้ใช้",
+      "password": "รหัสผ่าน",
+      "submit": "เข้าสู่ระบบ",
+      "statement": "ลงเวลาเข้า-ออกงาน ยื่นคำขอลา และดูสลิปเงินเดือนของคุณได้ในที่เดียว",
+      "footer": "นี่คือหน้าจอเข้าสู่ระบบของ {host}",
+      "error": {
+        "invalid_credentials": "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"
+      }
+    },
+    "logout": "ออกจากระบบ",
+    "session": {
+      "expired": "เซสชันของคุณหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง"
+    },
+    "forgot_password": "ลืมรหัสผ่าน?"
+  },
+  "leave": {
+    "request": {
+      "title": "คำขอลา",
+      "submit": "ส่งคำขอลา",
+      "reason": "เหตุผล",
+      "start_date": "วันที่เริ่มลา",
+      "end_date": "วันที่สิ้นสุดการลา"
+    },
+    "balance": {
+      "title": "วันลาคงเหลือ"
+    },
+    "type": {
+      "annual": "วันหยุดพักผ่อนประจำปี (ลาพักร้อน)",
+      "sick": "ลาป่วย",
+      "personal": "ลากิจ",
+      "maternity": "ลาคลอด",
+      "paternity": "ลาช่วยเหลือภริยาที่คลอดบุตร",
+      "infant_care": "ลาเลี้ยงดูบุตร"
+    },
+    "approval": {
+      "approve": "อนุมัติ",
+      "reject": "ไม่อนุมัติ"
+    },
+    "status": {
+      "pending": "รอดำเนินการ",
+      "approved": "อนุมัติแล้ว",
+      "rejected": "ไม่อนุมัติ"
+    }
+  },
+  "claims": {
+    "request": {
+      "title": "การเบิกค่าใช้จ่าย",
+      "submit": "ส่งคำขอเบิก"
+    },
+    "type": {
+      "expense": "การเบิกค่าใช้จ่าย",
+      "per_diem": "เบี้ยเลี้ยง"
+    },
+    "status": {
+      "pending": "รอดำเนินการ",
+      "approved": "อนุมัติแล้ว",
+      "rejected": "ไม่อนุมัติ"
+    },
+    "amount": {
+      "label": "จำนวนเงิน"
+    },
+    "receipt": {
+      "upload": "อัปโหลดใบเสร็จ"
+    }
+  },
+  "payroll": {
+    "payslip": {
+      "title": "สลิปเงินเดือน",
+      "net": "เงินได้สุทธิ",
+      "gross": "เงินได้รวม",
+      "deductions": "รายการหัก",
+      "salary": "เงินเดือน / ค่าจ้าง",
+      "overtime": "ค่าล่วงเวลา / โอที",
+      "withholding_tax": "ภาษีหัก ณ ที่จ่าย",
+      "social_security": "เงินสมทบกองทุนประกันสังคม"
+    },
+    "run": {
+      "title": "รอบการจ่ายเงินเดือน",
+      "status": {
+        "draft": "ฉบับร่าง",
+        "approved": "อนุมัติแล้ว",
+        "paid": "จ่ายแล้ว"
+      }
+    }
+  },
+  "attendance": {
+    "clock_in": "ลงเวลาเข้างาน",
+    "clock_out": "ลงเวลาออกงาน",
+    "timesheet": {
+      "title": "ใบลงเวลาทำงาน"
+    },
+    "shift": {
+      "title": "กะการทำงาน"
+    },
+    "roster": {
+      "title": "ตารางกะ"
+    },
+    "overtime": {
+      "label": "ค่าล่วงเวลา"
+    },
+    "status": {
+      "present": "มาทำงาน",
+      "absent": "ขาดงาน",
+      "late": "มาสาย"
+    }
+  },
+  "onboarding": {
+    "title": "การเริ่มงาน/ปฐมนิเทศ",
+    "welcome": "ยินดีต้อนรับสู่ทีมงาน",
+    "checklist": {
+      "title": "รายการตรวจสอบการเริ่มงาน"
+    },
+    "document": {
+      "upload": "อัปโหลดเอกสาร"
+    },
+    "probation": {
+      "label": "ทดลองงาน"
+    },
+    "start_date": "วันที่เริ่มงาน"
+  },
+  "glossary": {
+    "employee": "พนักงาน",
+    "employer": "นายจ้าง",
+    "probation": "ทดลองงาน",
+    "onboarding": "การเริ่มงาน/ปฐมนิเทศ",
+    "shift": "กะการทำงาน",
+    "roster": "ตารางกะ",
+    "attendance": "การลงเวลา",
+    "timesheet": "ใบลงเวลาทำงาน",
+    "overtime": "ค่าล่วงเวลา / โอที",
+    "public_holiday": "วันหยุดนักขัตฤกษ์",
+    "weekly_rest_day": "วันหยุดประจำสัปดาห์",
+    "annual_leave": "วันหยุดพักผ่อนประจำปี (ลาพักร้อน)",
+    "sick_leave": "ลาป่วย",
+    "personal_leave": "ลากิจ",
+    "maternity_leave": "ลาคลอด",
+    "paternity_leave": "ลาช่วยเหลือภริยาที่คลอดบุตร",
+    "infant_care_leave": "ลาเลี้ยงดูบุตร",
+    "leave_balance": "วันลาคงเหลือ",
+    "expense_claim": "การเบิกค่าใช้จ่าย",
+    "per_diem": "เบี้ยเลี้ยง",
+    "payroll": "การจ่ายเงินเดือน",
+    "salary": "เงินเดือน / ค่าจ้าง",
+    "payslip": "สลิปเงินเดือน",
+    "deduction": "รายการหัก",
+    "withholding_tax": "ภาษีหัก ณ ที่จ่าย",
+    "social_security_fund": "กองทุนประกันสังคม",
+    "employee_welfare_fund": "กองทุนสงเคราะห์ลูกจ้าง",
+    "provident_fund": "กองทุนสำรองเลี้ยงชีพ",
+    "severance_pay": "ค่าชดเชย",
+    "pay_in_lieu_of_notice": "ค่าบอกกล่าวล่วงหน้า",
+    "consent": "ความยินยอม",
+    "personal_data": "ข้อมูลส่วนบุคคล",
+    "facial_recognition": "การจดจำใบหน้า"
+  },
+  "statutory": {
+    "form": {
+      "sps_1_10": "สปส.1-10",
+      "por_ngor_dor_1": "ภ.ง.ด.1",
+      "fifty_tavi": "50 ทวิ",
+      "kor_11": "กร.11"
+    }
+  },
+  "shell": {
+    "brand": "GaDongHR",
+    "brandMark": {
+      "alt": "ตราสัญลักษณ์รูปกระดองของ GaDongHR",
+      "wordmarkGadong": "GaDong",
+      "wordmarkHr": "HR"
+    },
+    "nav": {
+      "statutoryRules": "กฎเกณฑ์ตามกฎหมาย",
+      "audit": "การตรวจสอบ",
+      "documents": "เอกสาร",
+      "roles": "บทบาท",
+      "notifications": "การแจ้งเตือน"
+    },
+    "locale": {
+      "th": "ไทย",
+      "en": "English",
+      "zh": "中文",
+      "chooseLanguage": "เลือกภาษาของคุณ"
+    },
+    "comingSoon": {
+      "title": "เร็วๆ นี้",
+      "body": "ฟีเจอร์นี้ยังไม่พร้อมใช้งาน"
+    }
+  },
+  "admin": {
+    "statutoryRules": {
+      "title": "กฎเกณฑ์ตามกฎหมาย",
+      "asOfLabel": "ณ วันที่",
+      "emptyState": "ยังไม่มีกฎเกณฑ์ตามกฎหมาย",
+      "propose": {
+        "cta": "เสนอกฎเกณฑ์ใหม่",
+        "title": "เสนอกฎเกณฑ์ตามกฎหมาย",
+        "success": "เสนอกฎเกณฑ์สำเร็จแล้ว",
+        "ruleKey": "รหัสกฎเกณฑ์",
+        "value": "ค่า",
+        "unit": "หน่วย",
+        "citation": "การอ้างอิงกฎหมาย",
+        "governanceClass": "ประเภทการกำกับดูแล",
+        "statutoryFloor": "อัตราขั้นต่ำตามกฎหมาย",
+        "effectiveFrom": "มีผลบังคับใช้ตั้งแต่",
+        "reason": "เหตุผล",
+        "submit": "ส่งข้อเสนอ"
+      },
+      "governanceClass": {
+        "STATUTORY_FLOOR": "อัตราขั้นต่ำตามกฎหมาย",
+        "STATUTORY_FIXED": "อัตราคงที่ตามกฎหมาย",
+        "COMPANY_POLICY": "นโยบายบริษัท"
+      },
+      "status": {
+        "draft": "ฉบับร่าง",
+        "pending_approval": "รอการอนุมัติ",
+        "active": "มีผลบังคับใช้",
+        "superseded": "ถูกแทนที่แล้ว"
+      },
+      "approve": {
+        "cta": "อนุมัติ",
+        "selfProposed": "คุณเป็นผู้เสนอกฎเกณฑ์นี้ จึงไม่สามารถอนุมัติได้"
+      },
+      "floorViolation": {
+        "title": "ต่ำกว่าอัตราขั้นต่ำตามกฎหมาย",
+        "body": "{value} ต่ำกว่าอัตราขั้นต่ำตามกฎหมายที่ {floor}"
+      },
+      "ceilingViolation": {
+        "title": "สูงกว่าเพดานตามกฎหมาย",
+        "body": "{value} สูงกว่าเพดานตามกฎหมายที่ {ceiling}"
+      },
+      "citationSeal": {
+        "withFloor": "§ {citation} · ขั้นต่ำ {floor}",
+        "withCeiling": "§ {citation} · เพดาน {ceiling}",
+        "plain": "§ {citation}"
+      }
+    }
+  },
+  "config": {
+    "error": {
+      "below_statutory_floor": "ค่าที่เสนอต่ำกว่าอัตราขั้นต่ำตามกฎหมาย",
+      "above_statutory_ceiling": "ค่าที่เสนอสูงกว่าเพดานตามกฎหมาย",
+      "pack_signature_invalid": "ลายเซ็นของชุดการตั้งค่าไม่ถูกต้อง",
+      "rule_not_found": "ไม่พบกฎเกณฑ์",
+      "rule_version_not_found": "ไม่พบเวอร์ชันของกฎเกณฑ์",
+      "not_a_draft": "กฎเกณฑ์นี้ไม่ใช่ฉบับร่าง",
+      "statutory_fixed_not_editable": "กฎเกณฑ์ประเภทอัตราคงที่ตามกฎหมายไม่สามารถแก้ไขได้"
+    }
+  },
+  "authz": {
+    "error": {
+      "denied": "คุณไม่มีสิทธิ์ในการดำเนินการนี้",
+      "sod_violation": "การดำเนินการนี้ต้องมีผู้อนุมัติคนละคนตามหลักการแบ่งแยกหน้าที่"
+    }
+  }
+}

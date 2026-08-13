@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { I18nProvider, useI18n } from './I18nContext'
 import { fetchBundle } from '../api/svcI18n'
-import { FALLBACK_EN_BUNDLE } from './fallbackBundle'
+import { FALLBACK_BUNDLE } from './fallbackBundle'
 
 vi.mock('../api/svcI18n', () => ({
   fetchBundle: vi.fn(),
@@ -29,9 +29,12 @@ describe('I18nProvider — fallback chain when svc-i18n is unreachable', () => {
    * THE bug this task fixes: with no backend running at all, `fetchBundle`
    * rejects for every locale. Before this change, `t()` resolved every key
    * to `''` — a blank screen with a single unlabelled `<button>`. Now it
-   * must resolve through the bundle compiled into the app at build time.
+   * must resolve through the bundle compiled into the app at build time —
+   * Thai, since that is this product's default language (`i18n/locale.ts`,
+   * `fallbackBundle.ts`'s header) and the audience this last resort exists
+   * to protect.
    */
-  it('resolves to the compiled-in English bundle, never an empty string, when the fetch rejects', async () => {
+  it('resolves to the compiled-in Thai bundle, never an empty string, when the fetch rejects', async () => {
     mockFetchBundle.mockRejectedValue(new Error('svc-i18n unreachable'))
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 
@@ -43,7 +46,7 @@ describe('I18nProvider — fallback chain when svc-i18n is unreachable', () => {
 
     await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'))
 
-    expect(screen.getByTestId('value').textContent).toBe(FALLBACK_EN_BUNDLE['auth.login.title'])
+    expect(screen.getByTestId('value').textContent).toBe(FALLBACK_BUNDLE['auth.login.title'])
     expect(screen.getByTestId('value').textContent).not.toBe('')
   })
 
