@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "test": "jest && pnpm --filter @gadong/web test:run",
     "test:e2e": "ts-node test/e2e/run.ts",
+    "test:realbroker": "jest --config jest.realbroker.config.js",
     "build": "pnpm -r build"
   },
   "devDependencies": {

@@ -34,4 +34,10 @@ main()
     console.error('[e2e] fatal error before/during the suite:', err)
     process.exitCode = 1
   })
-  .finally(() => down())
+  .finally(() => {
+    if (process.env['E2E_KEEP_STACK'] === '1') {
+      console.log('[e2e] E2E_KEEP_STACK=1 set, leaving containers up for inspection')
+      return undefined
+    }
+    return down()
+  })

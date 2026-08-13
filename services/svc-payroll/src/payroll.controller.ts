@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpException, Inject, Param, Post, Put, Query, Req } from '@nestjs/common'
-import { GadongError, Public, RequirePermission, buildHealth, withTransaction } from '@gadong/kernel'
+import { GadongError, Public, RequirePermission, buildHealth, outboxDepth, withTransaction } from '@gadong/kernel'
 import type { AuthenticatedRequest, HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { unsupportedBankFormat } from './errors'
@@ -108,7 +108,22 @@ export class PayrollController {
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
     const [crypto, config] = await Promise.all([this.cryptoHealth.check(), this.configHealth.check()])
-    return buildHealth('svc-payroll', { db, crypto, config })
+    // "A stuck outbox must be observable" (event-bus task) — there is no
+    // alerting anywhere in this system, so `payroll.committed`/
+    // `payslip.issued` rows the relay has fallen behind on must surface
+    // here, the one place an operator already looks. A failure reading
+    // the outbox itself (distinct from `db` above, which only proves the
+    // pool can run `SELECT 1`) degrades the response rather than being
+    // swallowed into a healthy-looking zero — same fail-closed reasoning
+    // as every dependency check on this endpoint.
+    let outbox: { pending: number; oldestAgeSeconds: number | null } | undefined
+    let outboxQuery: 'up' | 'down' = 'up'
+    try {
+      outbox = await outboxDepth(this.pool, 'payroll')
+    } catch {
+      outboxQuery = 'down'
+    }
+    return buildHealth('svc-payroll', { db, crypto, config, ...(outboxQuery === 'down' ? { outboxQuery } : {}) }, process.env, outbox)
   }
 
   // ------------------------------------------------------- M7-1 profiles

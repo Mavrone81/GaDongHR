@@ -6,6 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": { "build": "tsc -b" },
   "dependencies": {
+    "amqplib": "^2.0.1",
     "jose": "^4.15.9",
     "pg": "^8.13.0"
   },

@@ -54,6 +54,25 @@ describe('HealthController — GET /health reports db and crypto', () => {
     const out = await bothDown.health()
 
     expect(out.status).toBe('degraded')
-    expect(out.dependencies).toEqual({ db: 'down', crypto: 'down' })
+    // `outboxQuery: 'down'` too — the same rejecting pool answers the
+    // event-bus outbox-depth query (event-bus task) no better than
+    // `SELECT 1`, so it correctly shows up as its own down dependency
+    // rather than being silently skipped.
+    expect(out.dependencies).toEqual({ db: 'down', crypto: 'down', outboxQuery: 'down' })
+  })
+
+  it('reports outbox depth (event-bus health/metrics) when the db is healthy', async () => {
+    const pool = fakePool({
+      query: jest.fn().mockImplementation((sql: string) => {
+        if (/count\(\*\)/i.test(sql)) return Promise.resolve({ rows: [{ pending: 2, oldest_age_seconds: 5 }] })
+        return Promise.resolve({ rows: [{ '?column?': 1 }] })
+      }) as unknown as Pool['query'],
+    })
+    const controller = new HealthController(pool, fakeCryptoProbe('up'))
+
+    const out = await controller.health()
+
+    expect(out.status).toBe('ok') // pending rows well under the staleness threshold
+    expect(out.outbox).toEqual({ pending: 2, oldestAgeSeconds: 5, stale: false })
   })
 })

@@ -136,14 +136,24 @@ razor-thin even before Phase 3, and OOM-killing Postgres on a host with
 | **Total committed** | **3,440 MB** | 3,376 MB (Task 13) + 64 MB (`web`, Task 15c). |
 | **OS headroom** | **4,096 − 3,440 = 656 MB** | Still comfortably above the 512 MB floor. |
 
-`rabbitmq` and `redis` are provisioned because the brief requires them as
-standing infra, **not because any of the seven services currently use
-either**: a repo-wide check found no AMQP/RabbitMQ or Redis client
-anywhere in `packages/kernel` or `services/*/src` — the outbox relay's
-live broker adapter doesn't exist yet (`services/svc-audit`'s own source
-comment: "driven by a future message-bus adapter — none exists anywhere
-in this repo yet"). They're sized small and idle-ready for when that
-lands, not tuned for load they don't yet carry.
+`redis` is provisioned because the brief requires it as standing infra,
+**not because any of the seven services currently use it** — sized small
+and idle-ready for when a consumer lands, not tuned for load it doesn't
+yet carry.
+
+`rabbitmq` **is now live** (event-bus task, `.superpowers/sdd/02-modules/event-bus.md`):
+`svc-config`, `svc-audit`, `svc-notify` and `svc-docs` all connect via
+`RABBITMQ_URL` (`packages/kernel/src/bus/` — `AmqpPublisher` drains each
+service's outbox, `ConsumerLoop` dispatches inbound events). Its 160 MB
+sizing was already right for this — one durable topic exchange, one
+dead-letter exchange, and a handful of small durable queues, not a
+high-throughput broker. `svc-onboarding`, `svc-payroll`, `svc-timesheet`,
+`svc-leave`, `svc-claims`, `svc-scheduler` and `svc-attendance` are wired
+onto the bus the same way in code but are not yet in this compose file at
+all — this file's own header already documents that as deliberate
+("Module services M1-M7 must still NOT appear",
+`deploy/compose-validation.test.ts`'s exact fifteen-service list). Their
+memory lands with their own deployment phase, not this one.
 
 ### Before CompreFace arrives (Phase 3)
 

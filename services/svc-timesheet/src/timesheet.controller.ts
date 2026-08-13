@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpException, Inject, Param, Post, Query, Req } from '@nestjs/common'
-import { AuthzClient, GadongError, Public, RequirePermission, buildHealth, withTransaction } from '@gadong/kernel'
+import { AuthzClient, GadongError, Public, RequirePermission, buildHealth, outboxDepth, withTransaction } from '@gadong/kernel'
 import type { AuthenticatedRequest, HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import type { ProposeInput } from './exceptions.service'
@@ -243,7 +243,16 @@ export class TimesheetController {
   @Public()
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
-    return buildHealth('svc-timesheet', { db })
+    // "A stuck outbox must be observable" (event-bus task) — see
+    // `svc-payroll`'s identical wiring/reasoning in `payroll.controller.ts`.
+    let outbox: { pending: number; oldestAgeSeconds: number | null } | undefined
+    let outboxQuery: 'up' | 'down' = 'up'
+    try {
+      outbox = await outboxDepth(this.pool, 'timesheet')
+    } catch {
+      outboxQuery = 'down'
+    }
+    return buildHealth('svc-timesheet', { db, ...(outboxQuery === 'down' ? { outboxQuery } : {}) }, process.env, outbox)
   }
 
   // ---------- helpers ----------

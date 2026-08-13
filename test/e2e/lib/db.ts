@@ -77,6 +77,36 @@ export async function grantPermission(userId: string, permissionCode: string, gr
   })
 }
 
+/**
+ * `onboarding.employee.org_unit_id`/`onboarding.position.org_unit_id` both
+ * carry a real FK (`employee_org_unit_id_fkey`/`position_org_unit_id_fkey`,
+ * `services/svc-onboarding/migrations/1756000000000_onboarding-schema.js`)
+ * into `onboarding.org_unit` — `POST /employees` 500s on a foreign-key
+ * violation for any `orgUnitId`/`positionId` that doesn't already exist.
+ * `EmployeeController` has no route to create an org unit or position
+ * (M1's scope stops at the employee record itself), so the e2e harness
+ * seeds the two fixed ids the lifecycle test hires into directly — this is
+ * pure test-data setup (an org chart has to come from somewhere before the
+ * first hire), not a shortcut around any guard or business rule under
+ * test.
+ */
+export async function seedOnboardingOrgAndPosition(orgUnitId: string, positionId: string): Promise<void> {
+  await withSuperuserClient(async (client) => {
+    await client.query(
+      `INSERT INTO onboarding.org_unit (id, parent_id, name_i18n, cost_center)
+       VALUES ($1::uuid, NULL, '{"en":"E2E HQ","th":"E2E HQ"}'::jsonb, NULL)
+       ON CONFLICT (id) DO NOTHING`,
+      [orgUnitId],
+    )
+    await client.query(
+      `INSERT INTO onboarding.position (id, code, title_i18n, org_unit_id)
+       VALUES ($1::uuid, 'E2E-POS-1', '{"en":"E2E Tester","th":"E2E Tester"}'::jsonb, $2::uuid)
+       ON CONFLICT (id) DO NOTHING`,
+      [positionId, orgUnitId],
+    )
+  })
+}
+
 export async function waitForRoleSeeded(roleCode: string): Promise<boolean> {
   return withSuperuserClient(async (client) => {
     const res = await client.query('SELECT 1 FROM authz.role WHERE code = $1', [roleCode])

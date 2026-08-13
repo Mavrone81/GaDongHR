@@ -8,6 +8,7 @@ import type { AuthzTransport, Queryable } from '@gadong/kernel'
 import { DB_POOL, EntriesController } from './entries.controller'
 import { EntriesService } from './entries.service'
 import { EntriesRepository } from './entries.repository'
+import { AuditConsumer } from './consumer'
 
 /**
  * Real HTTP wiring for `svc-authz` (Task 8), matching `services/svc-config`'s
@@ -56,9 +57,12 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
  * guard denies it.
  *
  * No `AuditEmitter`/outbox providers here: this service consumes `audit.*`
- * events (`consumer.ts`, driven by a future message-bus adapter — none
- * exists anywhere in this repo yet, see task-9-report.md), it never
- * produces its own.
+ * events (`consumer.ts`, wired onto the real bus by `main.ts`'s
+ * `wireEventBus` via kernel's `startEventBus`, wildcard-bound to `audit.#`
+ * — see that function's doc comment), it never produces its own. Only the
+ * `AuditConsumer` provider itself lives here; the bus plumbing is
+ * constructed in `main.ts`, not this module, matching every other
+ * service's `app.module.ts`/`main.ts` split.
  */
 @Module({
   controllers: [EntriesController],
@@ -92,6 +96,11 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
     {
       provide: EntriesService,
       useFactory: (repo: EntriesRepository) => new EntriesService(repo),
+      inject: [EntriesRepository],
+    },
+    {
+      provide: AuditConsumer,
+      useFactory: (repo: EntriesRepository) => new AuditConsumer(repo),
       inject: [EntriesRepository],
     },
   ],

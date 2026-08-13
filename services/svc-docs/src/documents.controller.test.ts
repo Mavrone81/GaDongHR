@@ -1,12 +1,13 @@
 import { HttpException } from '@nestjs/common'
 import { APP_GUARD } from '@nestjs/core'
-import { GadongError, PERMISSION_METADATA_KEY } from '@gadong/kernel'
+import { GadongError, PERMISSION_METADATA_KEY, writeOutbox } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { DocumentsController, DB_POOL } from './documents.controller'
 import type { RenderRequestBody } from './documents.controller'
 import { AppModule } from './app.module'
 import type { DocumentsService, PreparedDocument, RenderResult, RetrievedDocument } from './documents.service'
 import type { DocumentRow } from './documents.repository'
+import { FakeDocsDb } from './testing/fake-db'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null
@@ -118,6 +119,18 @@ describe('DocumentsController wiring', () => {
     const controller = new DocumentsController(fakeDocumentsService(), pool)
     const out = await controller.health()
     expect(out).toMatchObject({ status: 'degraded', dependencies: { db: 'down' } })
+  })
+
+  it('reports outbox depth (event-bus health/metrics) — a fresh, undrained row is visible but not yet "stale"', async () => {
+    const db = new FakeDocsDb()
+    const tx = db.connect()
+    await writeOutbox(tx, 'docs', 'document.rendered', { documentId: 'doc-1' })
+    const controller = new DocumentsController(fakeDocumentsService(), db.asPool() as unknown as Pool)
+
+    const out = await controller.health()
+
+    expect(out.outbox).toMatchObject({ pending: 1, stale: false })
+    expect(out.status).toBe('ok') // freshly-written, well under the staleness threshold
   })
 
   it('maps a thrown GadongError (e.g. DOC-500 fonts_unavailable) to an HttpException carrying the error envelope and status', async () => {

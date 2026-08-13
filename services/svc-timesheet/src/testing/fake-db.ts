@@ -264,6 +264,13 @@ export class FakeTimesheetConnection implements Queryable {
     // --- outbox / processed_events ---
     if (/^INSERT INTO\s+\S*outbox\b/i.test(s)) return { rows: [this.insertOutbox(params)] }
     if (/^INSERT INTO\s+\S*processed_events\b/i.test(s)) return { rows: this.insertProcessedEvent(params) }
+    // kernel `outboxDepth` (event-bus health/metrics) — fixed SQL text this fake doesn't own, same precedent as the two lines above.
+    if (/^SELECT\s+count\(\*\)/i.test(s) && /FROM\s+\S*outbox\b/i.test(s)) {
+      const pending = [...this.db.outbox.values()].filter((r) => r.published_at === null)
+      const oldestAgeSeconds =
+        pending.length === 0 ? null : Math.max(0, (Date.now() - Math.min(...pending.map((r) => r.created_at.getTime()))) / 1000)
+      return { rows: [{ pending: pending.length, oldest_age_seconds: oldestAgeSeconds }] }
+    }
 
     throw new Error(`FakeTimesheetDb: unrecognised query: ${s}`)
   }

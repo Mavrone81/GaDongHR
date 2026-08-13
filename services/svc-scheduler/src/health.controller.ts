@@ -1,5 +1,5 @@
 import { Controller, Get, Inject } from '@nestjs/common'
-import { Public, buildHealth } from '@gadong/kernel'
+import { Public, buildHealth, outboxDepth } from '@gadong/kernel'
 import type { HealthPayload, Queryable } from '@gadong/kernel'
 
 /** DI token for the `scheduler` schema's connection pool — matches `services/svc-config`'s `DB_POOL` pattern. `app.module.ts` binds it to a real `pg.Pool` via kernel's `createPool`. */
@@ -36,7 +36,20 @@ export class HealthController {
   @Public()
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
-    return buildHealth('svc-scheduler', { db })
+    // "A stuck outbox must be observable" (event-bus task) — `roster.published`,
+    // `roster.entry.published` and `ot.approved` rows this service writes
+    // must actually reach the bus; if the relay stalls, downstream
+    // consumers silently stop hearing about published rosters/approved OT.
+    // See `services/svc-payroll/src/payroll.controller.ts`'s identical
+    // wiring/reasoning.
+    let outbox: { pending: number; oldestAgeSeconds: number | null } | undefined
+    let outboxQuery: 'up' | 'down' = 'up'
+    try {
+      outbox = await outboxDepth(this.pool, 'scheduler')
+    } catch {
+      outboxQuery = 'down'
+    }
+    return buildHealth('svc-scheduler', { db, ...(outboxQuery === 'down' ? { outboxQuery } : {}) }, process.env, outbox)
   }
 
   private async checkDb(): Promise<'up' | 'down'> {

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpException, Inject, Param, Post } from '@nestjs/common'
-import { GadongError, Public, RequirePermission, buildHealth, withTransaction } from '@gadong/kernel'
+import { GadongError, Public, RequirePermission, buildHealth, outboxDepth, withTransaction } from '@gadong/kernel'
 import type { HealthPayload, Locale } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { DocumentsService } from './documents.service'
@@ -102,7 +102,21 @@ export class DocumentsController {
   async health(): Promise<HealthPayload> {
     const db = await this.checkDb()
     const { storage, fonts } = await this.documentsService.health()
-    return buildHealth('svc-docs', { db, storage, fonts })
+    // "A stuck outbox must be observable" (event-bus task) — a
+    // `document.rendered` row the relay has fallen behind on must surface
+    // here, the one place an operator already looks. A failure reading the
+    // outbox itself (distinct from `db` above, which only proves the pool
+    // can run `SELECT 1`) degrades the response rather than being
+    // swallowed into a healthy-looking zero — same fail-closed reasoning as
+    // every other dependency check on this endpoint.
+    let outbox: { pending: number; oldestAgeSeconds: number | null } | undefined
+    let outboxQuery: 'up' | 'down' = 'up'
+    try {
+      outbox = await outboxDepth(this.pool, 'docs')
+    } catch {
+      outboxQuery = 'down'
+    }
+    return buildHealth('svc-docs', { db, storage, fonts, ...(outboxQuery === 'down' ? { outboxQuery } : {}) }, process.env, outbox)
   }
 
   private async checkDb(): Promise<'up' | 'down'> {
