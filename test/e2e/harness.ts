@@ -66,8 +66,8 @@ async function waitForHealthy(name: string, url: string): Promise<void> {
 export async function up(): Promise<void> {
   mkdirSync(RUNTIME_DIR, { recursive: true })
 
-  console.log('[harness] phase 1: postgres, vault, minio, oidc-issuer')
-  await compose('up', '-d', '--build', 'postgres', 'vault', 'minio', 'oidc-issuer')
+  console.log('[harness] phase 1: postgres, vault, minio, rabbitmq, oidc-issuer')
+  await compose('up', '-d', '--build', 'postgres', 'vault', 'minio', 'rabbitmq', 'oidc-issuer')
   await waitForHealthy('vault', `${'http://127.0.0.1:18200'}/v1/sys/health?standbyok=true`)
   await waitForHealthy('oidc-issuer', `${OIDC_ISSUER_URL}/health`)
   await waitFor('postgres', async () => {
@@ -91,34 +91,44 @@ export async function up(): Promise<void> {
     'mc alias set local http://127.0.0.1:9000 e2e-minio-user e2e-minio-password >/dev/null 2>&1; mc mb --ignore-existing local/gadonghr-docs-e2e',
   ])
 
-  // Phase 2, STAGGERED rather than one `up -d --build` for all nine:
-  // observed empirically on this host (three consecutive full runs, three
-  // different services crashing with exit 1 each time — svc-docs, then
-  // svc-timesheet, then svc-docs again) that starting all nine services'
-  // containers at once — each running its OWN real node-pg-migrate
-  // migration against the SAME single Postgres instance the moment it
-  // reports healthy, plus nine concurrent `docker build`s finishing and
-  // launching within the same few seconds — intermittently starves one
-  // container of CPU long enough to blow its migration's statement/
-  // connection setup. Not a code defect in any one service (each one
-  // boots cleanly in isolation, verified by hand against the same images);
-  // a resource-contention artifact of this sandbox. Batching the app tier
-  // into three waves of three, each waited to `/health` before the next
-  // wave starts, removes the nine-way pileup without weakening anything
-  // the migrations/health themselves prove — every service still runs its
-  // own real migration against the real, shared Postgres, just not all in
-  // the same instant.
-  console.log('[harness] phase 2: application services (staggered — see harness.ts comment)')
-  const appServiceWaves: string[][] = [
-    ['svc-authz', 'svc-config', 'svc-crypto'],
-    ['svc-onboarding', 'svc-scheduler', 'svc-attendance'],
-    ['svc-timesheet', 'svc-docs', 'svc-payroll'],
-  ]
-  for (const wave of appServiceWaves) {
-    await compose('up', '-d', '--build', ...wave)
-    for (const name of wave) {
-      await waitForHealthy(name, `http://127.0.0.1:${String(PORTS[name.replace('svc-', '') as keyof typeof PORTS])}/health`)
-    }
+  // Phase 2, SEQUENTIAL — a real seam defect found this session, not
+  // sandbox noise: `node-pg-migrate` guards a migration run with
+  // `pg_try_advisory_lock(PG_MIGRATE_LOCK_ID)` where `PG_MIGRATE_LOCK_ID`
+  // is a single hardcoded constant
+  // (`node_modules/node-pg-migrate/dist/runner.js`), and `pg_advisory_lock`
+  // is scoped to the whole Postgres DATABASE, not to a schema. Every
+  // GaDongHR service migrates its own schema but the SAME shared database
+  // (`deploy/docker-compose.yml`'s single `${POSTGRES_DB}` — this harness's
+  // `gadonghr` is the identical topology), so when two or more services
+  // boot at once, all racing `pg_try_advisory_lock`, one gets
+  // `lockObtained: false` and node-pg-migrate throws immediately —
+  // `"Another migration is already running"` — with NO retry, taking the
+  // whole container down (`main.ts`'s `bootstrap().catch(() =>
+  // process.exit(1))`). This was misdiagnosed at first as host resource
+  // contention (a plausible read of "one of nine containers intermittently
+  // dies") until the actual crash log was captured: a THIRD service
+  // (svc-onboarding), started as part of only a four-service batch,
+  // produced the exact "Another migration is already running" trace,
+  // which is a deterministic lock race, not a timing fluke. This is a
+  // real production defect: `docker compose up -d` for a fresh GaDongHR
+  // deployment (or any restart that migrates more than one service at
+  // once — e.g. a version bump touching two services' migrations) can
+  // crash-loop any service that loses this race, forever, since nothing
+  // retries it — see the e2e report's seam-defects list.
+  //
+  // The fix here is deliberately the dumbest possible one: migrate one
+  // service at a time, waited to `/health` (which only reports once its
+  // own migration + boot has completed) before starting the next. Slower,
+  // but removes the race entirely without touching any service's own
+  // code — the real fix (retry-with-backoff around `runner()` in every
+  // service's `main.ts`, or serializing migrations behind a
+  // deployment-level lock) is out of this session's scope and is reported,
+  // not silently patched around in application code.
+  console.log('[harness] phase 2: application services, ONE AT A TIME (node-pg-migrate advisory-lock race — see harness.ts comment)')
+  const appServices = ['svc-authz', 'svc-config', 'svc-crypto', 'svc-onboarding', 'svc-scheduler', 'svc-attendance', 'svc-timesheet', 'svc-docs', 'svc-payroll']
+  for (const name of appServices) {
+    await compose('up', '-d', '--build', name)
+    await waitForHealthy(name, `http://127.0.0.1:${String(PORTS[name.replace('svc-', '') as keyof typeof PORTS])}/health`)
   }
 
   console.log('[harness] waiting for svc-authz role catalog to self-seed')

@@ -119,6 +119,25 @@ services:
       retries: 20
       start_period: 5s
 
+  # Real AMQP broker for the real event bus (services/*/src/main.ts's
+  # `wireEventBus`/`startEventBus`, landed on this branch by the
+  # `origin/wt-eventbus` merge). Every service that produces or consumes an
+  # event now requires `RABBITMQ_URL` at boot — see each `requiredEnv
+  # ('RABBITMQ_URL')` call — so this harness needs a real broker, not just
+  # Postgres/Vault, to boot those services at all.
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    <<: *node-defaults
+    environment:
+      RABBITMQ_DEFAULT_USER: e2e-rabbitmq-user
+      RABBITMQ_DEFAULT_PASS: e2e-rabbitmq-password
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
   svc-authz:
     build: { context: ../.., dockerfile: services/svc-authz/Dockerfile }
     <<: *node-defaults
@@ -141,10 +160,12 @@ services:
       DATABASE_URL: postgresql://config:e2e-pw@postgres:5432/gadonghr
       AUTHZ_URL: http://svc-authz:3000
       CONFIG_PACK_SIGNING_KEY: e2e-config-pack-signing-key
+      RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
     ports: ["18002:3000"]
     depends_on:
       postgres: { condition: service_healthy }
       svc-authz: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     healthcheck: *http-health
 
   svc-crypto:
@@ -171,11 +192,13 @@ services:
       DATABASE_URL: postgresql://onboarding:e2e-pw@postgres:5432/gadonghr
       AUTHZ_URL: http://svc-authz:3000
       CRYPTO_URL: http://svc-crypto:3000
+      RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
     ports: ["18004:3000"]
     depends_on:
       postgres: { condition: service_healthy }
       svc-authz: { condition: service_healthy }
       svc-crypto: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     healthcheck: *http-health
 
   svc-scheduler:
@@ -187,10 +210,12 @@ services:
       DATABASE_URL: postgresql://scheduler:e2e-pw@postgres:5432/gadonghr
       AUTHZ_URL: http://svc-authz:3000
       CONFIG_URL: http://svc-config:3000
+      RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
     ports: ["18005:3000"]
     depends_on:
       postgres: { condition: service_healthy }
       svc-authz: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     healthcheck: *http-health
 
   svc-timesheet:
@@ -202,10 +227,12 @@ services:
       DATABASE_URL: postgresql://timesheet:e2e-pw@postgres:5432/gadonghr
       AUTHZ_URL: http://svc-authz:3000
       CONFIG_URL: http://svc-config:3000
+      RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
     ports: ["18007:3000"]
     depends_on:
       postgres: { condition: service_healthy }
       svc-authz: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     healthcheck: *http-health
 
   # M4 attendance. Only `/punches/code` (PIN/badge) is exercised by the
@@ -224,11 +251,13 @@ services:
       CONFIG_URL: http://svc-config:3000
       ATTENDANCE_CREDENTIAL_PEPPER: e2e-attendance-pepper
       FACE_ENGINE_URL: http://compreface.invalid:8000
+      RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
     ports: ["18006:3000"]
     depends_on:
       postgres: { condition: service_healthy }
       svc-authz: { condition: service_healthy }
       svc-crypto: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     healthcheck: *http-health
 
   svc-docs:
@@ -246,12 +275,14 @@ services:
       MINIO_ACCESS_KEY: e2e-minio-user
       MINIO_SECRET_KEY: e2e-minio-password
       DOCS_BUCKET: gadonghr-docs-e2e
+      RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
     ports: ["18009:3000"]
     depends_on:
       postgres: { condition: service_healthy }
       svc-authz: { condition: service_healthy }
       svc-crypto: { condition: service_healthy }
       minio: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     healthcheck: *http-health
 
   svc-payroll:
@@ -267,6 +298,7 @@ services:
       TIMESHEET_URL: http://svc-timesheet:3000
       DOCS_URL: http://svc-docs:3000
       ONBOARDING_URL: http://svc-onboarding:3000
+      RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
     ports: ["18008:3000"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -274,6 +306,7 @@ services:
       svc-crypto: { condition: service_healthy }
       svc-timesheet: { condition: service_healthy }
       svc-docs: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     healthcheck: *http-health
 
 networks:
