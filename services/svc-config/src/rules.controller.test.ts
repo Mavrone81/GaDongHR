@@ -160,7 +160,25 @@ describe('RulesController wiring', () => {
 
     const out = await controller.health()
 
-    expect(out).toMatchObject({ status: 'degraded', dependencies: { db: 'down' } })
+    // The same rejecting pool also fails kernel's `outboxDepth` query, so
+    // that degrades too — `outboxQuery: 'down'` rather than a silently
+    // healthy-looking zero (event-bus task, "a stuck outbox must be
+    // observable").
+    expect(out).toMatchObject({ status: 'degraded', dependencies: { db: 'down', outboxQuery: 'down' } })
+  })
+
+  it('GET /health reports outbox depth (event-bus health/metrics) — a fresh, undrained row is visible but not yet "stale"', async () => {
+    const query = jest.fn().mockImplementation((sql: string) => {
+      if (/^SELECT\s+count\(\*\)/i.test(sql)) return Promise.resolve({ rows: [{ pending: 1, oldest_age_seconds: 5 }] })
+      return Promise.resolve({ rows: [{ '?column?': 1 }] })
+    })
+    const pool = fakePool({ query: query as unknown as Pool['query'] })
+    const controller = new RulesController(fakeRulesService(), fakePacksService(), pool)
+
+    const out = await controller.health()
+
+    expect(out.outbox).toMatchObject({ pending: 1, stale: false })
+    expect(out.status).toBe('ok')
   })
 
   it('maps a thrown GadongError (e.g. CFG-422) to an HttpException carrying the error envelope, code, and citation', async () => {

@@ -45,12 +45,10 @@ function dateRange(dates: string[]): { from: string; to: string } {
  *
  * Every `handle*` method wraps its effect in the kernel's `idempotent()`
  * against `scheduler.processed_events` — triple delivery of the same event
- * id runs the handler exactly once (XC-EVENTS). No HTTP ingestion route
- * exists yet for these (there is no message-broker subscriber wired in this
- * environment for any service in this codebase — `services/svc-notify`'s
- * `NotifyService.handleLeaveApproved` is the precedent this file follows:
- * a plain method taking `(tx, eventId, payload)`, ready for a future
- * subscriber to call, tested directly here in the meantime).
+ * id runs the handler exactly once (XC-EVENTS). Subscribed for real via
+ * `main.ts`'s `wireEventBus` (event-bus task) — this class itself stays a
+ * plain `(tx, eventId, payload)` method set with no broker dependency of
+ * its own, the same shape every sibling consumer in this codebase uses.
  */
 export class EventsService {
   constructor(

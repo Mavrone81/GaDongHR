@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpException, Inject, Param, Post, Patch, Query, Req } from '@nestjs/common'
-import { GadongError, Public, RequirePermission, buildHealth, withTransaction } from '@gadong/kernel'
+import { GadongError, Public, RequirePermission, buildHealth, outboxDepth, withTransaction } from '@gadong/kernel'
 import type { AuthenticatedRequest, HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import type { ApprovalDecision, ApprovalStepRow } from './approvals.repository'
@@ -183,7 +183,22 @@ export class LeaveController {
     const db = await this.checkDb()
     const crypto = await this.cryptoHealth.check()
     const config = await this.configHealth.check()
-    return buildHealth('svc-leave', { db, crypto, config })
+    // "A stuck outbox must be observable" (event-bus task) — a
+    // `leave.approved`/`leave.cancelled`/`leave.balance_payout` row the
+    // relay has fallen behind on must surface here, the one place an
+    // operator already looks. A failure reading the outbox itself
+    // (distinct from `db` above, which only proves the pool can run
+    // `SELECT 1`) degrades the response rather than being swallowed into a
+    // healthy-looking zero — same fail-closed reasoning as every other
+    // dependency check on this endpoint.
+    let outbox: { pending: number; oldestAgeSeconds: number | null } | undefined
+    let outboxQuery: 'up' | 'down' = 'up'
+    try {
+      outbox = await outboxDepth(this.pool, 'leave')
+    } catch {
+      outboxQuery = 'down'
+    }
+    return buildHealth('svc-leave', { db, crypto, config, ...(outboxQuery === 'down' ? { outboxQuery } : {}) }, process.env, outbox)
   }
 
   private async checkDb(): Promise<'up' | 'down'> {

@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { randomUUID } from 'node:crypto'
 import { APP_GUARD } from '@nestjs/core'
-import { CryptoClient, PERMISSION_METADATA_KEY, PUBLIC_METADATA_KEY } from '@gadong/kernel'
+import { CryptoClient, PERMISSION_METADATA_KEY, PUBLIC_METADATA_KEY, writeOutbox } from '@gadong/kernel'
 import type { AuthenticatedRequest } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { ApprovalsRepository } from './approvals.repository'
@@ -69,6 +69,16 @@ describe('LeaveController — GET /health', () => {
     const { controller } = buildController(db)
     const out = await controller.health()
     expect(out).toMatchObject({ status: 'ok', service: 'svc-leave', dependencies: { db: 'up', crypto: 'up', config: 'up' } })
+  })
+
+  it('reports outbox depth (event-bus health/metrics) — a fresh, undrained row is visible but not yet "stale"', async () => {
+    const db = new FakeLeaveDb()
+    const { controller } = buildController(db)
+    await writeOutbox(db.connect(), 'leave', 'leave.approved', { requestId: 'r1' })
+
+    const health = await controller.health()
+    expect(health.outbox).toMatchObject({ pending: 1, stale: false })
+    expect(health.status).toBe('ok') // freshly-written, well under the staleness threshold
   })
 })
 

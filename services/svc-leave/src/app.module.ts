@@ -18,6 +18,8 @@ import { BalancesRepository } from './balances.repository'
 import { BalancesService } from './balances.service'
 import { CONFIG_HEALTH, CRYPTO_HEALTH, DB_POOL, LeaveController } from './leave.controller'
 import type { HealthCheckPort } from './leave.controller'
+import { EmployeeRefConsumer } from './employee-ref.consumer'
+import { EmployeeRefRepository } from './employee-ref.repository'
 import { EssBalancesService } from './ess-balances.service'
 import { HttpConfigClient } from './config-client'
 import type { ConfigClient } from './config-client'
@@ -177,6 +179,17 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
       useFactory: (repo: ApprovalsRepository, requestsRepo: RequestsRepository, typesRepo: LeaveTypesRepository, balances: BalancesService) =>
         new ApprovalsService(repo, requestsRepo, typesRepo, balances, () => randomUUID()),
       inject: [ApprovalsRepository, RequestsRepository, LeaveTypesRepository, BalancesService],
+    },
+    {
+      provide: EmployeeRefRepository,
+      useFactory: (pool: Queryable) => new EmployeeRefRepository(pool),
+      inject: [DB_POOL],
+    },
+    {
+      provide: EmployeeRefConsumer,
+      useFactory: (repo: EmployeeRefRepository, leaveTypes: LeaveTypesRepository, balances: BalancesService) =>
+        new EmployeeRefConsumer(repo, leaveTypes, balances),
+      inject: [EmployeeRefRepository, LeaveTypesRepository, BalancesService],
     },
   ],
 })
