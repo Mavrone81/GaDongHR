@@ -116,6 +116,19 @@ export interface DocsClient {
  * `mergeFields` (`DocumentsService.resolveHtml`) — this client sends
  * `html`, never `mergeFields`, and `entityType: 'payslip'` (the row's own
  * subject, matching `entityId` already being the payslip's id).
+ *
+ * A THIRD defect of the same kind, found once the body-shape fix above let
+ * this call actually reach `commit()`: `POST /render`'s real response body
+ * (`RenderResponseBody` — `documents.controller.ts`) is `{id, kind,
+ * entityType, entityId, lang, sha256}` — there has never been a `fileRef`
+ * field in it; the rendered PDF's storage pointer is written to
+ * `docs.document.file_ref` server-side (encrypted, `documents.service.ts`'s
+ * `prepare()`) and never round-trips back to the caller at all — the one
+ * way to later retrieve the PDF is `GET /documents/:id`, keyed on the
+ * response's `id`. This method reads `id` and returns it AS `fileRef` —
+ * the value `RunsService.writePayslip` re-encrypts into its own
+ * `payslip.pdf_ref` column — because that column's job is exactly "the key
+ * this service needs to fetch the PDF later", and `id` is that key.
  */
 export class HttpDocsClient implements DocsClient {
   constructor(
@@ -131,9 +144,9 @@ export class HttpDocsClient implements DocsClient {
     })
     if (!res.ok) throw new Error(`svc-docs returned ${res.status.toString()} rendering payslip ${input.payslipId}`)
     const body: unknown = await res.json()
-    const fileRef = typeof body === 'object' && body !== null ? (body as Record<string, unknown>)['fileRef'] : undefined
-    if (typeof fileRef !== 'string' || fileRef.length === 0) throw new Error('svc-docs returned no fileRef for a rendered payslip')
-    return { fileRef }
+    const documentId = typeof body === 'object' && body !== null ? (body as Record<string, unknown>)['id'] : undefined
+    if (typeof documentId !== 'string' || documentId.length === 0) throw new Error('svc-docs returned no document id for a rendered payslip')
+    return { fileRef: documentId }
   }
 }
 
