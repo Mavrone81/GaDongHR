@@ -35,6 +35,70 @@ jobs:
       # suites correctly and is exactly what `pnpm test` does locally.
       - run: pnpm test
 
+  # Real-stack lifecycle suite (`test/e2e/`): hire → onboard → timesheet →
+  # payroll over real HTTP against real Postgres + RabbitMQ + the services
+  # themselves, with the payslip asserted in satang. This tier exists
+  # because all 2,6xx unit tests run against fakes, and every defect that
+  # reached production this project has seen so far lived at a seam
+  # between components — a missing HTTP route, an outbox nobody drained, a
+  # migration advisory-lock race — none of which a fake can represent.
+  # The harness (`test/e2e/run.ts`) brings its stack up and always tears
+  # it down; no manual step, no dependency on any deployed environment.
+  e2e:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:e2e
+
+  # Real-broker transport proofs (`*.realbroker.test.ts`): outbox relay →
+  # AMQP → idempotent consumers, including redelivery, duplicate
+  # suppression and poison-message dead-lettering. Deliberately a separate
+  # job from `e2e`: this tier proves the transport's delivery semantics
+  # against a bare broker + database, while `e2e` proves the business
+  # lifecycle through the full service stack — a delivery-semantics
+  # failure should be readable as such, not buried inside a lifecycle
+  # failure. Setup mirrors the documented reproduce steps: the
+  # eventbus-test compose overlay publishes host ports, the checked-in
+  # example env-file provides throwaway credentials (test-only by design),
+  # and each touched service's migrations run with the same
+  # schema/create-schema flags its own `main.ts` boot runner uses.
+  realbroker:
+    needs: verify
+    runs-on: ubuntu-latest
+    env:
+      PGURL_BASE: postgresql://localhost:25432/gadonghr_eventbus_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Start postgres + rabbitmq (eventbus-test overlay)
+        working-directory: deploy
+        run: |
+          cp .env.eventbus-test.local.example .env.eventbus-test.local
+          docker compose -f docker-compose.yml -f docker-compose.eventbus-test.yml \
+            --env-file .env.eventbus-test.local up -d --wait postgres rabbitmq
+      - name: Migrate the schemas the suite touches
+        run: |
+          for svc in onboarding payroll timesheet; do
+            DATABASE_URL="postgresql://${svc}:test_pw@localhost:25432/gadonghr_eventbus_test" \
+              npx node-pg-migrate -m "services/svc-${svc}/migrations" \
+                --schema "${svc}" --create-schema --migrations-table pgmigrations up
+          done
+      - run: pnpm test:realbroker
+      - name: Tear down
+        if: always()
+        working-directory: deploy
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.eventbus-test.yml \
+            --env-file .env.eventbus-test.local down -v
+
   # Task 15: build every service image (all fifteen services/* Dockerfiles)
   # plus `web`, tag each with the commit sha and `main`, and push to GHCR.
   # Only runs on a real push to main/phase-* (the top-level `on:` already
@@ -144,8 +208,14 @@ jobs:
   # exactly the failure auto-deploy-gadonghr.sh's `refs/ci-pass/<sha>`
   # gate exists to prevent: it must never be possible for the marker to
   # exist while a tag it implies is still missing from the registry.
+  # `e2e` and `realbroker` are deploy gates on equal footing with `verify`
+  # and `build-images`: a commit whose lifecycle or delivery semantics are
+  # broken must never grow a `refs/ci-pass/<sha>` marker, for exactly the
+  # reason the unit tier alone let a dead event bus and a missing HTTP
+  # route reach production — the marker must mean "the real stack works",
+  # not "the fakes agree with each other".
   mark-ci-pass:
-    needs: [verify, build-images]
+    needs: [verify, e2e, realbroker, build-images]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
