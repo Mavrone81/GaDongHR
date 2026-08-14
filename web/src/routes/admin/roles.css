@@ -1,0 +1,22 @@
+/*
+ * Domain-specific styling for the roles console. Shared primitives and the
+ * shared page frame (`components/page.css`) cover the generic treatment;
+ * what's left here is specific to this screen: the role code column and
+ * the permission-list wrap. Every color is a `var(--token)`.
+ */
+
+.roles-code {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.roles-permissions {
+  max-width: 24rem;
+}
+
+.roles-error {
+  border-left: 3px solid var(--ink);
+  padding: var(--space-2) var(--space-3);
+  margin: var(--space-3) 0;
+}

@@ -1,0 +1,56 @@
+/*
+ * Domain-specific styling for the audit console. Shared primitives (Field,
+ * Button, Eyebrow, Table — `src/components/`) and the shared page frame
+ * (`components/page.css`) cover the generic treatment; what's left here is
+ * specific to this screen: the filter panel grid, hash text, and the
+ * chain-verification result. Every color is a `var(--token)` — nothing
+ * here hard-codes a hex, and nothing here uses `--seal`
+ * (`src/styles/noSealOutsideSeal.test.tsx` — that token is reserved for
+ * statutory citations only, never a compliance/integrity accent).
+ */
+
+.audit-filters {
+  display: grid;
+  gap: 0;
+}
+
+.audit-entry__detail {
+  padding: var(--space-2) 0;
+}
+
+.audit-hash {
+  word-break: break-all;
+  font-size: 0.85rem;
+}
+
+.audit-pagination {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.audit-verify {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--rule);
+}
+
+.audit-verify__result {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--ink);
+}
+
+.audit-verify__result--valid {
+  border-left-color: var(--carapace);
+}
+
+.audit-verify__issues {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+}
+
+.audit-verify__issues li {
+  margin-bottom: var(--space-2);
+}

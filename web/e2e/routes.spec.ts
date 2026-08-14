@@ -2,16 +2,21 @@ import { expect, test } from '@playwright/test'
 import { signInAsDevUser } from './auth'
 import { assertAppRendered, assertNoEmptyOrRawKeyText } from './assertions'
 import { clientSideNavigate } from './nav'
-import { mockI18nReachable, realBundle } from './mockApis'
+import { mockI18nReachable, realBundle, FIXTURE_AUDIT_ENTRY, FIXTURE_ROLES, FIXTURE_NOTIFICATION } from './mockApis'
 import { NAV_DESTINATIONS } from '../src/routes/navigation'
 
 /**
  * Item 2 of the task brief: every route in the router table
  * (`web/src/App.tsx`'s `ShellRoutes`) is visited and asserted to render
- * its EXPECTED screen — a placeholder rendering its placeholder is a PASS,
- * not a failure, so the day someone builds the real screen behind it, this
+ * its EXPECTED screen. `/admin/statutory-rules` shipped first; the four
+ * routes below (`/compliance/audit`, `/documents`, `/admin/roles`,
+ * `/notifications`) used to render the deliberate `ComingSoon` placeholder
+ * this test suite asserted on — "a placeholder rendering its placeholder
+ * is a PASS ... so the day someone builds the real screen behind it, this
  * test starts telling the truth about that instead of silently continuing
- * to pass either way.
+ * to pass either way." That day is this one: each now asserts its real
+ * screen renders real, fixture-backed data, the same way the
+ * `/admin/statutory-rules` test below already did.
  *
  * `NAV_DESTINATIONS` (`web/src/routes/navigation.ts`) is imported, not
  * hand-copied — the exact same array `Shell.tsx`'s nav renders from — so
@@ -22,7 +27,6 @@ import { NAV_DESTINATIONS } from '../src/routes/navigation'
  * in React state and a real browser navigation would drop it — see that
  * file's header.
  */
-const PLACEHOLDER_ROUTES = NAV_DESTINATIONS.filter((d) => d.path !== '/admin/statutory-rules')
 
 test.describe('every route renders its expected screen (authenticated)', () => {
   test('the index route ("/") redirects to the default nav destination on sign-in', async ({ page }) => {
@@ -50,16 +54,59 @@ test.describe('every route renders its expected screen (authenticated)', () => {
     await assertNoEmptyOrRawKeyText(page)
   })
 
-  for (const destination of PLACEHOLDER_ROUTES) {
-    test(`${destination.path} renders the ComingSoon placeholder (deliberate — not yet built)`, async ({ page }) => {
-      await signInAsDevUser(page)
-      await clientSideNavigate(page, destination.path)
+  test('/compliance/audit renders the real audit trail — not a placeholder', async ({ page }, testInfo) => {
+    await signInAsDevUser(page)
+    await clientSideNavigate(page, '/compliance/audit')
 
-      await assertAppRendered(page)
-      await expect(page.locator('.coming-soon__title')).toHaveText(realBundle('th')['shell.comingSoon.title'] ?? '')
-      await assertNoEmptyOrRawKeyText(page)
-    })
-  }
+    await assertAppRendered(page)
+    await expect(page.locator('.page__title')).toHaveText(realBundle('th')['audit.title'] ?? '')
+    // `FIXTURE_AUDIT_ENTRY` (`e2e/mockApis.ts`) actually renders — proves
+    // this screen's `GET /entries` data path end-to-end.
+    await expect(page.getByRole('cell', { name: FIXTURE_AUDIT_ENTRY.action })).toBeVisible()
+    await assertNoEmptyOrRawKeyText(page)
+    await page.screenshot({ path: testInfo.outputPath('audit-page.png'), fullPage: true })
+  })
+
+  test('/documents renders the real document lookup console — not a placeholder', async ({ page }, testInfo) => {
+    await signInAsDevUser(page)
+    await clientSideNavigate(page, '/documents')
+
+    await assertAppRendered(page)
+    await expect(page.locator('.page__title')).toHaveText(realBundle('th')['documents.title'] ?? '')
+    await expect(page.locator('#documents-lookup-id')).toBeVisible()
+    await assertNoEmptyOrRawKeyText(page)
+    await page.screenshot({ path: testInfo.outputPath('documents-page.png'), fullPage: true })
+  })
+
+  test('/admin/roles renders the real roles console — not a placeholder', async ({ page }, testInfo) => {
+    await signInAsDevUser(page)
+    await clientSideNavigate(page, '/admin/roles')
+
+    await assertAppRendered(page)
+    await expect(page.locator('.page__title')).toHaveText(realBundle('th')['admin.roles.title'] ?? '')
+    // `FIXTURE_ROLES` (`e2e/mockApis.ts`) actually renders — proves this
+    // screen's `GET /roles` data path end-to-end.
+    await expect(page.getByRole('cell', { name: FIXTURE_ROLES[0]?.code })).toBeVisible()
+    await assertNoEmptyOrRawKeyText(page)
+    await page.screenshot({ path: testInfo.outputPath('roles-page.png'), fullPage: true })
+  })
+
+  test('/notifications renders the real notification inbox — not a placeholder', async ({ page }, testInfo) => {
+    // `FIXTURE_NOTIFICATION` is shared, mutable module state (`mockApis.ts`'s
+    // `mockSvcNotify` flips `readAt` in place on a real Mark-read call) —
+    // reset it so this test's outcome (and its screenshot) never depends on
+    // whether a Mark-read test from `nav-and-buttons.spec.ts` happened to
+    // run earlier in the same worker.
+    FIXTURE_NOTIFICATION.readAt = null
+    await signInAsDevUser(page)
+    await clientSideNavigate(page, '/notifications')
+
+    await assertAppRendered(page)
+    await expect(page.locator('.page__title')).toHaveText(realBundle('th')['notifications.title'] ?? '')
+    await expect(page.getByText('Your leave request was approved')).toBeVisible()
+    await assertNoEmptyOrRawKeyText(page)
+    await page.screenshot({ path: testInfo.outputPath('notifications-page.png'), fullPage: true })
+  })
 
   test('an unknown path under the shell hits the catch-all route and renders ComingSoon', async ({ page }) => {
     await signInAsDevUser(page)

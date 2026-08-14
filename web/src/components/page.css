@@ -1,0 +1,39 @@
+/*
+ * The generic page frame every screen in this app shares (first written for
+ * `admin/statutoryRules.css`; extracted here so the four newer screens
+ * — audit, documents, roles, notifications — don't each redeclare it).
+ * DESIGN.md's "Layout": no cards, no shadows, no rounded containers — this
+ * is a document, not a dashboard.
+ */
+
+.page {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-4);
+}
+
+.page__header {
+  margin-bottom: var(--space-6);
+}
+
+.page__title {
+  margin: var(--space-1) 0 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.empty-state {
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+}
+
+.panel {
+  margin: var(--space-4) 0 var(--space-6);
+  padding: var(--space-4);
+  border: 1px solid var(--rule);
+}
+
+.panel__actions {
+  margin-top: var(--space-4);
+}

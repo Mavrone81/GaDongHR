@@ -1,0 +1,60 @@
+/*
+ * Domain-specific styling for the notifications inbox. Shared primitives
+ * and the shared page frame (`components/page.css`) cover the generic
+ * treatment; what's left here is specific to this screen: the all/unread
+ * toggle, the notification row, and the unread badge. Every color is a
+ * `var(--token)` — nothing here uses `--seal` (unread is an inbox state,
+ * not a legal citation).
+ */
+
+.notifications-filter {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.notifications-filter .btn--quiet[aria-pressed='true'] {
+  text-decoration-thickness: 2px;
+  color: var(--ink);
+}
+
+.notifications-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.notification-row {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.notification-row--unread .notification-row__subject {
+  font-weight: 700;
+}
+
+.notification-row__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.notification-row__badge {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--carapace);
+}
+
+.notification-row__body {
+  margin: var(--space-1) 0;
+  color: var(--muted);
+}
+
+.notification-row__footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}

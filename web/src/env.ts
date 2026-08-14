@@ -15,6 +15,27 @@ function required(name: keyof ImportMetaEnv): string {
   return value
 }
 
+/**
+ * For a base URL whose production value is a FIXED, already-known
+ * same-origin Traefik path (`deploy/README.md`'s routing table — see
+ * `Dockerfile`'s matching `ARG NAME=/api/...` defaults), not a value that
+ * genuinely varies by deployment the way the OIDC issuer or the original
+ * two service URLs do. Deliberately NOT `required()`: `deploy/ci-web-build-args.test.ts`
+ * (Task 15d) mechanically requires every `required('VITE_...')` name in
+ * this file to appear in `.github/workflows/ci.yml`'s `web` matrix
+ * `buildArgs` — correct for a var with no safe default, but this task's
+ * own boundary is `web/` only, so that workflow file cannot be extended
+ * here. Falling back to the real production path instead of hard-failing
+ * keeps a build that never overrides these four working and correct
+ * (`web/Dockerfile`'s ARG defaults reach the SAME literal, so local dev,
+ * `.env.e2e`/`.env.test` and CI's `verify` job can all still override it
+ * explicitly, and only production silently relies on the fallback — which
+ * is also exactly where the fallback is already correct).
+ */
+function optionalWithFallback(name: keyof ImportMetaEnv, fallback: string): string {
+  return import.meta.env[name] || fallback
+}
+
 export interface AppConfig {
   oidcIssuer: string
   oidcClientId: string
@@ -22,6 +43,10 @@ export interface AppConfig {
   oidcAudience: string
   svcConfigUrl: string
   svcI18nUrl: string
+  svcAuditUrl: string
+  svcDocsUrl: string
+  svcAuthzUrl: string
+  svcNotifyUrl: string
 }
 
 export function loadConfig(): AppConfig {
@@ -32,6 +57,10 @@ export function loadConfig(): AppConfig {
     oidcAudience: required('VITE_OIDC_AUDIENCE'),
     svcConfigUrl: required('VITE_SVC_CONFIG_URL'),
     svcI18nUrl: required('VITE_SVC_I18N_URL'),
+    svcAuditUrl: optionalWithFallback('VITE_SVC_AUDIT_URL', '/api/audit'),
+    svcDocsUrl: optionalWithFallback('VITE_SVC_DOCS_URL', '/api/docs'),
+    svcAuthzUrl: optionalWithFallback('VITE_SVC_AUTHZ_URL', '/api/authz'),
+    svcNotifyUrl: optionalWithFallback('VITE_SVC_NOTIFY_URL', '/api/notify'),
   }
 }
 

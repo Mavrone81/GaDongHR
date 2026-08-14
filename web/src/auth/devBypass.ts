@@ -57,9 +57,11 @@ export const DEV_PRINCIPAL: DevPrincipal = {
     'config.pack.import',
     'audit.read',
     'authz.role.read',
+    'authz.role.grant',
     'notify.notification.read',
     'notify.notification.update',
     'document.read',
+    'document.generate',
   ],
 }
 

@@ -39,7 +39,17 @@ const RAW_I18N_KEY_PATTERN = /\b[a-z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*){1,}\
  *
  *  1. The whole page's visible text is scanned for anything shaped like a
  *     raw i18n key (catches a missing translation surfacing as
- *     `auth.login.submit` instead of real text).
+ *     `auth.login.submit` instead of real text) — EXCEPT text inside an
+ *     element marked `.raw-code`. That marker exists for exactly one
+ *     reason: the audit and roles consoles (`AuditPage.tsx`'s action/entity
+ *     cells, `RolesPage.tsx`'s permission list) legitimately display real
+ *     system identifiers verbatim — `employee.update`, `leave.admin` — and
+ *     those are indistinguishable in SHAPE from an unresolved i18n key
+ *     (`RAW_I18N_KEY_PATTERN` cannot tell "a real dotted code the screen is
+ *     supposed to show" from "a translation that failed to resolve"). The
+ *     marker is an explicit, narrow allowlist a screen opts into per
+ *     value, not a blanket exemption — everything else on every screen is
+ *     still scanned exactly as before.
  *  2. Every interactive control (button, link, form field) is walked in
  *     the page itself and must resolve to a non-empty accessible name —
  *     `aria-label`, an associated `<label for>` (every `Field` in this app
@@ -50,7 +60,11 @@ const RAW_I18N_KEY_PATTERN = /\b[a-z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*){1,}\
  *     incidents went unnoticed.
  */
 export async function assertNoEmptyOrRawKeyText(page: Page): Promise<void> {
-  const bodyText = await page.locator('body').innerText()
+  const bodyText = await page.evaluate(() => {
+    const raw = document.body.innerText
+    const carveOuts = Array.from(document.querySelectorAll<HTMLElement>('.raw-code')).map((el) => el.innerText)
+    return carveOuts.reduce((text, carveOut) => (carveOut ? text.split(carveOut).join('') : text), raw)
+  })
   const match = RAW_I18N_KEY_PATTERN.exec(bodyText)
   expect(match, `page shows what looks like a raw, unresolved i18n key: "${String(match?.[0])}"`).toBeNull()
 

@@ -1,7 +1,7 @@
 import { useI18n } from '../i18n/I18nContext'
 import './comingSoon.css'
 
-/** Placeholder for the four `web/ui-coverage.json` screens this task does not build (task brief: "the other four come next"). Reached only via a nav link that role-driven nav already gated (`Shell.tsx`'s `NavLink`) or a direct URL a permitted user typed — `RequirePermission` (`routes/RequirePermission.tsx`) still guards it either way. */
+/** The catch-all screen for a path with no route at all (`App.tsx`'s `path="*"`) — every one of `web/ui-coverage.json`'s five declared screens now has a real screen behind it (see `routes/navigation.ts`'s header), so this component's only remaining job is "an unknown URL under the shell renders something readable, never a blank screen," not standing in for unbuilt scope. */
 export function ComingSoon(): React.JSX.Element {
   const { t } = useI18n()
   return (

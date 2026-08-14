@@ -256,6 +256,35 @@
         "withCeiling": "§ {citation} · 上限 {ceiling}",
         "plain": "§ {citation}"
       }
+    },
+    "roles": {
+      "title": "角色",
+      "table": {
+        "code": "角色",
+        "name": "名称",
+        "permissions": "权限",
+        "system": "系统角色"
+      },
+      "emptyState": "未找到角色。",
+      "grant": {
+        "cta": "授予角色",
+        "title": "授予角色",
+        "userId": "用户编号",
+        "role": "角色",
+        "orgScopeUnitId": "组织范围单位编号（可选）",
+        "submit": "授予",
+        "confirm": "确认将角色“{role}”授予用户 {userId}？",
+        "success": "已将角色“{role}”授予 {userId}。"
+      },
+      "revoke": {
+        "cta": "撤销角色",
+        "title": "撤销角色",
+        "userId": "用户编号",
+        "role": "角色",
+        "submit": "撤销",
+        "confirm": "确认从用户 {userId} 撤销角色“{role}”？此操作将立即移除其相应权限。",
+        "success": "已从 {userId} 撤销角色“{role}”。"
+      }
     }
   },
   "config": {
@@ -273,6 +302,111 @@
     "error": {
       "denied": "您没有执行此操作的权限。",
       "sod_violation": "根据职责分离原则，此操作需要由其他审批人处理。"
+    }
+  },
+  "audit": {
+    "title": "审计记录",
+    "filters": {
+      "entity": "实体",
+      "entityId": "实体编号",
+      "from": "起始日期",
+      "to": "结束日期",
+      "apply": "应用筛选条件",
+      "quickFilter": "筛选本页（操作人或操作）"
+    },
+    "table": {
+      "occurredAt": "发生时间",
+      "actor": "操作人",
+      "action": "操作",
+      "entity": "实体",
+      "purpose": "目的",
+      "detail": "详情",
+      "actorLine": "{actorId} · {actorRole}",
+      "entityLine": "{entity} · {entityId}"
+    },
+    "detailPanel": {
+      "prevEntryHash": "上一条记录哈希",
+      "entryHash": "本条记录哈希",
+      "beforeHash": "变更前哈希",
+      "afterHash": "变更后哈希",
+      "none": "无记录"
+    },
+    "pagination": {
+      "label": "第 {page} 页",
+      "prev": "上一页",
+      "next": "下一页"
+    },
+    "emptyState": "没有符合筛选条件的审计记录。",
+    "verify": {
+      "cta": "验证哈希链",
+      "verifying": "正在验证…",
+      "valid": "链条完整 — 已检查 {count} 条记录，未发现问题。",
+      "invalid": "在 {entryCount} 条记录中发现 {issueCount} 个问题。",
+      "issueKind": {
+        "content_mismatch": "内容不匹配",
+        "chain_break": "链条断裂"
+      },
+      "issueEntry": "{kind} — {entryId}"
+    }
+  },
+  "documents": {
+    "title": "文档",
+    "lookup": {
+      "title": "查找文档",
+      "id": "文档编号",
+      "purpose": "本次读取的目的",
+      "purposeHint": "将随本次解密记录，用于 PDPA 访问留痕。",
+      "submit": "获取"
+    },
+    "meta": {
+      "kind": "类型",
+      "entityType": "实体类型",
+      "entityId": "实体编号",
+      "lang": "语言",
+      "sha256": "SHA-256",
+      "createdAt": "创建时间"
+    },
+    "download": {
+      "cta": "下载 PDF"
+    },
+    "generate": {
+      "cta": "生成文档",
+      "title": "生成文档",
+      "kind": "类型",
+      "lang": "语言",
+      "entityType": "实体类型",
+      "entityId": "实体编号",
+      "html": "文档 HTML 内容",
+      "submit": "生成",
+      "success": "文档已生成 — 编号 {id}。",
+      "lookupNow": "查找该文档"
+    }
+  },
+  "docs": {
+    "error": {
+      "document_not_found": "未找到该文档。",
+      "template_not_found": "未找到该类型和语言对应的模板。",
+      "missing_merge_fields": "模板缺少必填字段。",
+      "render_input_required": "必须提供模板字段或 HTML 内容之一。",
+      "fonts_unavailable": "该文档包含现有字体无法渲染的字符。"
+    }
+  },
+  "notifications": {
+    "title": "通知",
+    "filter": {
+      "all": "全部",
+      "unreadOnly": "仅未读"
+    },
+    "emptyState": "暂无通知。",
+    "unreadBadge": "未读",
+    "markRead": {
+      "cta": "标记为已读"
+    }
+  },
+  "notify": {
+    "error": {
+      "notification_not_found": "未找到该通知。",
+      "unauthenticated": "您必须登录后才能执行此操作。"
     }
   }
 }

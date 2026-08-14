@@ -82,6 +82,26 @@ ARG VITE_OIDC_AUDIENCE
 ARG VITE_OIDC_REDIRECT_URI
 ARG VITE_SVC_CONFIG_URL
 ARG VITE_SVC_I18N_URL
+# The four screens built alongside `admin/statutory-rules` (audit, documents,
+# roles, notifications — `src/env.ts`'s `svcAuditUrl`/`svcDocsUrl`/
+# `svcAuthzUrl`/`svcNotifyUrl`, all `required()`). These deliberately DO
+# carry a default (`ARG NAME=value`, unlike the six above, which are always
+# supplied by `.github/workflows/ci.yml` and would otherwise be silently
+# empty) because this task's boundary is `web/` only — that workflow file is
+# not — and `required()` throwing on a missing var is not scoped to the one
+# screen that needs it: `loadConfig()` builds the whole `AppConfig` object in
+# one call, so a single missing field fails EVERY screen at `AuthProvider`'s
+# mount, not just these four. The default is exactly the value the workflow
+# would pass if it were updated — the same same-origin relative path
+# deploy/README.md's Traefik routing table already gives `svc-config`/
+# `svc-i18n` above, just for the four newer services. If the `web` matrix
+# leg is later extended with an explicit `--build-arg VITE_SVC_AUDIT_URL=...`
+# etc., that takes priority the same way it does for the six ARGs above;
+# until then, this default is what actually ships.
+ARG VITE_SVC_AUDIT_URL=/api/audit
+ARG VITE_SVC_DOCS_URL=/api/docs
+ARG VITE_SVC_AUTHZ_URL=/api/authz
+ARG VITE_SVC_NOTIFY_URL=/api/notify
 RUN pnpm --filter @gadong/web build
 
 # ---------- runtime: static files behind unprivileged nginx ----------

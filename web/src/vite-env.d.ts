@@ -19,6 +19,20 @@ interface ImportMetaEnv {
   readonly VITE_SVC_CONFIG_URL: string
   readonly VITE_SVC_I18N_URL: string
   /**
+   * svc-audit's `/entries`, `/verify` — the Audit console
+   * (`/compliance/audit`). Optional (`env.ts`'s `optionalWithFallback`):
+   * unset falls back to the real production Traefik path `/api/audit` —
+   * see that function's doc for why this one, unlike the two above, has a
+   * safe default instead of failing loudly when absent.
+   */
+  readonly VITE_SVC_AUDIT_URL?: string
+  /** svc-docs' `/documents/:id`, `/render` — the Documents console (`/documents`). Optional, same fallback pattern as `VITE_SVC_AUDIT_URL` (`/api/docs`). */
+  readonly VITE_SVC_DOCS_URL?: string
+  /** svc-authz's `/roles`, `/users/:id/roles*` — the Roles console (`/admin/roles`). Optional, same fallback pattern as `VITE_SVC_AUDIT_URL` (`/api/authz`). */
+  readonly VITE_SVC_AUTHZ_URL?: string
+  /** svc-notify's `/notifications*` — the Notifications inbox (`/notifications`). Optional, same fallback pattern as `VITE_SVC_AUDIT_URL` (`/api/notify`). */
+  readonly VITE_SVC_NOTIFY_URL?: string
+  /**
    * Opt-in dev-only login bypass (skips the OIDC redirect, signs in as a
    * fixed local principal) so the shell is usable with no Keycloak running.
    * Read ONLY behind `import.meta.env.DEV` — see `src/auth/devBypass.ts`'s

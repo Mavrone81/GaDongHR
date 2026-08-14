@@ -1,0 +1,30 @@
+/*
+ * Domain-specific styling for the documents console. Shared primitives and
+ * the shared page frame (`components/page.css`) cover the generic
+ * treatment; what's left here is specific to this screen: the purpose
+ * hint, the retrieved-document metadata block, and the sha256 text.
+ * Every color is a `var(--token)` — nothing here hard-codes a hex.
+ */
+
+.documents-hint {
+  margin: calc(var(--space-2) * -1) 0 var(--space-3);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.documents-meta {
+  margin-top: var(--space-4);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--rule);
+}
+
+.documents-hash {
+  word-break: break-all;
+  font-size: 0.85rem;
+}
+
+.documents-error {
+  border-left: 3px solid var(--ink);
+  padding: var(--space-2) var(--space-3);
+  margin: var(--space-3) 0;
+}

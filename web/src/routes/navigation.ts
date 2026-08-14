@@ -1,11 +1,13 @@
 /**
- * The five screens `web/ui-coverage.json` declares. Only `/admin/statutory-rules`
- * has a real screen behind it today (task brief: "You are building the
- * shell plus `/admin/statutory-rules` only; the other four come next.").
- * The other four are wired to `ComingSoon` so role-driven nav can be
- * demonstrated across the full set without inventing four screens' worth
- * of scope — and so a permission grant for one of them is not silently
- * unreachable once its real screen lands (no manifest entry is removed).
+ * The five screens `web/ui-coverage.json` declares. `/admin/statutory-rules`
+ * shipped first; `/compliance/audit`, `/documents`, `/admin/roles` and
+ * `/notifications` (the four `App.tsx` used to wire to `ComingSoon` —
+ * "the other four come next") now each have a real screen behind them too
+ * — see `routes/compliance/AuditPage.tsx`, `routes/documents/DocumentsPage.tsx`,
+ * `routes/admin/RolesPage.tsx` and `routes/notifications/NotificationsPage.tsx`
+ * for what each one's backing API actually supports, and where it falls
+ * short of the destination's name. `ComingSoon` itself is now reachable
+ * only via the catch-all route (`App.tsx`'s `path="*"`).
  */
 export interface NavDestination {
   path: string

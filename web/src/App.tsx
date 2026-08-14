@@ -8,6 +8,10 @@ import { CallbackPage } from './routes/CallbackPage'
 import { ComingSoon } from './routes/ComingSoon'
 import { RequirePermission } from './routes/RequirePermission'
 import { StatutoryRulesPage } from './routes/admin/StatutoryRulesPage'
+import { AuditPage } from './routes/compliance/AuditPage'
+import { DocumentsPage } from './routes/documents/DocumentsPage'
+import { RolesPage } from './routes/admin/RolesPage'
+import { NotificationsPage } from './routes/notifications/NotificationsPage'
 import { DEFAULT_NAV_PATH } from './routes/navigation'
 
 /**
@@ -54,7 +58,7 @@ function ShellRoutes(): React.JSX.Element {
             path="compliance/audit"
             element={
               <RequirePermission permission="audit.read">
-                <ComingSoon />
+                <AuditPage />
               </RequirePermission>
             }
           />
@@ -62,7 +66,7 @@ function ShellRoutes(): React.JSX.Element {
             path="documents"
             element={
               <RequirePermission permission="document.read">
-                <ComingSoon />
+                <DocumentsPage />
               </RequirePermission>
             }
           />
@@ -70,7 +74,7 @@ function ShellRoutes(): React.JSX.Element {
             path="admin/roles"
             element={
               <RequirePermission permission="authz.role.read">
-                <ComingSoon />
+                <RolesPage />
               </RequirePermission>
             }
           />
@@ -78,7 +82,7 @@ function ShellRoutes(): React.JSX.Element {
             path="notifications"
             element={
               <RequirePermission permission="notify.notification.read">
-                <ComingSoon />
+                <NotificationsPage />
               </RequirePermission>
             }
           />

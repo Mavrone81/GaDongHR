@@ -256,6 +256,35 @@
         "withCeiling": "§ {citation} · ceiling {ceiling}",
         "plain": "§ {citation}"
       }
+    },
+    "roles": {
+      "title": "Roles",
+      "table": {
+        "code": "Role",
+        "name": "Name",
+        "permissions": "Permissions",
+        "system": "System role"
+      },
+      "emptyState": "No roles found.",
+      "grant": {
+        "cta": "Grant a role",
+        "title": "Grant a role",
+        "userId": "User ID",
+        "role": "Role",
+        "orgScopeUnitId": "Org scope unit ID (optional)",
+        "submit": "Grant",
+        "confirm": "Grant \"{role}\" to user {userId}?",
+        "success": "Granted \"{role}\" to {userId}."
+      },
+      "revoke": {
+        "cta": "Revoke a role",
+        "title": "Revoke a role",
+        "userId": "User ID",
+        "role": "Role",
+        "submit": "Revoke",
+        "confirm": "Revoke \"{role}\" from user {userId}? This removes their access to it immediately.",
+        "success": "Revoked \"{role}\" from {userId}."
+      }
     }
   },
   "config": {
@@ -273,6 +302,111 @@
     "error": {
       "denied": "You do not have permission to perform this action.",
       "sod_violation": "This action requires a different approver due to separation of duties."
+    }
+  },
+  "audit": {
+    "title": "Audit trail",
+    "filters": {
+      "entity": "Entity",
+      "entityId": "Entity ID",
+      "from": "From",
+      "to": "To",
+      "apply": "Apply filters",
+      "quickFilter": "Filter this page (actor or action)"
+    },
+    "table": {
+      "occurredAt": "Occurred at",
+      "actor": "Actor",
+      "action": "Action",
+      "entity": "Entity",
+      "purpose": "Purpose",
+      "detail": "Detail",
+      "actorLine": "{actorId} · {actorRole}",
+      "entityLine": "{entity} · {entityId}"
+    },
+    "detailPanel": {
+      "prevEntryHash": "Previous entry hash",
+      "entryHash": "Entry hash",
+      "beforeHash": "Before hash",
+      "afterHash": "After hash",
+      "none": "None recorded"
+    },
+    "pagination": {
+      "label": "Page {page}",
+      "prev": "Previous page",
+      "next": "Next page"
+    },
+    "emptyState": "No audit entries match these filters.",
+    "verify": {
+      "cta": "Verify chain",
+      "verifying": "Verifying…",
+      "valid": "Chain intact — {count} entries checked, no issues found.",
+      "invalid": "{issueCount} issue(s) found across {entryCount} entries.",
+      "issueKind": {
+        "content_mismatch": "Content mismatch",
+        "chain_break": "Chain break"
+      },
+      "issueEntry": "{kind} — {entryId}"
+    }
+  },
+  "documents": {
+    "title": "Documents",
+    "lookup": {
+      "title": "Look up a document",
+      "id": "Document ID",
+      "purpose": "Purpose of this read",
+      "purposeHint": "Recorded against this document's decrypt for the PDPA access trail.",
+      "submit": "Retrieve"
+    },
+    "meta": {
+      "kind": "Kind",
+      "entityType": "Entity type",
+      "entityId": "Entity ID",
+      "lang": "Language",
+      "sha256": "SHA-256",
+      "createdAt": "Created at"
+    },
+    "download": {
+      "cta": "Download PDF"
+    },
+    "generate": {
+      "cta": "Generate a document",
+      "title": "Generate a document",
+      "kind": "Kind",
+      "lang": "Language",
+      "entityType": "Entity type",
+      "entityId": "Entity ID",
+      "html": "Document HTML",
+      "submit": "Generate",
+      "success": "Document generated — id {id}.",
+      "lookupNow": "Look up this document"
+    }
+  },
+  "docs": {
+    "error": {
+      "document_not_found": "Document not found.",
+      "template_not_found": "No template exists for this kind and language.",
+      "missing_merge_fields": "The template is missing required fields.",
+      "render_input_required": "Either template fields or HTML content is required.",
+      "fonts_unavailable": "This document contains characters the available fonts cannot render."
+    }
+  },
+  "notifications": {
+    "title": "Notifications",
+    "filter": {
+      "all": "All",
+      "unreadOnly": "Unread only"
+    },
+    "emptyState": "No notifications.",
+    "unreadBadge": "Unread",
+    "markRead": {
+      "cta": "Mark read"
+    }
+  },
+  "notify": {
+    "error": {
+      "notification_not_found": "Notification not found.",
+      "unauthenticated": "You must be signed in to do this."
     }
   }
 }

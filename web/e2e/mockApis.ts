@@ -177,3 +177,229 @@ export async function mockSvcConfig(page: Page): Promise<void> {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FIXTURE_RULE) })
   })
 }
+
+/**
+ * Fixed base URLs `web/.env.e2e` gives the four newer services'
+ * `VITE_SVC_*_URL` — same "point at a port nothing is listening on, so a
+ * `page.route()` interception is the only thing that can ever answer"
+ * convention `.env.e2e`'s own header describes for `VITE_SVC_CONFIG_URL`/
+ * `VITE_SVC_I18N_URL`.
+ *
+ * The mocks below match against these ORIGINS explicitly (a `URL`
+ * predicate, not a bare `'**\/documents/**'`-style glob) — deliberately,
+ * after a real regression: `web`'s own route folders are named
+ * `routes/documents/`, `routes/notifications/`, etc. (the same words these
+ * APIs use), so `vite dev`'s SAME-ORIGIN module requests for
+ * `src/routes/documents/DocumentsPage.tsx` also contain the literal
+ * substring `/documents/` — a loose `'**\/documents/**'` glob (`**`
+ * crosses `/`) matched that request too, answered it with `{"...":...}`
+ * JSON instead of JavaScript, and broke the ENTIRE module graph (`App.tsx`
+ * imports `DocumentsPage` eagerly), which is why every screen — not just
+ * Documents — failed to render at all. Anchoring on `url.origin` makes
+ * that class of collision structurally impossible: a same-origin dev-server
+ * asset request can never match an intercept scoped to a different fake
+ * origin.
+ */
+const E2E_SVC_AUDIT_ORIGIN = 'http://localhost:4912'
+const E2E_SVC_DOCS_ORIGIN = 'http://localhost:4913'
+const E2E_SVC_AUTHZ_ORIGIN = 'http://localhost:4914'
+const E2E_SVC_NOTIFY_ORIGIN = 'http://localhost:4915'
+
+/** One hash-chained `audit.entry` row, shaped like `services/svc-audit/src/entries.repository.ts`'s `StoredEntry` — real chain fields (not fabricated), so `AuditPage.tsx`'s detail panel has real hashes to display. */
+export const FIXTURE_AUDIT_ENTRY = {
+  id: '1',
+  occurredAt: '2026-01-15T09:30:00.000Z',
+  actorId: 'e2e-hr-officer',
+  actorRole: 'hr-officer',
+  action: 'employee.update',
+  entity: 'employee',
+  entityId: 'emp-e2e-1',
+  purpose: 'onboarding review',
+  beforeHash: 'e2e-before-hash',
+  afterHash: 'e2e-after-hash',
+  prevEntryHash: '0'.repeat(64),
+  entryHash: 'e2e-entry-hash-1',
+}
+
+/**
+ * Intercepts svc-audit's `GET /entries` and `GET /verify`
+ * (`services/svc-audit/src/entries.controller.ts`) — no live svc-audit
+ * process, same reasoning as `mockSvcConfig`. `/verify` reports the fixture
+ * chain as intact; the "chain broken" shape is exercised at the unit level
+ * (`AuditPage.test.tsx`), not here, since forging a genuinely-broken
+ * `VerifyResult` from this fixture would just be typing the shape by hand
+ * either way.
+ */
+export async function mockSvcAudit(page: Page): Promise<void> {
+  await page.route(
+    (url) => url.origin === E2E_SVC_AUDIT_ORIGIN && url.pathname === '/entries',
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ entries: [FIXTURE_AUDIT_ENTRY], page: 1 }),
+      })
+    },
+  )
+
+  await page.route(
+    (url) => url.origin === E2E_SVC_AUDIT_ORIGIN && url.pathname === '/verify',
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ valid: true, entryCount: 1, issues: [] }),
+      })
+    },
+  )
+}
+
+/** One `docs.document` row, shaped like `services/svc-docs/src/documents.controller.ts`'s `DocumentResponseBody` — `contentBase64` is a tiny real base64 payload (not the string `"base64"`), so `DocumentsPage.tsx`'s `base64ToBlob` has real bytes to decode. */
+export const FIXTURE_DOCUMENT_ID = 'e2e-doc-1'
+export const FIXTURE_DOCUMENT = {
+  id: FIXTURE_DOCUMENT_ID,
+  kind: 'contract',
+  entityType: 'employee',
+  entityId: 'emp-e2e-1',
+  lang: 'en',
+  sha256: 'e2e0000000000000000000000000000000000000000000000000000000000',
+  createdAt: '2026-01-10T00:00:00.000Z',
+  contentBase64: 'JVBERi1mYWtl', // "%PDF-fake", base64
+}
+
+/**
+ * Intercepts svc-docs' `GET /documents/:id` and `POST /render`
+ * (`services/svc-docs/src/documents.controller.ts`) — no live svc-docs
+ * process, same reasoning as `mockSvcConfig`. `/render` always answers with
+ * `FIXTURE_DOCUMENT_ID`, so the generate-then-look-up flow
+ * (`DocumentsPage.tsx`'s `GeneratePanel`/`onGenerated`) resolves to a
+ * document `/documents/:id` also serves.
+ */
+export async function mockSvcDocs(page: Page): Promise<void> {
+  await page.route(
+    (url) => url.origin === E2E_SVC_DOCS_ORIGIN && url.pathname === '/render',
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: FIXTURE_DOCUMENT_ID,
+          kind: 'contract',
+          entityType: 'employee',
+          entityId: 'emp-e2e-1',
+          lang: 'en',
+          sha256: FIXTURE_DOCUMENT.sha256,
+        }),
+      })
+    },
+  )
+
+  await page.route(
+    (url) => url.origin === E2E_SVC_DOCS_ORIGIN && url.pathname.startsWith('/documents/'),
+    async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FIXTURE_DOCUMENT) })
+    },
+  )
+}
+
+/** Role templates, shaped like `services/svc-authz/src/authz.controller.ts`'s `RoleWithPermissions` — codes/permissions drawn from the real catalog (`services/svc-authz/src/seed/roles.ts`), not invented ones. */
+export const FIXTURE_ROLES = [
+  {
+    id: 'role-hr-officer',
+    code: 'hr-officer',
+    nameI18n: { en: 'HR Officer', th: 'เจ้าหน้าที่ทรัพยากรบุคคล' },
+    isSystem: true,
+    permissions: ['employee.read', 'employee.update', 'leave.admin'],
+  },
+  {
+    id: 'role-line-manager',
+    code: 'line-manager',
+    nameI18n: { en: 'Line Manager', th: 'ผู้จัดการสายงาน' },
+    isSystem: true,
+    permissions: ['roster.read', 'roster.write', 'leave.approve'],
+  },
+]
+
+/**
+ * Intercepts svc-authz's `GET /roles`, `POST /users/:id/roles` and
+ * `DELETE /users/:id/roles/:roleId` (`services/svc-authz/src/authz.controller.ts`)
+ * — no live svc-authz process, same reasoning as `mockSvcConfig`. This is
+ * what makes `/admin/roles`'s Grant/Revoke panels exercisable end to end.
+ */
+export async function mockSvcAuthz(page: Page): Promise<void> {
+  await page.route(
+    (url) => url.origin === E2E_SVC_AUTHZ_ORIGIN && url.pathname === '/roles',
+    async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ roles: FIXTURE_ROLES }) })
+    },
+  )
+
+  await page.route(
+    (url) => url.origin === E2E_SVC_AUTHZ_ORIGIN && /^\/users\/[^/]+\/roles$/.test(url.pathname),
+    async (route) => {
+      // POST /users/:id/roles — grant.
+      const body = route.request().postDataJSON() as Record<string, unknown>
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'grant-e2e-1',
+          userId: 'e2e-target-user',
+          roleId: body['roleId'],
+          orgScopeUnitId: body['orgScopeUnitId'] ?? null,
+          grantedBy: body['grantedBy'],
+          grantedAt: new Date().toISOString(),
+        }),
+      })
+    },
+  )
+
+  await page.route(
+    (url) => url.origin === E2E_SVC_AUTHZ_ORIGIN && /^\/users\/[^/]+\/roles\/[^/]+$/.test(url.pathname),
+    async (route) => {
+      // DELETE /users/:id/roles/:roleId — revoke.
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ deleted: 1 }) })
+    },
+  )
+}
+
+/** One `notify.notification` row, shaped like `services/svc-notify/src/notify.repository.ts`'s `NotificationRow` — starts unread (`readAt: null`) so `NotificationsPage.tsx`'s Mark-read control has something real to click. */
+export const FIXTURE_NOTIFICATION = {
+  id: 'notif-e2e-1',
+  recipientUserId: 'gadonghr-dev-bypass-principal',
+  kind: 'leave.approved',
+  lang: 'en',
+  subject: 'Your leave request was approved',
+  body: 'Your annual leave for 2026-02-01 was approved by your manager.',
+  readAt: null as string | null,
+  createdAt: '2026-01-14T00:00:00.000Z',
+}
+
+/**
+ * Intercepts svc-notify's `GET /notifications` and `POST
+ * /notifications/:id/read` (`services/svc-notify/src/notify.controller.ts`)
+ * — no live svc-notify process, same reasoning as `mockSvcConfig`. Mark-read
+ * actually flips the fixture's `readAt` in place, so a subsequent
+ * `GET /notifications` in the same test reflects the change — the real
+ * behaviour `notify.repository.ts`'s `markRead` produces, not a canned
+ * response that ignores what was clicked.
+ */
+export async function mockSvcNotify(page: Page): Promise<void> {
+  await page.route(
+    (url) => url.origin === E2E_SVC_NOTIFY_ORIGIN && url.pathname.startsWith('/notifications'),
+    async (route) => {
+      const request = route.request()
+      const url2 = new URL(request.url())
+
+      if (url2.pathname.endsWith('/read') && request.method() === 'POST') {
+        FIXTURE_NOTIFICATION.readAt = new Date().toISOString()
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FIXTURE_NOTIFICATION) })
+        return
+      }
+
+      const unreadOnly = url2.searchParams.get('unread') === 'true'
+      const notifications = unreadOnly && FIXTURE_NOTIFICATION.readAt !== null ? [] : [FIXTURE_NOTIFICATION]
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ notifications }) })
+    },
+  )
+}
