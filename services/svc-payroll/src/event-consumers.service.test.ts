@@ -31,29 +31,60 @@ function harness() {
 const EMPLOYEE = '33333333-3333-4333-8333-333333333333'
 
 describe('timesheet.locked / timesheet.unlocked', () => {
-  it('records the version a run may bind to', async () => {
+  // `periodId` is svc-timesheet's own period-row UUID — never payroll's
+  // 'YYYY-MM' concept — so every fixture below uses a realistic
+  // (non-'YYYY-MM'-shaped) UUID for it, matching the real wire payload
+  // `period.service.ts`'s `writeOutbox` call produces, and asserts that the
+  // stored `period` is derived from `dateRange.from` instead.
+  const PERIOD_ID = '11111111-1111-4111-8111-111111111111'
+  const DATE_RANGE = { from: '2026-10-01', to: '2026-10-31' }
+
+  it('records the version a run may bind to, keyed on the calendar-month code derived from dateRange, not the foreign periodId', async () => {
     const h = harness()
     await h.service.handleTimesheetLock(h.tx, {
       topic: 'timesheet.locked',
       eventId: 'evt-1',
-      payload: { periodId: '2026-10', lockVersion: 7, lockedBy: EMPLOYEE },
+      payload: { periodId: PERIOD_ID, dateRange: DATE_RANGE, lockVersion: 7, lockedBy: EMPLOYEE },
     })
     expect(await h.refs.findTimesheetLock('2026-10', h.tx)).toMatchObject({ period: '2026-10', lockVersion: 7, locked: true })
   })
 
   it('an unlock flips the flag and bumps the version — which is what makes a bound run stale', async () => {
     const h = harness()
-    await h.service.handleTimesheetLock(h.tx, { topic: 'timesheet.locked', eventId: 'e1', payload: { periodId: '2026-10', lockVersion: 7 } })
-    await h.service.handleTimesheetLock(h.tx, { topic: 'timesheet.unlocked', eventId: 'e2', payload: { periodId: '2026-10', lockVersion: 8 } })
+    await h.service.handleTimesheetLock(h.tx, {
+      topic: 'timesheet.locked',
+      eventId: 'e1',
+      payload: { periodId: PERIOD_ID, dateRange: DATE_RANGE, lockVersion: 7 },
+    })
+    await h.service.handleTimesheetLock(h.tx, {
+      topic: 'timesheet.unlocked',
+      eventId: 'e2',
+      payload: { periodId: PERIOD_ID, dateRange: DATE_RANGE, lockVersion: 8 },
+    })
     expect(await h.refs.findTimesheetLock('2026-10', h.tx)).toMatchObject({ lockVersion: 8, locked: false })
   })
 
   it('TRIPLE DELIVERY of one event id produces exactly one effect (XC-EVENTS)', async () => {
     const h = harness()
-    const event = { topic: 'timesheet.locked' as const, eventId: 'same-id', payload: { periodId: '2026-10', lockVersion: 7 } }
+    const event = {
+      topic: 'timesheet.locked' as const,
+      eventId: 'same-id',
+      payload: { periodId: PERIOD_ID, dateRange: DATE_RANGE, lockVersion: 7 },
+    }
     expect(await h.service.handleTimesheetLock(h.tx, event)).toBe('ok')
     expect(await h.service.handleTimesheetLock(h.tx, event)).toBe('duplicate')
     expect(await h.service.handleTimesheetLock(h.tx, event)).toBe('duplicate')
+  })
+
+  it('rejects a dateRange.from that is not a plain YYYY-MM-DD date, rather than silently storing a garbage period code', async () => {
+    const h = harness()
+    await expect(
+      h.service.handleTimesheetLock(h.tx, {
+        topic: 'timesheet.locked',
+        eventId: 'evt-bad',
+        payload: { periodId: PERIOD_ID, dateRange: { from: 'not-a-date', to: '2026-10-31' }, lockVersion: 1 },
+      }),
+    ).rejects.toThrow(/dateRange.from must be 'YYYY-MM-DD'/)
   })
 })
 

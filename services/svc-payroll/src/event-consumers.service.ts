@@ -40,7 +40,7 @@ import { encryptMoneyFields } from './money-crypto'
 export interface TimesheetLockedEvent {
   topic: 'timesheet.locked' | 'timesheet.unlocked'
   eventId: string
-  payload: { periodId: string; lockVersion: number; lockedBy?: string }
+  payload: { periodId: string; dateRange: { from: string; to: string }; lockVersion: number; lockedBy?: string }
 }
 
 export interface LeaveBalancePayoutEvent {
@@ -87,6 +87,29 @@ export interface EmployeeEvent {
 
 const SCHEMA = 'payroll'
 
+/**
+ * `payroll.timesheet_lock.period` is keyed on PAYROLL's own period concept
+ * ('YYYY-MM' — see `runs.service.ts`'s `monthIndex`/`previousMonth`, and the
+ * `payroll_run.period` column both read), never on `svc-timesheet`'s own
+ * period row id. `timesheet.locked`'s payload carries `periodId` (svc-timesheet's
+ * UUID primary key for `timesheet.period` — see `PeriodRow.id`) precisely
+ * because svc-timesheet has no "YYYY-MM" concept of its own (a period there
+ * is an arbitrary `[from, to]` date range); this consumer is the one place
+ * that translates between the two services' period concepts, deriving the
+ * calendar-month code from the event's own `dateRange.from` rather than
+ * mistaking the foreign UUID for it. A run then binds via
+ * `RunsService.findTimesheetLock(run.period, tx)`, `run.period` always being
+ * this same 'YYYY-MM' shape — storing the UUID here would make that lookup
+ * never find a row, however successfully this consumer ran.
+ */
+function derivePeriodCode(dateRange: { from: string; to: string }): string {
+  const match = /^(\d{4}-\d{2})-\d{2}$/.exec(dateRange.from)
+  if (match === null || match[1] === undefined) {
+    throw new Error(`EventConsumersService: timesheet.locked dateRange.from must be 'YYYY-MM-DD', got ${JSON.stringify(dateRange.from)}`)
+  }
+  return match[1]
+}
+
 export class EventConsumersService {
   constructor(
     private readonly refs: RefsRepository,
@@ -99,7 +122,7 @@ export class EventConsumersService {
   async handleTimesheetLock(tx: Queryable, event: TimesheetLockedEvent): Promise<'duplicate' | 'ok'> {
     const result = await idempotent(tx, SCHEMA, event.eventId, async () => {
       await this.refs.upsertTimesheetLock(tx, {
-        period: event.payload.periodId,
+        period: derivePeriodCode(event.payload.dateRange),
         lockVersion: event.payload.lockVersion,
         locked: event.topic === 'timesheet.locked',
         lockedBy: event.payload.lockedBy ?? null,

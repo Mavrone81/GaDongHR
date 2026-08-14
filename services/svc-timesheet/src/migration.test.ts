@@ -534,7 +534,7 @@ describe('timesheet schema migration — every remaining constraint is actually 
       /ADD CONSTRAINT "timesheet_employee_ref_employment_type_check" CHECK \(employment_type IN \('monthly', 'daily', 'hourly', 'contract'\)\);/,
     )
     expect(sql).toMatch(
-      /ADD CONSTRAINT "timesheet_employee_ref_status_check" CHECK \(status IN \('onboarding', 'active', 'terminated'\)\);/,
+      /ADD CONSTRAINT "timesheet_employee_ref_status_check" CHECK \(status IN \('draft', 'onboarding', 'active', 'cancelled', 'terminated'\)\);/,
     )
   })
 

@@ -145,7 +145,7 @@ function parseEmployeeUpsert(payload: unknown): EmployeeUpsertPayload {
   if (employmentType !== 'monthly' && employmentType !== 'daily' && employmentType !== 'hourly' && employmentType !== 'contract') {
     throw new Error('employee.*: invalid employmentType')
   }
-  if (status !== 'onboarding' && status !== 'active' && status !== 'terminated') {
+  if (status !== 'draft' && status !== 'onboarding' && status !== 'active' && status !== 'cancelled' && status !== 'terminated') {
     throw new Error('employee.*: invalid status')
   }
   return {

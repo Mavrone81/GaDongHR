@@ -1,7 +1,7 @@
 import type { Queryable } from '@gadong/kernel'
 
 export type EmploymentType = 'monthly' | 'daily' | 'hourly' | 'contract'
-export type EmployeeStatus = 'onboarding' | 'active' | 'terminated'
+export type EmployeeStatus = 'draft' | 'onboarding' | 'active' | 'cancelled' | 'terminated'
 
 export interface TimesheetEmployeeRefRow {
   employeeId: string

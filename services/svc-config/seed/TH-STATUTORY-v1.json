@@ -137,13 +137,13 @@
     {
       "rule_key": "hours.regular.max_per_week",
       "value": {
-        "general": 48,
+        "standard": 48,
         "hazardous": 42
       },
       "unit": "hours",
       "statutory_floor": null,
       "statutory_ceiling": {
-        "general": 48,
+        "standard": 48,
         "hazardous": 42
       },
       "citation": "LPA s.23. 48 (42 hazardous)",

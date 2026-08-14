@@ -468,7 +468,7 @@ export class FakeTimesheetConnection implements Queryable {
         .sort((a, b) => Date.parse(b.actual_in as string) - Date.parse(a.actual_in as string))
       return candidates.length > 0 ? [{ ...(candidates[0] as DayRecordRow) }] : []
     }
-    if (/work_date BETWEEN \$1 AND \$2 AND \(\$3::text\[\] IS NULL/i.test(sql)) {
+    if (/work_date BETWEEN \$1 AND \$2 AND \(\$3::uuid\[\] IS NULL/i.test(sql)) {
       const [from, to, employeeIds] = params as [string, string, string[] | null]
       return visible
         .filter((r) => r.work_date >= from && r.work_date <= to && (employeeIds === null || employeeIds.includes(r.employee_id)))

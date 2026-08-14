@@ -188,7 +188,7 @@ export class DayRecordRepository {
   async findByEmployeesAndRange(employeeIds: string[] | null, from: string, to: string): Promise<DayRecordRow[]> {
     const { rows } = await this.db.query(
       `SELECT ${SELECT_COLUMNS} FROM timesheet.day_record
-       WHERE work_date BETWEEN $1 AND $2 AND ($3::text[] IS NULL OR employee_id = ANY($3))
+       WHERE work_date BETWEEN $1 AND $2 AND ($3::uuid[] IS NULL OR employee_id = ANY($3::uuid[]))
        ORDER BY employee_id, work_date`,
       [from, to, employeeIds],
     )

@@ -336,10 +336,18 @@ exports.up = (pgm) => {
     'timesheet_employee_ref_employment_type_check',
     { check: "employment_type IN ('monthly', 'daily', 'hourly', 'contract')" },
   )
+  // Mirrors svc-onboarding's real `EmployeeStatus` enum (`employee.repository.ts`:
+  // 'draft' | 'onboarding' | 'active' | 'cancelled' | 'terminated') — the first
+  // `employee.created` event for a brand-new employee carries status 'draft'
+  // (set in `employee.service.ts`'s `commitCreate`), so a CHECK narrower than
+  // onboarding's own enum rejects the very first event every employee ever
+  // produces. This table is a pass-through read model (no code in this service
+  // branches on the value), so it validates against the full upstream enum
+  // rather than re-deriving its own subset.
   pgm.addConstraint(
     { schema: 'timesheet', name: 'timesheet_employee_ref' },
     'timesheet_employee_ref_status_check',
-    { check: "status IN ('onboarding', 'active', 'terminated')" },
+    { check: "status IN ('draft', 'onboarding', 'active', 'cancelled', 'terminated')" },
   )
 
   pgm.createTable(
