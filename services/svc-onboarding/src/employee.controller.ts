@@ -15,7 +15,7 @@ import type { GenerateContractInput, GeneratedContract } from './contract.servic
 import { SelfServiceService } from './self-service.service'
 import type { EmployeeStatus } from './employee.repository'
 import type { ConsentRecordRow } from './consent.repository'
-import { checklistTaskNotFound } from './onboarding-errors'
+import { checklistTaskNotFound, employeeOutOfScope } from './onboarding-errors'
 
 /** DI token for the `onboarding` schema's connection pool — the same `Symbol` token pattern every sibling controller (`svc-config`, `svc-docs`) established. */
 export const DB_POOL = Symbol('DB_POOL')
@@ -82,19 +82,19 @@ export class EmployeeController {
 
   @Get('employees')
   @RequirePermission('employee.read')
-  async list(@Query('org_unit') orgUnit?: string, @Query('status') status?: EmployeeStatus): Promise<{ employees: EmployeeSummary[] }> {
+  async list(@Req() req: Req, @Query('org_unit') orgUnit?: string, @Query('status') status?: EmployeeStatus): Promise<{ employees: EmployeeSummary[] }> {
     return this.runFailClosed(async () => {
       const filter: EmployeeListFilter = {}
       if (orgUnit !== undefined) filter.orgUnitId = orgUnit
       if (status !== undefined) filter.status = status
-      return { employees: await this.employees.list(filter) }
+      return { employees: await this.employees.list(filter, this.requireUserId(req), this.requireScope(req)) }
     })
   }
 
   @Get('employees/:id')
   @RequirePermission('employee.read')
-  async getOne(@Param('id') id: string): Promise<EmployeeProfile> {
-    return this.runFailClosed(() => this.employees.getProfile(id))
+  async getOne(@Param('id') id: string, @Req() req: Req): Promise<EmployeeProfile> {
+    return this.runFailClosed(() => this.employees.getProfile(id, this.requireUserId(req), this.requireScope(req)))
   }
 
   @Get('employees/:id/sensitive')
@@ -103,7 +103,7 @@ export class EmployeeController {
     return this.runFailClosed(async () => {
       const fields = (query.fields ?? '').split(',').map((f) => f.trim()).filter((f) => f.length > 0)
       const purpose = query.purpose ?? ''
-      const values = await this.employees.prepareSensitiveRead(id, fields, purpose)
+      const values = await this.employees.prepareSensitiveRead(id, fields, purpose, this.requireUserId(req), this.requireScope(req))
       await withTransaction(this.pool, (tx) => this.employees.commitSensitiveReadAudit(tx, id, fields, purpose, actorId(req), actorRole(req)))
       return values
     })
@@ -205,16 +205,59 @@ export class EmployeeController {
    * (this build: the employee's own id — see `self-service.service.ts`'s
    * header on signed-link generation being out of scope) is trusted no
    * further than any other `:id` path param elsewhere on this controller.
+   *
+   * **That comment described the INTENT, not the code — until this fix.**
+   * The row-scoping audit found nothing here actually checked `token`
+   * against the caller's identity: an authenticated employee A holding
+   * `employee.update` could submit `POST /self-service/{B's id}` and patch
+   * B's record, because `PermissionGuard` only ever asked "does this
+   * caller hold `employee.update`", never "on this employee". Same defect
+   * shape as `GET /documents/:id` (roadmap "🔴 Open security gap"), found
+   * in a route whose own comment already claimed the protection existed.
+   * `scopeAllowsEmployee` is used directly against `req.userId`/`token`
+   * rather than fetching the row first (unlike `getProfile`) — a
+   * self-service submission has no org-unit-level concept at all (per the
+   * comment above, this route's whole design is "self, never an org
+   * subtree"), so there is nothing an org-unit lookup would add here that
+   * a direct identity comparison does not already give for `'self'`/`'*'`
+   * scope, and an array (org-subtree) scope is correctly refused
+   * unconditionally — a manager-scoped grant of `employee.update` was
+   * never meant to reach a signed self-service link.
    */
   @Post('self-service/:token')
   @RequirePermission('employee.update')
   async selfServiceSubmit(@Param('token') token: string, @Body() body: SelfServiceSubmitBody, @Req() req: Req): Promise<{ id: string; empCode: string } | { duplicate: true }> {
     return this.runFailClosed(async () => {
+      const callerId = this.requireUserId(req)
+      const scope = this.requireScope(req)
+      const allowed = scope === '*' || (scope === 'self' ? callerId === token : false)
+      if (!allowed) throw employeeOutOfScope(token)
+
       const result = await withTransaction(this.pool, (tx) =>
         this.selfService.submit(tx, body.submissionId, token, body.patch, actorId(req), actorRole(req)),
       )
       return result === 'duplicate' ? { duplicate: true } : result
     })
+  }
+
+  /** `PermissionGuard` already denied any request with no authenticated principal before any handler on this controller runs (no route here is `@Public()`) — this narrows the type, it does not add a new check. */
+  private requireUserId(req: Req): string {
+    if (!req.userId) throw new HttpException({ code: 'ONB-401', message_i18n_key: 'onboarding.error.unauthenticated', details: [] }, 401)
+    return req.userId
+  }
+
+  /**
+   * `PermissionGuard` sets `request.authzScope` on every ALLOWED decision
+   * (kernel `guard.ts`) — reaching a handler that calls this at all means
+   * the guard already granted the route's permission, so this is only
+   * absent if a future refactor removed that assignment; fails closed
+   * rather than silently treating a missing scope as `'*'`.
+   */
+  private requireScope(req: Req): NonNullable<Req['authzScope']> {
+    if (req.authzScope === undefined) {
+      throw new HttpException({ code: 'ONB-500', message_i18n_key: 'onboarding.error.scope_missing', details: [] }, 500)
+    }
+    return req.authzScope
   }
 
   /** The same translation `svc-config`/`svc-docs`'s controllers perform: a thrown `GadongError` becomes the `{code, message_i18n_key, details}` envelope at its declared HTTP status; anything else is a genuine bug and is left to propagate. */

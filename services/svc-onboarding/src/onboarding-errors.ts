@@ -18,6 +18,27 @@ export function employeeNotFound(id: string): GadongError {
   return new GadongError('ONB-003', 'onboarding.error.employee_not_found', 404, [{ id }])
 }
 
+/**
+ * Row-scoping fix (roadmap "🔴 Open security gap"): the caller's grant
+ * exists (`PermissionGuard` already allowed `employee.read`/
+ * `employee.sensitive.read`/`employee.update`) but does not cover THIS
+ * employee — either they hold only `'self'` scope and this is someone
+ * else's record, or an org-scoped grant whose subtree does not include
+ * this employee's `org_unit_id`. 403, matching the precedent already
+ * shipped elsewhere in this codebase for the identical shape
+ * (`svc-timesheet`'s `TSH-070`/`TSH-071`, `svc-docs`'s `DOC-070`) — a
+ * single-id route denies rather than returning an empty/filtered result
+ * (that pattern is reserved for list routes, see `EmployeeService.list`).
+ */
+export function employeeOutOfScope(id: string): GadongError {
+  return new GadongError('ONB-070', 'onboarding.error.employee_out_of_scope', 403, [{ id }])
+}
+
+/** `GET /employees?org_unit=X` where `X` is not covered by the caller's `Decision.scopeOrgUnitIds` — same reasoning as `employeeOutOfScope`, for an explicitly-named org unit rather than an explicitly-named employee (mirrors `svc-timesheet`'s `TSH-070` on `GET /teams/:orgUnit/days`). */
+export function orgUnitOutOfScope(orgUnitId: string): GadongError {
+  return new GadongError('ONB-071', 'onboarding.error.org_unit_out_of_scope', 403, [{ orgUnitId }])
+}
+
 /** `POST /employees/:id/transition` — the state diagram's guard (M1-ONBOARDING §1.2) failed: e.g. `onboarding→active` attempted with the checklist incomplete, or an unrecognised `to` state. */
 export function lifecycleGuardFailed(reason: string): GadongError {
   return new GadongError('ONB-010', 'onboarding.error.lifecycle_guard_failed', 409, [{ reason }])

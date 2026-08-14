@@ -77,8 +77,12 @@ function makeController(overrides: Partial<FakeDeps> = {}): { controller: Employ
   return { controller, deps }
 }
 
-function reqWith(userId?: string, actorRole?: string): { userId?: string; actorRole?: string } {
-  const r: { userId?: string; actorRole?: string } = {}
+function reqWith(
+  userId?: string,
+  actorRole?: string,
+  authzScope: string[] | '*' | 'self' = '*',
+): { userId?: string; actorRole?: string; authzScope?: string[] | '*' | 'self' } {
+  const r: { userId?: string; actorRole?: string; authzScope?: string[] | '*' | 'self' } = { authzScope }
   if (userId !== undefined) r.userId = userId
   if (actorRole !== undefined) r.actorRole = actorRole
   return r
@@ -97,7 +101,7 @@ describe('EmployeeController — delegation', () => {
   it('GET /employees/:id/sensitive parses fields=a,b and forwards purpose, then audits after decrypting', async () => {
     const { controller, deps } = makeController()
     await controller.getSensitive('emp-1', { fields: 'national_id, bank_account', purpose: 'kyc' }, reqWith('hr-1', 'hr-officer'))
-    expect(deps.employees.prepareSensitiveRead).toHaveBeenCalledWith('emp-1', ['national_id', 'bank_account'], 'kyc')
+    expect(deps.employees.prepareSensitiveRead).toHaveBeenCalledWith('emp-1', ['national_id', 'bank_account'], 'kyc', 'hr-1', '*')
     expect(deps.employees.commitSensitiveReadAudit).toHaveBeenCalledWith(expect.anything(), 'emp-1', ['national_id', 'bank_account'], 'kyc', 'hr-1', 'hr-officer')
   })
 
@@ -142,6 +146,76 @@ describe('EmployeeController — delegation', () => {
     expect(out).toEqual({ duplicate: true })
   })
 
+  it('GET /employees forwards the caller id and scope to EmployeeService.list', async () => {
+    const { controller, deps } = makeController()
+    await controller.list(reqWith('mgr-1', 'line-manager', ['org-a']), 'org-a', undefined)
+    expect(deps.employees.list).toHaveBeenCalledWith({ orgUnitId: 'org-a' }, 'mgr-1', ['org-a'])
+  })
+
+  it('GET /employees/:id forwards the caller id and scope to EmployeeService.getProfile', async () => {
+    const { controller, deps } = makeController()
+    await controller.getOne('emp-2', reqWith('emp-1', 'employee-ess', 'self'))
+    expect(deps.employees.getProfile).toHaveBeenCalledWith('emp-2', 'emp-1', 'self')
+  })
+})
+
+describe('EmployeeController — row-scoping fix: POST /self-service/:token (roadmap "🔴 Open security gap")', () => {
+  it("'self' scope allows the caller submitting their own token", async () => {
+    const { controller, deps } = makeController()
+    await controller.selfServiceSubmit('emp-1', { submissionId: 'sub-1', patch: {} }, reqWith('emp-1', 'employee-ess', 'self'))
+    expect(deps.selfService.submit).toHaveBeenCalledWith(expect.anything(), 'sub-1', 'emp-1', {}, 'emp-1', 'employee-ess')
+  })
+
+  it("'self' scope denies (ONB-070) a caller submitting SOMEONE ELSE's token — the exact vulnerability found: the route's own comment claimed this was already impossible", async () => {
+    const { controller, deps } = makeController()
+    await expect(
+      controller.selfServiceSubmit('emp-victim', { submissionId: 'sub-1', patch: {} }, reqWith('emp-attacker', 'employee-ess', 'self')),
+    ).rejects.toMatchObject({ getStatus: expect.any(Function) })
+    expect(deps.selfService.submit).not.toHaveBeenCalled()
+
+    try {
+      await controller.selfServiceSubmit('emp-victim', { submissionId: 'sub-1', patch: {} }, reqWith('emp-attacker', 'employee-ess', 'self'))
+    } catch (thrown) {
+      expect((thrown as HttpException).getStatus()).toBe(403)
+      expect((thrown as HttpException).getResponse()).toMatchObject({ code: 'ONB-070' })
+    }
+  })
+
+  it('an org-unit array scope is refused unconditionally — a manager-scoped employee.update grant was never meant to reach a self-service link', async () => {
+    const { controller, deps } = makeController()
+    await expect(
+      controller.selfServiceSubmit('emp-1', { submissionId: 'sub-1', patch: {} }, reqWith('mgr-1', 'line-manager', ['org-a'])),
+    ).rejects.toMatchObject({ getStatus: expect.any(Function) })
+    expect(deps.selfService.submit).not.toHaveBeenCalled()
+  })
+
+  it("'*' scope (e.g. hr-system-admin acting on behalf of an employee) is allowed", async () => {
+    const { controller, deps } = makeController()
+    await controller.selfServiceSubmit('emp-victim', { submissionId: 'sub-1', patch: {} }, reqWith('admin-1', 'hr-system-admin', '*'))
+    expect(deps.selfService.submit).toHaveBeenCalledWith(expect.anything(), 'sub-1', 'emp-victim', {}, 'admin-1', 'hr-system-admin')
+  })
+})
+
+describe('EmployeeController — row-scoping defensive checks', () => {
+  it('throws 401 when req.userId is somehow unset (PermissionGuard should already have caught this)', async () => {
+    const { controller } = makeController()
+    await expect(controller.getOne('emp-1', { authzScope: '*' })).rejects.toMatchObject({ getStatus: expect.any(Function) })
+    try {
+      await controller.getOne('emp-1', { authzScope: '*' })
+    } catch (thrown) {
+      expect((thrown as HttpException).getStatus()).toBe(401)
+    }
+  })
+
+  it('throws 500 (never silently "*") when req.authzScope is somehow unset despite an allowed decision', async () => {
+    const { controller } = makeController()
+    try {
+      await controller.getOne('emp-1', { userId: 'user-1' })
+      throw new Error('expected rejection')
+    } catch (thrown) {
+      expect((thrown as HttpException).getStatus()).toBe(500)
+    }
+  })
 })
 
 describe('EmployeeController — deny-by-default permission wiring (M1-ONBOARDING §3.1)', () => {
@@ -175,7 +249,15 @@ describe('EmployeeController — deny-by-default permission wiring (M1-ONBOARDIN
   it('every method on this controller is accounted for above (no silently-unguarded route) — GET /health lives on the separate HealthController, not here', () => {
     const proto = EmployeeController.prototype as unknown as Record<string, unknown>
     const methodNames = Object.getOwnPropertyNames(proto).filter(
-      (n) => n !== 'constructor' && typeof proto[n] === 'function' && !n.startsWith('_') && n !== 'runFailClosed',
+      (n) =>
+        n !== 'constructor' &&
+        typeof proto[n] === 'function' &&
+        !n.startsWith('_') &&
+        n !== 'runFailClosed' &&
+        // Row-scoping fix helpers (`employee.controller.ts`) — same
+        // "not a route" treatment as `runFailClosed` above.
+        n !== 'requireUserId' &&
+        n !== 'requireScope',
     )
     expect(methodNames.sort()).toEqual(Object.keys(EXPECTED).sort())
   })

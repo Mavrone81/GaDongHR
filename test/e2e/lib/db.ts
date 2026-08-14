@@ -107,6 +107,72 @@ export async function seedOnboardingOrgAndPosition(orgUnitId: string, positionId
   })
 }
 
+/**
+ * Row-scoping fix (roadmap "🔴 Open security gap") test support: seeds an
+ * `authz.org_unit` row directly. `authz.user_role.org_scope_unit_id` carries
+ * a real FK into this table (`services/svc-authz/migrations/
+ * 1754100000000_authz-schema.js`), so `grantScopedPermission` below cannot
+ * grant an org-scoped permission for an org unit `svc-authz` has never
+ * heard of — in production this table is populated by consuming
+ * `employee.created`/`employee.updated` (`AuthzService.applyEmployeeCreated`),
+ * which no running consumer loop wires up yet (`authz.service.ts`'s own
+ * doc); this is the same direct-SQL test-data-setup precedent
+ * `seedOnboardingOrgAndPosition` above already establishes for
+ * `onboarding.org_unit`/`onboarding.position` — not a shortcut around the
+ * guard or scope logic under test.
+ */
+export async function seedAuthzOrgUnit(id: string, nameEn: string): Promise<void> {
+  await withSuperuserClient(async (client) => {
+    await client.query(
+      `INSERT INTO authz.org_unit (id, parent_id, name_i18n, cost_center)
+       VALUES ($1::uuid, NULL, $2::jsonb, NULL)
+       ON CONFLICT (id) DO NOTHING`,
+      [id, JSON.stringify({ en: nameEn, th: nameEn })],
+    )
+  })
+}
+
+/**
+ * Row-scoping fix test support: grants `permissionCode` to `userId` scoped
+ * to exactly `orgUnitId` (an org-scoped grant — `authz.user_role
+ * .org_scope_unit_id` set, not `NULL`), so `AuthzService.decide()` resolves
+ * `scopeOrgUnitIds` to that unit's subtree rather than `'self'`. Same
+ * throwaway-role mechanism as `grantPermission` above (a permission with no
+ * existing `ROLE_TEMPLATES` entry that grants it scoped, which is exactly
+ * this case: no template grants any permission WITH an org scope — that is
+ * assigned per-grant, by `POST /users/:id/roles`'s real `orgScopeUnitId`
+ * body field, which this mirrors), keyed additionally on `orgUnitId` so
+ * granting the same permission scoped to two different org units (as the
+ * cross-org-unit-denial test does) does not collide on one throwaway role.
+ */
+export async function grantScopedPermission(userId: string, permissionCode: string, orgUnitId: string, grantedBy: string): Promise<void> {
+  const roleCode = `e2e-machine-scoped-${permissionCode.replace(/\./g, '-')}-${orgUnitId.slice(-8)}`
+  await withSuperuserClient(async (client) => {
+    await client.query(
+      `INSERT INTO authz.role (code, name_i18n, is_system)
+       VALUES ($1, $2::jsonb, false)
+       ON CONFLICT (code) DO NOTHING`,
+      [roleCode, JSON.stringify({ en: roleCode, th: roleCode })],
+    )
+    await client.query(
+      `INSERT INTO authz.role_permission (role_id, permission_code)
+       SELECT r.id, $2 FROM authz.role r WHERE r.code = $1
+       ON CONFLICT (role_id, permission_code) DO NOTHING`,
+      [roleCode, permissionCode],
+    )
+    await client.query(
+      `INSERT INTO authz.user_role (user_id, role_id, org_scope_unit_id, granted_by)
+       SELECT $1::uuid, r.id, $3::uuid, $4::uuid
+       FROM authz.role r
+       WHERE r.code = $2
+         AND NOT EXISTS (
+           SELECT 1 FROM authz.user_role ur WHERE ur.user_id = $1::uuid AND ur.role_id = r.id
+         )`,
+      [userId, roleCode, orgUnitId, grantedBy],
+    )
+  })
+}
+
 export async function waitForRoleSeeded(roleCode: string): Promise<boolean> {
   return withSuperuserClient(async (client) => {
     const res = await client.query('SELECT 1 FROM authz.role WHERE code = $1', [roleCode])

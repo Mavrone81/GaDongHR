@@ -2,10 +2,21 @@
  * Every grant carries an org scope: the whole tenant (`'*'`), just the
  * caller's own record (`'self'`), or an explicit set of org-unit subtree
  * roots the caller may act within. Roadmap "Permission catalog".
+ *
+ * Named and exported separately from `Decision` (rather than inlined) so
+ * `PermissionGuard` (`guard.ts`) and `authz/scope.ts`'s row-scoping helpers
+ * can share exactly this type — see `guard.ts`'s `AuthenticatedRequest
+ * .authzScope`, which is this same union attached to the request object so
+ * a service's repository layer can apply it as a WHERE constraint, instead
+ * of every service re-deriving the type or (worse) calling `AuthzClient
+ * .decide()` a second time just to recover it (roadmap "🔴 Open security
+ * gap": "svc-authz returns scopeOrgUnitIds, and nothing consumes it").
  */
+export type AuthzScope = string[] | '*' | 'self'
+
 export interface Decision {
   allowed: boolean
-  scopeOrgUnitIds: string[] | '*' | 'self'
+  scopeOrgUnitIds: AuthzScope
 }
 
 /** Transport to svc-authz (not yet built). Injectable so this client is unit-testable without HTTP. */

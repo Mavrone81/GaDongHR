@@ -85,10 +85,10 @@ export class DocumentsController {
 
   @Get('documents/:id')
   @RequirePermission('document.read')
-  async getById(@Req() req: AuthenticatedRequest, @Param('id') id: string): Promise<DocumentResponseBody> {
+  async getById(@Param('id') id: string, @Req() req: AuthenticatedRequest): Promise<DocumentResponseBody> {
     return this.runFailClosed(async () => {
       const purpose = DOCUMENT_READ_PURPOSE
-      const { meta, pdfBytes } = await this.documentsService.getDocument(id, purpose)
+      const { meta, pdfBytes } = await this.documentsService.getDocument(id, this.requireUserId(req), this.requireScope(req), purpose)
       // The read/download itself never holds a transaction (MinIO GET +
       // decrypt — see `DocumentsService.getDocument`'s doc); the audit
       // entry is its own fast, separate write, same split
@@ -127,6 +127,26 @@ export class DocumentsController {
       outboxQuery = 'down'
     }
     return buildHealth('svc-docs', { db, storage, fonts, ...(outboxQuery === 'down' ? { outboxQuery } : {}) }, process.env, outbox)
+  }
+
+  /** `PermissionGuard` already denied any request with no authenticated principal before this handler runs (`document.read` is not `@Public()`) — this narrows the type, it does not add a new check. */
+  private requireUserId(req: AuthenticatedRequest): string {
+    if (!req.userId) throw new HttpException({ code: 'DOC-401', message_i18n_key: 'docs.error.unauthenticated', details: [] }, 401)
+    return req.userId
+  }
+
+  /**
+   * `PermissionGuard` sets `request.authzScope` on every ALLOWED decision
+   * (see kernel `guard.ts`) — reaching this handler at all means the guard
+   * already granted `document.read`, so this is only absent if a future
+   * refactor removed that assignment; fails closed rather than silently
+   * treating a missing scope as `'*'`.
+   */
+  private requireScope(req: AuthenticatedRequest): NonNullable<AuthenticatedRequest['authzScope']> {
+    if (req.authzScope === undefined) {
+      throw new HttpException({ code: 'DOC-500', message_i18n_key: 'docs.error.scope_missing', details: [] }, 500)
+    }
+    return req.authzScope
   }
 
   private async checkDb(): Promise<'up' | 'down'> {

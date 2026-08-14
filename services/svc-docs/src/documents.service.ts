@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
 import { Injectable, Logger } from '@nestjs/common'
-import { AuditEmitter, CryptoClient, cryptoUnavailable, writeOutbox } from '@gadong/kernel'
-import type { Locale, Queryable } from '@gadong/kernel'
+import { AuditEmitter, CryptoClient, cryptoUnavailable, scopeAllowsEmployee, writeOutbox } from '@gadong/kernel'
+import type { AuthzScope, Locale, Queryable } from '@gadong/kernel'
 import { DocumentsRepository } from './documents.repository'
 import type { DocumentRow, NewDocumentRow } from './documents.repository'
+import { EmployeeRefRepository } from './employee-ref.repository'
+import { PayslipRefRepository } from './payslip-ref.repository'
 import { TemplateLoader } from './templates'
 import type { WarnLogger } from './templates'
 import { FontRegistry } from './fonts/font-registry'
@@ -13,7 +15,7 @@ import { htmlToPlainText } from './rendering/html-text'
 import type { ObjectStorage } from './storage/object-storage'
 import { resolveMergeFields, substituteTemplate } from './merge-fields'
 import type { MergeFields } from './merge-fields'
-import { documentNotFound, fontsUnavailable, renderInputRequired } from './errors'
+import { documentNotFound, documentOutOfScope, fontsUnavailable, renderInputRequired } from './errors'
 
 /**
  * `mergeFields` and `html` are mutually exclusive rendering INPUTS, not two
@@ -90,6 +92,8 @@ export class DocumentsService {
     private readonly storage: ObjectStorage,
     private readonly crypto: CryptoClient,
     private readonly bucket: string,
+    private readonly employeeRefs: EmployeeRefRepository,
+    private readonly payslipRefs: PayslipRefRepository,
     private readonly audit: AuditEmitter = new AuditEmitter(),
   ) {}
 
@@ -193,9 +197,47 @@ export class DocumentsService {
     return { id: row.id, kind: row.kind, entityType: row.entityType, entityId: row.entityId, lang: row.lang, sha256: row.sha256 }
   }
 
-  async getDocument(id: string, purpose: string = DOCUMENT_READ_PURPOSE): Promise<RetrievedDocument> {
+  /**
+   * Row-scoping fix (roadmap "🔴 Open security gap"): `callerId`/`scope`
+   * are REQUIRED, not optional (see `authz/scope.ts`'s design-decision
+   * note in `@gadong/kernel` — an unscoped call site must not compile).
+   * `scope` is `request.authzScope`, the `Decision.scopeOrgUnitIds` the
+   * kernel `PermissionGuard` already fetched for `document.read` and
+   * attached to the request — this method is the one place that applies
+   * it, so no caller of `DocumentsService` can accidentally skip the
+   * check.
+   *
+   * `scope === '*'` skips ownership resolution entirely (no read-model
+   * lookup needed) — every other scope resolves the document's owning
+   * employee via `resolveOwnerEmployeeId` and then applies kernel's
+   * `scopeAllowsEmployee`, exactly the same function `svc-timesheet`'s
+   * `views.service.ts` uses for the identical shape.
+   *
+   * **403, not a filtered-empty result** (see `errors.ts#documentOutOfScope`'s
+   * doc): this is a single-id route — the caller named one specific
+   * document. Unlike a list/aggregate route (where silently omitting
+   * out-of-scope rows is the right call: an empty page leaks nothing an
+   * attacker didn't already have to guess), a single-id GET has no
+   * "empty" shape to fall back to that isn't itself either an error or a
+   * lie (a 200 with no body would just be a worse-shaped 403). This
+   * mirrors the precedent already shipped in this codebase —
+   * `svc-timesheet`'s `TSH-070`/`TSH-071` — rather than inventing a new
+   * convention.
+   */
+  async getDocument(id: string, callerId: string, scope: AuthzScope, purpose: string = DOCUMENT_READ_PURPOSE): Promise<RetrievedDocument> {
     const meta = await this.repo.findById(id)
     if (!meta) throw documentNotFound(id)
+
+    if (scope !== '*') {
+      const ownerEmployeeId = await this.resolveOwnerEmployeeId(meta)
+      if (ownerEmployeeId === null) throw documentOutOfScope(id)
+
+      // `scope === 'self'` never needs the owner's org unit (scopeAllowsEmployee
+      // ignores it for that case) — only fetched for the array-scope path,
+      // so a plain ESS self-read never pays for a read-model lookup.
+      const ownerOrgUnitId = scope === 'self' ? null : (await this.employeeRefs.findById(ownerEmployeeId))?.orgUnitId ?? null
+      if (!scopeAllowsEmployee(scope, callerId, ownerEmployeeId, ownerOrgUnitId)) throw documentOutOfScope(id)
+    }
 
     const pointerJson = await this.crypto.decrypt(meta.entityId, 'file_ref', meta.fileRef, purpose)
     const pointer = JSON.parse(pointerJson) as { bucket: string; key: string }
@@ -223,6 +265,25 @@ export class DocumentsService {
       entityId: meta.id,
       purpose,
     })
+  }
+
+  /**
+   * `docs.document` carries no direct employee owner for every `kind` —
+   * see `payslip-ref.repository.ts`'s doc for why `entity_type = 'payslip'`
+   * needs a separate lookup (`entity_id` is the payslip's own id, not the
+   * employee's). Returns `null` — fail closed, never fail open — for any
+   * `entity_type` this method does not have a resolution path for, and for
+   * a `'payslip'` document whose `payslip.issued` event has not been
+   * consumed yet (the read model lagging the write is a real, transient
+   * state, not grounds to skip the check).
+   */
+  private async resolveOwnerEmployeeId(meta: DocumentRow): Promise<string | null> {
+    if (meta.entityType === 'employee') return meta.entityId
+    if (meta.entityType === 'payslip') {
+      const ref = await this.payslipRefs.findById(meta.entityId)
+      return ref?.employeeId ?? null
+    }
+    return null
   }
 
   async health(): Promise<{ storage: 'up' | 'down'; fonts: 'up' | 'down' }> {

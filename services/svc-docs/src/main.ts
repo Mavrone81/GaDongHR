@@ -7,6 +7,7 @@ import { startEventBus } from '@gadong/kernel'
 import type { EventBus } from '@gadong/kernel'
 import { AppModule } from './app.module'
 import { DB_POOL } from './documents.controller'
+import { EventsConsumer } from './events.consumer'
 
 /**
  * Runs every pending `migrations/*.js` against `DATABASE_URL` before the
@@ -40,9 +41,7 @@ function requiredEnv(name: string): string {
  * Wires this service onto the message bus (event-bus task): drains the
  * `docs` schema's outbox onto `gadong.events` — `document.rendered`, the
  * only event `documents.service.ts` produces (`writeOutbox(tx, 'docs',
- * 'document.rendered', ...)` in `commit()`). `svc-docs` consumes no bus
- * events itself (no `consume` block below — confirmed, there is no
- * consumer/handler class anywhere in `services/svc-docs/src`).
+ * 'document.rendered', ...)` in `commit()`).
  *
  * NOTE — `document.rendered` is NOT in the roadmap's documented event
  * catalog (`docs/superpowers/plans/00-PROGRAM-ROADMAP.md`'s event catalog
@@ -51,14 +50,44 @@ function requiredEnv(name: string): string {
  * correct — an outbox row that is never drained just accumulates forever,
  * which is exactly the defect this task fixes for every service, not only
  * the ones that already have a downstream consumer written.
+ *
+ * **`consume` block added by the row-scoping fix** (roadmap "🔴 Open
+ * security gap"): `GET /documents/:id`'s ownership check
+ * (`documents.service.ts#getDocument`) needs to know a document's owning
+ * employee's org unit, and — for `kind: 'payslip'` documents specifically
+ * — which employee a payslip even belongs to (`entity_id` there is the
+ * payslip's own id, not the employee's; see `payslip-ref.repository.ts`'s
+ * doc). `employee.created`/`employee.updated` feed `docs.employee_ref`;
+ * `payslip.issued` feeds `docs.payslip_ref`. Same dispatch-by-routing-key
+ * shape as `services/svc-timesheet/src/main.ts`.
+ *
+ * Deliberately NOT subscribed to `employee.terminated`: that event's real
+ * payload (`services/svc-onboarding/src/employee.service.ts`'s `transition`
+ * — `{id, terminationDate, reasonCategory}`, matching the roadmap's own
+ * event-catalog row) carries no `orgUnitId`, so routing it through the same
+ * `handleEmployeeUpsert`/`parseEmployeeUpsert` path `svc-timesheet`'s
+ * `main.ts` does would throw "missing orgUnitId" on every real termination
+ * — and there is nothing for `docs.employee_ref` to update anyway: a
+ * termination does not change which org unit an employee's past documents
+ * belong to for row-scoping purposes.
  */
-async function wireEventBus(pool: Pool): Promise<EventBus> {
+async function wireEventBus(pool: Pool, consumer: EventsConsumer): Promise<EventBus> {
   const amqpUrl = requiredEnv('RABBITMQ_URL')
   return startEventBus({
     amqpUrl,
     pool,
     schema: 'docs',
     publish: { intervalMs: Number(process.env['OUTBOX_RELAY_INTERVAL_MS'] ?? 5000) },
+    consume: {
+      queue: 'q.svc-docs.events',
+      routingKeys: ['employee.created', 'employee.updated', 'payslip.issued'],
+      handlers: {
+        'employee.created': (tx, eventId, payload) => consumer.handleEmployeeUpsert(tx, eventId, payload),
+        'employee.updated': (tx, eventId, payload) => consumer.handleEmployeeUpsert(tx, eventId, payload),
+        'payslip.issued': (tx, eventId, payload) => consumer.handlePayslipIssued(tx, eventId, payload),
+      },
+      onDeadLetter: (info) => console.error('svc-docs: dead-lettered event', info),
+    },
     logger: console,
   })
 }
@@ -69,7 +98,8 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule)
 
   const pool = app.get<Pool>(DB_POOL)
-  const bus = await wireEventBus(pool)
+  const consumer = app.get(EventsConsumer)
+  const bus = await wireEventBus(pool, consumer)
 
   await app.listen(3000, '0.0.0.0')
 

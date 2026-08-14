@@ -5,6 +5,21 @@ export function documentNotFound(id: string): GadongError {
   return new GadongError('DOC-404', 'docs.error.document_not_found', 404, [{ id }])
 }
 
+/**
+ * Row-scoping fix (roadmap "🔴 Open security gap"): the caller's
+ * `document.read` grant does not cover THIS document's owner — either the
+ * document's own org unit is outside an org-scoped grant, or the caller
+ * holds only `'self'` scope and this document belongs to someone else.
+ * 403, matching `svc-timesheet`'s established precedent for the identical
+ * shape (`TSH-070`/`TSH-071`, `views.service.ts`) — see
+ * `documents.service.ts#getDocument`'s doc for why an explicit single-id
+ * route denies with 403 rather than returning an empty/filtered result
+ * (the pattern reserved for list/aggregate routes).
+ */
+export function documentOutOfScope(id: string): GadongError {
+  return new GadongError('DOC-070', 'docs.error.document_out_of_scope', 403, [{ id }])
+}
+
 /** Neither `templates/<kind>.<lang>.html` nor the `en` fallback exists — there is nothing to render at all, for any language. */
 export function templateNotFound(kind: string, lang: string): GadongError {
   return new GadongError('DOC-404', 'docs.error.template_not_found', 404, [{ kind, lang }])

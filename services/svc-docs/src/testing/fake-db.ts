@@ -29,10 +29,26 @@ interface StoredOutboxRow {
   published_at: Date | null
 }
 
+/** Row-scoping fix local read model (`employee-ref.repository.ts`). */
+interface StoredEmployeeRefRow {
+  employee_id: string
+  org_unit_id: string
+  updated_at: Date
+}
+
+/** Row-scoping fix local read model (`payslip-ref.repository.ts`). */
+interface StoredPayslipRefRow {
+  payslip_id: string
+  employee_id: string
+  updated_at: Date
+}
+
 export class FakeDocsDb {
   private readonly documents = new Map<string, StoredDocumentRow>()
   private readonly outbox = new Map<string, StoredOutboxRow>()
   private readonly processedEvents = new Set<string>()
+  private readonly employeeRefs = new Map<string, StoredEmployeeRefRow>()
+  private readonly payslipRefs = new Map<string, StoredPayslipRefRow>()
 
   connect(): FakeDocsConnection {
     return new FakeDocsConnection(this)
@@ -50,6 +66,14 @@ export class FakeDocsDb {
 
   debugOutboxRows(): StoredOutboxRow[] {
     return [...this.outbox.values()]
+  }
+
+  debugEmployeeRefs(): StoredEmployeeRefRow[] {
+    return [...this.employeeRefs.values()]
+  }
+
+  debugPayslipRefs(): StoredPayslipRefRow[] {
+    return [...this.payslipRefs.values()]
   }
 
   // --- internals used only by FakeDocsConnection ---
@@ -73,6 +97,27 @@ export class FakeDocsDb {
   _insertProcessedEvent(schema: string, eventId: string): void {
     this.processedEvents.add(`${schema}:${eventId}`)
   }
+
+  _upsertEmployeeRef(row: StoredEmployeeRefRow): void {
+    this.employeeRefs.set(row.employee_id, row)
+  }
+
+  _findEmployeeRef(employeeId: string): StoredEmployeeRefRow | undefined {
+    return this.employeeRefs.get(employeeId)
+  }
+
+  _upsertPayslipRef(row: StoredPayslipRefRow): void {
+    this.payslipRefs.set(row.payslip_id, row)
+  }
+
+  _findPayslipRef(payslipId: string): StoredPayslipRefRow | undefined {
+    return this.payslipRefs.get(payslipId)
+  }
+}
+
+/** Untyped-object escape hatch for the same reason `toReturnedRow` below exists: a `Queryable`'s `query()` contract returns `Record<string, unknown>` rows (matching real `pg`), and these two read-model row shapes are otherwise perfectly good, narrow interfaces that TS strict mode correctly refuses to widen implicitly. */
+function toRecord(row: StoredEmployeeRefRow | StoredPayslipRefRow): Record<string, unknown> {
+  return row as unknown as Record<string, unknown>
 }
 
 function toReturnedRow(r: StoredDocumentRow): Record<string, unknown> {
@@ -94,6 +139,8 @@ export class FakeDocsConnection implements Queryable {
   private pendingInserts: StoredDocumentRow[] = []
   private pendingOutboxInserts: StoredOutboxRow[] = []
   private pendingProcessedEvents: Array<{ schema: string; eventId: string }> = []
+  private pendingEmployeeRefs: StoredEmployeeRefRow[] = []
+  private pendingPayslipRefs: StoredPayslipRefRow[] = []
 
   constructor(private readonly db: FakeDocsDb) {}
 
@@ -110,6 +157,8 @@ export class FakeDocsConnection implements Queryable {
       this.pendingInserts = []
       this.pendingOutboxInserts = []
       this.pendingProcessedEvents = []
+      this.pendingEmployeeRefs = []
+      this.pendingPayslipRefs = []
       return { rows: [] }
     }
 
@@ -117,6 +166,8 @@ export class FakeDocsConnection implements Queryable {
       for (const row of this.pendingInserts) this.db._insert(row)
       for (const row of this.pendingOutboxInserts) this.db._insertOutboxRow(row)
       for (const { schema, eventId } of this.pendingProcessedEvents) this.db._insertProcessedEvent(schema, eventId)
+      for (const row of this.pendingEmployeeRefs) this.db._upsertEmployeeRef(row)
+      for (const row of this.pendingPayslipRefs) this.db._upsertPayslipRef(row)
       this.inTx = false
       return { rows: [] }
     }
@@ -125,6 +176,8 @@ export class FakeDocsConnection implements Queryable {
       this.pendingInserts = []
       this.pendingOutboxInserts = []
       this.pendingProcessedEvents = []
+      this.pendingEmployeeRefs = []
+      this.pendingPayslipRefs = []
       this.inTx = false
       return { rows: [] }
     }
@@ -176,6 +229,38 @@ export class FakeDocsConnection implements Queryable {
     }
 
     if (/^SELECT 1\b/i.test(s)) return { rows: [{ '?column?': 1 }] }
+
+    if (/^INSERT INTO\s+docs\.employee_ref\b/i.test(s)) {
+      const [employeeId, orgUnitId] = params as [string, string]
+      const row: StoredEmployeeRefRow = { employee_id: employeeId, org_unit_id: orgUnitId, updated_at: new Date() }
+      if (this.inTx) this.pendingEmployeeRefs.push(row)
+      else this.db._upsertEmployeeRef(row)
+      return { rows: [toRecord(row)] }
+    }
+
+    if (/^SELECT[\s\S]*FROM\s+docs\.employee_ref\b/i.test(s)) {
+      if (!/WHERE employee_id = \$1/i.test(s)) throw new Error(`FakeDocsDb: unrecognised SELECT: ${s}`)
+      const [employeeId] = params as [string]
+      const pending = this.pendingEmployeeRefs.find((r) => r.employee_id === employeeId)
+      const found = pending ?? this.db._findEmployeeRef(employeeId)
+      return { rows: found ? [toRecord(found)] : [] }
+    }
+
+    if (/^INSERT INTO\s+docs\.payslip_ref\b/i.test(s)) {
+      const [payslipId, employeeId] = params as [string, string]
+      const row: StoredPayslipRefRow = { payslip_id: payslipId, employee_id: employeeId, updated_at: new Date() }
+      if (this.inTx) this.pendingPayslipRefs.push(row)
+      else this.db._upsertPayslipRef(row)
+      return { rows: [toRecord(row)] }
+    }
+
+    if (/^SELECT[\s\S]*FROM\s+docs\.payslip_ref\b/i.test(s)) {
+      if (!/WHERE payslip_id = \$1/i.test(s)) throw new Error(`FakeDocsDb: unrecognised SELECT: ${s}`)
+      const [payslipId] = params as [string]
+      const pending = this.pendingPayslipRefs.find((r) => r.payslip_id === payslipId)
+      const found = pending ?? this.db._findPayslipRef(payslipId)
+      return { rows: found ? [toRecord(found)] : [] }
+    }
 
     throw new Error(`FakeDocsDb: unrecognised query: ${s}`)
   }
