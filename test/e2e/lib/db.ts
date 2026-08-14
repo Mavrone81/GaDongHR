@@ -98,19 +98,29 @@ export async function seedOnboardingOrgAndPosition(orgUnitId: string, positionId
        ON CONFLICT (id) DO NOTHING`,
       [orgUnitId],
     )
-    // `code` is derived from `positionId`, and the conflict target is `code`,
-    // NOT `id`. Both matter, and the row-scope suite is what proved it: it
-    // calls this helper twice (one org unit per scope, to test cross-org-unit
-    // denial), which passed a fresh `positionId` each time but reused a
-    // hard-coded `'E2E-POS-1'` — so the second call collided on
-    // `position_code_key` while `ON CONFLICT (id)` looked at the wrong
-    // column entirely and never fired. A single-hire lifecycle test could
-    // never surface either half.
+    // `code` is derived from the WHOLE `positionId`, and the conflict target
+    // is `code`, not `id` — the table's only unique constraint is
+    // `position_code_key` (on `code`), so `ON CONFLICT (id)` guards a column
+    // that never collides while the one that does collide goes unguarded.
+    //
+    // The code must carry the entire uuid, not a prefix: every fixture id in
+    // this suite is a zero-padded constant
+    // (`00000000-0000-4000-8000-0000000ac203`), so any leading slice is
+    // identical across all of them — a "unique" code built from one silently
+    // collapses every position into a single row, `DO NOTHING` swallows the
+    // insert, and the next `POST /employees` dies on
+    // `employee_position_id_fkey` pointing at a position that was never
+    // written. `code` is unbounded `text` (onboarding-schema.js:98), so the
+    // full uuid costs nothing.
+    //
+    // Only the row-scope suite exercises this: the lifecycle hires once into
+    // one org unit, so the helper ran exactly once and neither defect could
+    // appear.
     await client.query(
       `INSERT INTO onboarding.position (id, code, title_i18n, org_unit_id)
        VALUES ($1::uuid, $3::text, '{"en":"E2E Tester","th":"E2E Tester"}'::jsonb, $2::uuid)
        ON CONFLICT (code) DO NOTHING`,
-      [positionId, orgUnitId, `E2E-POS-${positionId.slice(0, 8)}`],
+      [positionId, orgUnitId, `E2E-POS-${positionId}`],
     )
   })
 }
