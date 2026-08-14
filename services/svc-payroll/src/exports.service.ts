@@ -1,4 +1,4 @@
-import { CryptoClient } from '@gadong/kernel'
+import { AuditEmitter, CryptoClient } from '@gadong/kernel'
 import type { Queryable } from '@gadong/kernel'
 import { bankAccountMissing, exportBeforeCommit, runNotFound } from './errors'
 import type { Satang } from './money'
@@ -62,6 +62,7 @@ export class ExportsService {
     private readonly config: ConfigClient,
     private readonly crypto: CryptoClient,
     private readonly newId: () => string,
+    private readonly audit: AuditEmitter = new AuditEmitter(),
   ) {}
 
   /** Called from inside the commit transaction, before the run's status becomes `committed`. */
@@ -92,13 +93,37 @@ export class ExportsService {
     return recorded
   }
 
-  async renderStatutory(runId: string, kind: StatutoryExportKind, db: Queryable): Promise<GeneratedExport> {
+  async renderStatutory(
+    runId: string,
+    kind: StatutoryExportKind,
+    db: Queryable,
+    actorId = 'unknown',
+    actorRole = 'unknown',
+  ): Promise<GeneratedExport> {
     const run = await this.requireCommitted(runId, db)
     const ctx = await this.buildContext(run, db)
-    return EXPORT_BUILDERS[kind](ctx)
+    const generated = EXPORT_BUILDERS[kind](ctx)
+
+    // "bank/statutory export generated ... this IS an export in the PDPA
+    // sense — record it" (roadmap audit-coverage brief). `db` here is the
+    // service's own pool, not a transaction — this download-and-render path
+    // mutates nothing (`recordAll` already wrote the immutable
+    // `statutory_export` row at commit time), so there is no caller
+    // transaction to piggy-back on; a standalone `INSERT` into this
+    // service's own outbox is the correct (and only available) unit here.
+    await this.audit.emit(db, 'payroll', {
+      actorId,
+      actorRole,
+      action: 'export.generated',
+      entity: 'statutory_export',
+      entityId: runId,
+      after: { kind, period: run.period },
+    })
+
+    return generated
   }
 
-  async renderBankFile(runId: string, format: string, db: Queryable): Promise<BankFileResult> {
+  async renderBankFile(runId: string, format: string, db: Queryable, actorId = 'unknown', actorRole = 'unknown'): Promise<BankFileResult> {
     const run = await this.requireCommitted(runId, db)
     const resolver = new StatutoryResolver(this.config, run.periodEnd ?? run.period)
     const [name, account] = await Promise.all([
@@ -128,7 +153,7 @@ export class ExportsService {
       })
     }
 
-    return buildBankFile(format, {
+    const built = buildBankFile(format, {
       runId: run.id,
       period: run.period,
       payDate: run.payDate ?? run.period,
@@ -136,6 +161,20 @@ export class ExportsService {
       originatorName: name.value,
       lines,
     })
+
+    // Same reasoning as `renderStatutory`'s audit emit above: a bank file is
+    // an export in the PDPA sense (line count reveals nothing per-employee;
+    // no account number or name is ever put in `after`).
+    await this.audit.emit(db, 'payroll', {
+      actorId,
+      actorRole,
+      action: 'export.generated',
+      entity: 'bank_file',
+      entityId: runId,
+      after: { format: built.kind, period: run.period, lineCount: lines.length },
+    })
+
+    return built
   }
 
   private async requireCommitted(runId: string, db: Queryable): Promise<PayrollRunRow> {

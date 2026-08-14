@@ -4,8 +4,10 @@ import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_FILTER, APP_GUARD } from '@nestjs/core'
 import {
+  AuditEmitter,
   AuthzClient,
   CryptoClient,
+  DENIAL_AUDIT_SINK,
   GadongErrorFilter,
   MachineTokenClient,
   PermissionGuard,
@@ -14,7 +16,7 @@ import {
   createOidcMiddlewareHandler,
   createPool,
 } from '@gadong/kernel'
-import type { AuthenticatedFetch, AuthzTransport, CryptoTransport, OidcMiddlewareHandler, Queryable } from '@gadong/kernel'
+import type { AuthenticatedFetch, AuthzTransport, CryptoTransport, DenialAuditSink, OidcMiddlewareHandler, Queryable } from '@gadong/kernel'
 import { CONFIG_HEALTH, CRYPTO_HEALTH, DB_POOL, PayrollController } from './payroll.controller'
 import type { HealthCheckPort } from './payroll.controller'
 import { HttpConfigClient } from './config-client'
@@ -140,6 +142,22 @@ function createMachineTokenClient(): MachineTokenClient {
       // table name resolves in this service's own schema and nowhere else.
       useFactory: () => createPool(requiredEnv('DATABASE_URL'), 'payroll'),
     },
+    // One `AuditEmitter` instance, shared by every service that writes to
+    // this schema's `payroll.outbox` — stateless (kernel `audit/emitter.ts`),
+    // so a single shared instance is exactly as safe as `new AuditEmitter()`
+    // per call and one fewer allocation per write.
+    { provide: AuditEmitter, useFactory: () => new AuditEmitter() },
+    {
+      // Wires `PermissionGuard`'s optional denial-audit sink (kernel
+      // `authz/guard.ts`) to THIS service's own pool/schema — see that
+      // file's "DENIAL AUDITING" doc for why the guard itself stays
+      // decoupled from any one service's DB. `payroll.run.*` and
+      // `payroll.profile.*` denials land in the same `payroll.outbox` every
+      // other audit entry above does.
+      provide: DENIAL_AUDIT_SINK,
+      useFactory: (pool: Queryable): DenialAuditSink => ({ pool, schema: 'payroll' }),
+      inject: [DB_POOL],
+    },
     {
       provide: CRYPTO_HEALTH,
       useFactory: () => createHttpHealthCheck(`${process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000'}/health`),
@@ -194,9 +212,9 @@ function createMachineTokenClient(): MachineTokenClient {
 
     {
       provide: PayProfilesService,
-      useFactory: (repo: PayProfilesRepository, refs: RefsRepository, crypto: CryptoClient, config: ConfigClient) =>
-        new PayProfilesService(repo, refs, crypto, config, () => randomUUID()),
-      inject: [PayProfilesRepository, RefsRepository, CryptoClient, 'CONFIG_CLIENT'],
+      useFactory: (repo: PayProfilesRepository, refs: RefsRepository, crypto: CryptoClient, config: ConfigClient, audit: AuditEmitter) =>
+        new PayProfilesService(repo, refs, crypto, config, () => randomUUID(), audit),
+      inject: [PayProfilesRepository, RefsRepository, CryptoClient, 'CONFIG_CLIENT', AuditEmitter],
     },
     {
       provide: PayslipsService,
@@ -215,7 +233,8 @@ function createMachineTokenClient(): MachineTokenClient {
         directory: EmployeeDirectoryClient,
         config: ConfigClient,
         crypto: CryptoClient,
-      ) => new ExportsService(runs, payslips, profiles, profilesService, refs, exportsRepo, directory, config, crypto, () => randomUUID()),
+        audit: AuditEmitter,
+      ) => new ExportsService(runs, payslips, profiles, profilesService, refs, exportsRepo, directory, config, crypto, () => randomUUID(), audit),
       inject: [
         RunsRepository,
         PayslipsRepository,
@@ -226,6 +245,7 @@ function createMachineTokenClient(): MachineTokenClient {
         'DIRECTORY_CLIENT',
         'CONFIG_CLIENT',
         CryptoClient,
+        AuditEmitter,
       ],
     },
     {
@@ -242,6 +262,7 @@ function createMachineTokenClient(): MachineTokenClient {
         timesheets: TimesheetClient,
         docs: DocsClient,
         recorder: ExportRecorder,
+        audit: AuditEmitter,
       ) =>
         new RunsService(
           runs,
@@ -257,6 +278,7 @@ function createMachineTokenClient(): MachineTokenClient {
           recorder,
           () => randomUUID(),
           () => new Date().toISOString(),
+          audit,
         ),
       inject: [
         RunsRepository,
@@ -270,6 +292,7 @@ function createMachineTokenClient(): MachineTokenClient {
         'TIMESHEET_CLIENT',
         'DOCS_CLIENT',
         ExportsService,
+        AuditEmitter,
       ],
     },
     {

@@ -195,3 +195,67 @@ describe('AuthzService.applyEmployeeCreated — maintains the org-tree read mode
     expect(units).toContainEqual({ id: 'chonburi-plant', parentId: 'chonburi-office' })
   })
 })
+
+describe('AuthzService.grantRole / revokeRole — audit coverage (roadmap: "grants and revocations — who granted what to whom")', () => {
+  it('grantRole inserts the grant AND emits audit.role.granted with the actor, the grantee, the role and the scope', async () => {
+    const { conn, repo, db, service } = setUp()
+    const role = await repo.upsertRole(conn, 'hr-officer', {}, false)
+
+    const grant = await service.grantRole(
+      conn,
+      { userId: 'user-1', roleId: role.id, orgScopeUnitId: 'chonburi-plant', grantedBy: 'admin-1' },
+      'authz_admin',
+    )
+
+    const [audit] = db.debugOutboxRows().filter((r) => r.topic === 'audit.role.granted')
+    expect(audit?.payload).toMatchObject({
+      actorId: 'admin-1',
+      actorRole: 'authz_admin',
+      action: 'role.granted',
+      entity: 'user_role_grant',
+      entityId: grant.id,
+      beforeHash: null,
+    })
+    expect((audit?.payload as Record<string, unknown>)['afterHash']).toEqual(expect.any(String))
+  })
+
+  it('grantRole defaults actorRole to "unknown" when the caller omits it', async () => {
+    const { conn, repo, db, service } = setUp()
+    const role = await repo.upsertRole(conn, 'hr-officer', {}, false)
+
+    await service.grantRole(conn, { userId: 'user-1', roleId: role.id, orgScopeUnitId: null, grantedBy: 'admin-1' })
+
+    const [audit] = db.debugOutboxRows().filter((r) => r.topic === 'audit.role.granted')
+    expect(audit?.payload).toMatchObject({ actorId: 'admin-1', actorRole: 'unknown' })
+  })
+
+  it('revokeRole deletes the grant(s) AND emits exactly one audit.role.revoked entry carrying how many were removed', async () => {
+    const { conn, repo, db, service } = setUp()
+    const role = await repo.upsertRole(conn, 'hr-officer', {}, false)
+    await service.grantRole(conn, { userId: 'user-1', roleId: role.id, orgScopeUnitId: 'chonburi-plant', grantedBy: 'admin-1' })
+    await service.grantRole(conn, { userId: 'user-1', roleId: role.id, orgScopeUnitId: 'bangkok-hq', grantedBy: 'admin-1' })
+
+    const deleted = await service.revokeRole(conn, 'user-1', role.id, 'admin-2', 'authz_admin')
+
+    expect(deleted).toBe(2)
+    const revokedRows = db.debugOutboxRows().filter((r) => r.topic === 'audit.role.revoked')
+    expect(revokedRows).toHaveLength(1) // one DELETE, one audit entry — not one per row removed
+    expect(revokedRows[0]?.payload).toMatchObject({
+      actorId: 'admin-2',
+      actorRole: 'authz_admin',
+      action: 'role.revoked',
+      entity: 'user_role_grant',
+      entityId: 'user-1',
+    })
+  })
+
+  it('revokeRole still emits an audit entry (grantsRemoved: 0) when there was nothing to revoke — the attempt itself is the auditable fact', async () => {
+    const { conn, db, service } = setUp()
+
+    const deleted = await service.revokeRole(conn, 'user-1', 'no-such-role', 'admin-2')
+
+    expect(deleted).toBe(0)
+    const [audit] = db.debugOutboxRows().filter((r) => r.topic === 'audit.role.revoked')
+    expect(audit).toBeDefined()
+  })
+})

@@ -270,3 +270,49 @@ describe('bank files render from the committed payslips', () => {
     await expect(h.exports.renderBankFile(run.id, 'citibank', h.tx)).rejects.toMatchObject({ code: 'PAY-051' })
   })
 })
+
+describe('audit coverage — a rendered export is a PDPA "export" (roadmap: "bank/statutory export generated ... record it")', () => {
+  it('renderStatutory emits audit.export.generated, entity statutory_export, kind in `after` — no employee-level data', async () => {
+    const h = await harness()
+    const run = await committedRun(h)
+    await h.exports.renderStatutory(run.id, 'sso_1_10', h.tx, PREPARER, 'payroll_officer')
+
+    const [row] = h.db.debugOutboxRows().filter((r) => r.topic === 'audit.export.generated')
+    const payload = row?.payload as Record<string, unknown>
+    expect(payload).toMatchObject({ actorId: PREPARER, actorRole: 'payroll_officer', action: 'export.generated', entity: 'statutory_export', entityId: run.id })
+    const serialised = JSON.stringify(payload)
+    for (const secret of ['สมชาย', '1234567890123', '9876543210987']) expect(serialised).not.toContain(secret)
+  })
+
+  it('every renderStatutory call gets its own audit entry — re-rendering is re-auditing, not deduplicated', async () => {
+    const h = await harness()
+    const run = await committedRun(h)
+    await h.exports.renderStatutory(run.id, 'sso_1_10', h.tx)
+    await h.exports.renderStatutory(run.id, 'sso_1_10', h.tx)
+
+    expect(h.db.debugOutboxRows().filter((r) => r.topic === 'audit.export.generated')).toHaveLength(2)
+  })
+
+  it('renderBankFile emits audit.export.generated, entity bank_file, with the format and line count — never an account number', async () => {
+    const h = await harness()
+    const run = await committedRun(h)
+    await h.exports.renderBankFile(run.id, 'generic', h.tx, APPROVER, 'payroll_manager')
+
+    const rows = h.db.debugOutboxRows().filter((r) => r.topic === 'audit.export.generated')
+    const bankRow = rows.find((r) => (r.payload as Record<string, unknown>)['entity'] === 'bank_file')
+    expect(bankRow?.payload).toMatchObject({ actorId: APPROVER, actorRole: 'payroll_manager', action: 'export.generated', entity: 'bank_file', entityId: run.id })
+    const afterPayload = (bankRow?.payload as { afterHash?: string })['afterHash']
+    expect(afterPayload).toEqual(expect.any(String))
+    const serialised = JSON.stringify(bankRow?.payload)
+    expect(serialised).not.toMatch(/1234567800|1234567801/) // the seeded bank account numbers
+  })
+
+  it('actor defaults to "unknown" when a caller omits it', async () => {
+    const h = await harness()
+    const run = await committedRun(h)
+    await h.exports.renderBankFile(run.id, 'generic', h.tx)
+
+    const [row] = h.db.debugOutboxRows().filter((r) => r.topic === 'audit.export.generated')
+    expect(row?.payload).toMatchObject({ actorId: 'unknown', actorRole: 'unknown' })
+  })
+})

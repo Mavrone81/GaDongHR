@@ -1,6 +1,6 @@
-import { Body, Controller, Delete, Get, HttpException, Inject, Param, Post, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, HttpException, Inject, Param, Post, Req, UseGuards } from '@nestjs/common'
 import { GadongError, PermissionGuard, RequirePermission, buildHealth, withTransaction } from '@gadong/kernel'
-import type { HealthPayload } from '@gadong/kernel'
+import type { AuthenticatedRequest, HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { AuthzService } from './authz.service'
 import type { Decision } from './authz.service'
@@ -138,17 +138,16 @@ export class AuthzController {
   @Post('users/:id/roles')
   @UseGuards(PermissionGuard)
   @RequirePermission('authz.role.grant')
-  async grantRole(@Param('id') userId: string, @Body() body: GrantRoleBody): Promise<UserRoleGrantRow> {
+  async grantRole(@Req() req: AuthenticatedRequest, @Param('id') userId: string, @Body() body: GrantRoleBody): Promise<UserRoleGrantRow> {
     return this.runFailClosed(async () => {
       const role = await this.authzRepo.findRoleById(body.roleId)
       if (!role) throw roleNotFound(body.roleId)
       return withTransaction(this.pool, (tx) =>
-        this.authzRepo.insertUserRole(tx, {
-          userId,
-          roleId: body.roleId,
-          orgScopeUnitId: body.orgScopeUnitId ?? null,
-          grantedBy: body.grantedBy,
-        }),
+        this.authzService.grantRole(
+          tx,
+          { userId, roleId: body.roleId, orgScopeUnitId: body.orgScopeUnitId ?? null, grantedBy: body.grantedBy },
+          actorRole(req),
+        ),
       )
     })
   }
@@ -156,9 +155,9 @@ export class AuthzController {
   @Delete('users/:id/roles/:roleId')
   @UseGuards(PermissionGuard)
   @RequirePermission('authz.role.grant')
-  async revokeRole(@Param('id') userId: string, @Param('roleId') roleId: string): Promise<{ deleted: number }> {
+  async revokeRole(@Req() req: AuthenticatedRequest, @Param('id') userId: string, @Param('roleId') roleId: string): Promise<{ deleted: number }> {
     return this.runFailClosed(async () => {
-      const deleted = await withTransaction(this.pool, (tx) => this.authzRepo.deleteUserRoleGrants(tx, userId, roleId))
+      const deleted = await withTransaction(this.pool, (tx) => this.authzService.revokeRole(tx, userId, roleId, actorId(req), actorRole(req)))
       return { deleted }
     })
   }
@@ -187,4 +186,12 @@ export class AuthzController {
       throw err
     }
   }
+}
+
+/** Same fallback every other controller's audit wiring uses: an imprecise actor beats a 500 on every audited write. */
+function actorId(req: AuthenticatedRequest): string {
+  return req.userId ?? 'unknown'
+}
+function actorRole(req: AuthenticatedRequest): string {
+  return req.actorRole ?? 'unknown'
 }

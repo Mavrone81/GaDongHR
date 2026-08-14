@@ -49,12 +49,13 @@ function fakePool(overrides: Partial<Pool> = {}): Pool {
   } as unknown as Pool
 }
 
-type FakeDocumentsService = Pick<DocumentsService, 'prepare' | 'commit' | 'getDocument' | 'health'>
+type FakeDocumentsService = Pick<DocumentsService, 'prepare' | 'commit' | 'getDocument' | 'commitReadAudit' | 'health'>
 function fakeDocumentsService(overrides: Partial<FakeDocumentsService> = {}): DocumentsService {
   const base: FakeDocumentsService = {
     prepare: jest.fn().mockResolvedValue(fakePrepared()),
     commit: jest.fn().mockResolvedValue({ id: 'doc-1', kind: 'payslip', entityType: 'employee', entityId: 'emp-1', lang: 'th', sha256: 'a'.repeat(64) } satisfies RenderResult),
     getDocument: jest.fn().mockResolvedValue({ meta: fakeDocumentRow(), pdfBytes: Buffer.from('pdf-bytes') } satisfies RetrievedDocument),
+    commitReadAudit: jest.fn().mockResolvedValue(undefined),
     health: jest.fn().mockResolvedValue({ storage: 'up', fonts: 'up' }),
     ...overrides,
   }
@@ -79,7 +80,7 @@ describe('DocumentsController wiring', () => {
     const commit = jest.fn().mockResolvedValue({ id: 'doc-1', kind: 'payslip', entityType: 'employee', entityId: 'emp-1', lang: 'th', sha256: prepared.sha256 })
     const controller = new DocumentsController(fakeDocumentsService({ prepare, commit }), fakePool())
 
-    const out = await controller.render(renderBody())
+    const out = await controller.render({ userId: 'hr-1', actorRole: 'hr_admin' } as never, renderBody())
 
     expect(prepare).toHaveBeenCalledWith({
       kind: 'payslip',
@@ -88,17 +89,19 @@ describe('DocumentsController wiring', () => {
       entityId: 'emp-1',
       mergeFields: { companyName: { type: 'text', value: 'GaDong' } },
     })
-    expect(commit).toHaveBeenCalledWith(expect.anything(), prepared)
+    expect(commit).toHaveBeenCalledWith(expect.anything(), prepared, 'hr-1', 'hr_admin')
     expect(out).toMatchObject({ id: 'doc-1', sha256: prepared.sha256 })
   })
 
   it('GET /documents/:id forwards id and returns metadata plus base64 content', async () => {
     const getDocument = jest.fn().mockResolvedValue({ meta: fakeDocumentRow({ id: 'doc-2' }), pdfBytes: Buffer.from('hello-pdf') })
-    const controller = new DocumentsController(fakeDocumentsService({ getDocument }), fakePool())
+    const commitReadAudit = jest.fn().mockResolvedValue(undefined)
+    const controller = new DocumentsController(fakeDocumentsService({ getDocument, commitReadAudit }), fakePool())
 
-    const out = await controller.getById('doc-2')
+    const out = await controller.getById({ userId: 'hr-1', actorRole: 'hr_admin' } as never, 'doc-2')
 
-    expect(getDocument).toHaveBeenCalledWith('doc-2')
+    expect(getDocument).toHaveBeenCalledWith('doc-2', 'document.read')
+    expect(commitReadAudit).toHaveBeenCalledWith(expect.anything(), fakeDocumentRow({ id: 'doc-2' }), 'document.read', 'hr-1', 'hr_admin')
     expect(out).toMatchObject({ id: 'doc-2', kind: 'payslip', contentBase64: Buffer.from('hello-pdf').toString('base64') })
   })
 
@@ -138,7 +141,7 @@ describe('DocumentsController wiring', () => {
     const controller = new DocumentsController(fakeDocumentsService({ prepare: jest.fn().mockRejectedValue(err) }), fakePool())
 
     try {
-      await controller.render(renderBody())
+      await controller.render({ userId: 'hr-1' } as never, renderBody())
       throw new Error('expected rejection')
     } catch (thrown) {
       expect(thrown).toBeInstanceOf(HttpException)
@@ -153,7 +156,7 @@ describe('DocumentsController wiring', () => {
     const controller = new DocumentsController(fakeDocumentsService({ getDocument: jest.fn().mockRejectedValue(err) }), fakePool())
 
     try {
-      await controller.getById('missing')
+      await controller.getById({ userId: 'hr-1' } as never, 'missing')
       throw new Error('expected rejection')
     } catch (thrown) {
       expect(thrown).toBeInstanceOf(HttpException)

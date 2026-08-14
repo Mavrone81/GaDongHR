@@ -144,6 +144,49 @@ describe('pay profile — write', () => {
   })
 })
 
+describe('pay profile — audit coverage (roadmap: writes to pay data must reach the PDPA trail)', () => {
+  it('a create emits audit.pay_profile.created with actor, shape only — no basePay/bank fields in the clear', async () => {
+    const h = await harness()
+    await h.service.upsert(h.tx, EMPLOYEE, dto(), '2026-10-31', PREPARER, 'hr_admin')
+
+    const [row] = h.db.debugOutboxRows().filter((r) => r.topic === 'audit.pay_profile.created')
+    expect(row).toBeDefined()
+    const payload = row?.payload as Record<string, unknown>
+    expect(payload).toMatchObject({ actorId: PREPARER, actorRole: 'hr_admin', action: 'pay_profile.created', entity: 'pay_profile', entityId: EMPLOYEE, beforeHash: null })
+    expect(payload['afterHash']).toEqual(expect.any(String))
+    const serialised = JSON.stringify(payload)
+    for (const secret of ['45000', '1234567890', 'SOMCHAI']) expect(serialised).not.toContain(secret)
+  })
+
+  it('a second upsert (an UPDATE) emits audit.pay_profile.updated, not .created', async () => {
+    const h = await harness()
+    await h.service.upsert(h.tx, EMPLOYEE, dto(), '2026-10-31', PREPARER, 'hr_admin')
+    await h.service.upsert(h.tx, EMPLOYEE, dto({ basePayThb: '50000' }), '2026-10-31', APPROVER, 'hr_admin')
+
+    const topics = h.db.debugOutboxRows().map((r) => r.topic)
+    expect(topics).toEqual(['audit.pay_profile.created', 'audit.pay_profile.updated'])
+  })
+
+  it('defaults actor to "unknown" for a caller that does not supply one — never throws, never silently skips the entry', async () => {
+    const h = await harness()
+    await h.service.upsert(h.tx, EMPLOYEE, dto(), '2026-10-31')
+
+    const [row] = h.db.debugOutboxRows().filter((r) => r.topic === 'audit.pay_profile.created')
+    expect(row?.payload).toMatchObject({ actorId: 'unknown', actorRole: 'unknown' })
+  })
+
+  it('commitProfileReadAudit records audit.pay_profile.sensitive.read and REQUIRES a non-blank purpose (kernel AuditEmitter enforcement)', async () => {
+    const h = await harness()
+    await h.service.upsert(h.tx, EMPLOYEE, dto(), '2026-10-31')
+
+    await h.service.commitProfileReadAudit(h.tx, EMPLOYEE, 'payroll.profile.read', APPROVER, 'payroll_admin')
+    const [row] = h.db.debugOutboxRows().filter((r) => r.topic === 'audit.pay_profile.sensitive.read')
+    expect(row?.payload).toMatchObject({ actorId: APPROVER, actorRole: 'payroll_admin', purpose: 'payroll.profile.read', entity: 'pay_profile', entityId: EMPLOYEE })
+
+    await expect(h.service.commitProfileReadAudit(h.tx, EMPLOYEE, '', APPROVER, 'payroll_admin')).rejects.toThrow(/requires a non-empty purpose/)
+  })
+})
+
 describe('pay profile — read', () => {
   it('round-trips every encrypted field back to what was written', async () => {
     const h = await harness()

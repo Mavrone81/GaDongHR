@@ -1,7 +1,9 @@
 import 'reflect-metadata'
-import { Injectable, SetMetadata } from '@nestjs/common'
+import { Inject, Injectable, Optional, SetMetadata } from '@nestjs/common'
 import type { CanActivate, ExecutionContext } from '@nestjs/common'
 import { GadongError, permissionDenied } from '../errors'
+import { AuditEmitter } from '../audit/emitter'
+import type { Queryable } from '../outbox/outbox'
 import { AuthzClient } from './client'
 
 /**
@@ -84,7 +86,35 @@ export const Public = (): MethodDecorator & ClassDecorator => SetMetadata(PUBLIC
  */
 export interface AuthenticatedRequest {
   userId?: string
+  /**
+   * Set by `OidcMiddleware` (`authz/oidc.middleware.ts`) from the token's
+   * role claim, same field `svc-onboarding`/`svc-config`/`svc-docs`
+   * controllers already read for their own audit entries. Not declared on
+   * `AuthenticatedRequest` originally (only `userId` was), so `recordDenial`
+   * below reads it defensively rather than assuming every caller's request
+   * object was built through the middleware.
+   */
+  actorRole?: string
 }
+
+/**
+ * Where a denial audit entry lands: the CALLING SERVICE's own outbox
+ * (`pool`), under its own schema — never a cross-schema write, matching
+ * every other producer in this codebase (`writeOutbox`'s doc). A service
+ * that wants `authz.denied` entries provides this token; a service that
+ * does not is unaffected (see `PermissionGuard`'s constructor doc for why
+ * that has to stay optional).
+ */
+export interface DenialAuditSink {
+  pool: Queryable
+  schema: string
+}
+
+/**
+ * DI token for `DenialAuditSink`. Deliberately NOT a hard constructor
+ * dependency of `PermissionGuard` — see the constructor's own doc.
+ */
+export const DENIAL_AUDIT_SINK = Symbol('DENIAL_AUDIT_SINK')
 
 /**
  * Distinct from `permissionDenied()`: an unannotated route was never
@@ -130,10 +160,55 @@ function noPermissionDeclaredError(): GadongError {
  * `@Injectable()` is required for that `useClass` registration to resolve
  * through Nest's DI container — without it every service would have to
  * hand-roll a `useFactory` instead (fix round 1, IMPORTANT 3).
+ *
+ * DENIAL AUDITING (roadmap: "authz denials" are one of the four things a
+ * PDPA audit trail must cover). This is the ONE place a denial can be
+ * observed for every guarded route in every service — a per-controller
+ * `catch` around `PermissionGuard` would have to be added, correctly, to
+ * every controller in the system, which is exactly the "a new route
+ * inherits nothing" failure mode `guard-mounting.audit.test.ts`'s own doc
+ * already rejects for the guard's *mounting*. So denial auditing is wired
+ * once, here, rather than per service.
+ *
+ * `denialAuditSink` is `@Optional()` — deliberately NOT a hard constructor
+ * dependency — for two reasons: (1) `guard.test.ts` and every service's own
+ * unit tests construct `new PermissionGuard(authzClient)` with a single
+ * argument, and turning this into a required second parameter would be a
+ * breaking change to every one of those call sites for a feature most of
+ * them do not (yet) opt into; (2) a service that has not wired a sink
+ * (every service outside this task's scope, for now) must keep behaving
+ * exactly as before — denial auditing is additive, not a precondition for
+ * the guard to function. See `DenialAuditSink`'s doc for what a service
+ * provides to opt in.
+ *
+ * FAIL-OPEN-LOG, not fail-closed, for the audit write itself — deliberately
+ * the opposite of the guard's own authorization decision, which stays
+ * fail-closed (an unreachable `AuthzClient` still denies). The two failure
+ * domains are independent: an outage in the service's OWN database (the
+ * thing `denialAuditSink.pool` points at) must not turn a correct 403 into
+ * a 500, because that would make a database blip look like an authorization
+ * bypass attempt failing differently, and — worse — because the guard runs
+ * on literally every request, a synchronous audit-write failure that
+ * propagated would take the route down alongside the audit trail that was
+ * supposed to be recording about it. So `recordDenial` below awaits the
+ * write (it must actually land before the request finishes, matching the
+ * outbox pattern's synchronous-write-async-relay split — this is not a
+ * fire-and-forget), but any failure is caught, logged, and swallowed; the
+ * denial itself (`permissionDenied(permission)`) is thrown unconditionally
+ * either way. Never a synchronous HTTP call: the write goes straight to
+ * this service's own outbox table via the `Queryable` the service already
+ * uses for everything else (`writeOutbox`'s contract, same as
+ * `AuditEmitter.emit`), never to `svc-audit` or anywhere else over the
+ * network.
  */
 @Injectable()
 export class PermissionGuard implements CanActivate {
-  constructor(private readonly authzClient: AuthzClient) {}
+  private readonly auditEmitter = new AuditEmitter()
+
+  constructor(
+    private readonly authzClient: AuthzClient,
+    @Optional() @Inject(DENIAL_AUDIT_SINK) private readonly denialAuditSink?: DenialAuditSink,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic =
@@ -154,15 +229,42 @@ export class PermissionGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>()
     if (!request.userId) {
+      await this.recordDenial(request, permission)
       throw permissionDenied(permission)
     }
 
     const decision = await this.authzClient.decide(request.userId, permission)
 
     if (!decision.allowed) {
+      await this.recordDenial(request, permission)
       throw permissionDenied(permission)
     }
 
     return true
+  }
+
+  /**
+   * See the class doc's "DENIAL AUDITING" / "FAIL-OPEN-LOG" sections for
+   * why this is optional, awaited, and never lets a failure escape. `noop`
+   * when no sink was wired (the common case today — most services have not
+   * opted in yet).
+   */
+  private async recordDenial(request: AuthenticatedRequest, permission: string): Promise<void> {
+    if (!this.denialAuditSink) return
+    try {
+      await this.auditEmitter.emit(this.denialAuditSink.pool, this.denialAuditSink.schema, {
+        actorId: request.userId ?? 'unknown',
+        actorRole: request.actorRole ?? 'unknown',
+        action: 'authz.denied',
+        entity: 'permission',
+        entityId: permission,
+      })
+    } catch (err) {
+      // Fail-open-log (class doc): the permission decision itself already
+      // stayed fail-closed above this call; a broken audit write must not
+      // additionally turn a correct 403 into a 500.
+      // eslint-disable-next-line no-console
+      console.error('PermissionGuard: failed to record authz.denied audit entry', err)
+    }
   }
 }

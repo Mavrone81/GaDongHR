@@ -36,8 +36,8 @@ export {
 } from './db/pool'
 export type { Decision, AuthzTransport, AuthzClientOptions } from './authz/client'
 export { AuthzClient, DECISION_CACHE_TTL_MS, DECISION_CACHE_MAX_ENTRIES, AUTHZ_DECIDE_TIMEOUT_MS } from './authz/client'
-export type { AuthenticatedRequest } from './authz/guard'
-export { RequirePermission, Public, PermissionGuard, PERMISSION_METADATA_KEY, PUBLIC_METADATA_KEY } from './authz/guard'
+export type { AuthenticatedRequest, DenialAuditSink } from './authz/guard'
+export { RequirePermission, Public, PermissionGuard, PERMISSION_METADATA_KEY, PUBLIC_METADATA_KEY, DENIAL_AUDIT_SINK } from './authz/guard'
 export { GadongErrorFilter } from './http/gadong-error.filter'
 export type {
   OidcAuthenticatedRequest,

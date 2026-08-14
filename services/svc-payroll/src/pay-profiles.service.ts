@@ -1,4 +1,4 @@
-import { CryptoClient } from '@gadong/kernel'
+import { AuditEmitter, CryptoClient } from '@gadong/kernel'
 import type { Queryable } from '@gadong/kernel'
 import { belowMinimumWage, employeeRefNotFound, minimumWageNotOnFile, payProfileNotFound, providentFundRateOutOfBand } from './errors'
 import { bahtToSatang, parsePercent, satangToBaht } from './money'
@@ -120,13 +120,24 @@ export class PayProfilesService {
     private readonly crypto: CryptoClient,
     private readonly config: ConfigClient,
     private readonly newId: () => string,
+    private readonly audit: AuditEmitter = new AuditEmitter(),
   ) {}
 
   /**
    * Creates or replaces a profile. `on` is the date the statutory figures
-   * are validated against — today for an ordinary edit.
+   * are validated against — today for an ordinary edit. `actorId`/`actorRole`
+   * default to `'unknown'` so every existing caller (tests, `FinalPayService`
+   * indirectly) keeps compiling — an imprecise actor on the audit entry
+   * beats every write path having to be touched to supply one.
    */
-  async upsert(tx: Queryable, employeeId: string, dto: PayProfileInputDto, on: string): Promise<PayProfileView> {
+  async upsert(
+    tx: Queryable,
+    employeeId: string,
+    dto: PayProfileInputDto,
+    on: string,
+    actorId = 'unknown',
+    actorRole = 'unknown',
+  ): Promise<PayProfileView> {
     const employee = await this.refs.findEmployee(employeeId, tx)
     if (employee === null) throw employeeRefNotFound(employeeId)
 
@@ -172,6 +183,22 @@ export class PayProfilesService {
     const saved = existing === null ? await this.repo.insert(tx, row) : await this.repo.update(tx, row)
     if (saved === null) throw payProfileNotFound(employeeId)
 
+    // "pay-profile reads and writes (S3 → purpose required)" — roadmap
+    // audit-coverage brief. `after` never carries `basePayThb` or any other
+    // money/bank field raw — only the shape (basis, whether recurring items
+    // exist) — `AuditEmitter.emit` would hash it before the outbox either
+    // way, but keeping the object itself free of S3 values is the same
+    // belt-and-suspenders discipline `employee.service.ts` documents for
+    // `employee.created`'s `after`.
+    await this.audit.emit(tx, 'payroll', {
+      actorId,
+      actorRole,
+      action: existing === null ? 'pay_profile.created' : 'pay_profile.updated',
+      entity: 'pay_profile',
+      entityId: employeeId,
+      after: { payBasis: dto.payBasis, recurringItemCount: dto.recurringItems.length },
+    })
+
     return {
       employeeId,
       basePayThb: satangToBaht(basePay),
@@ -183,6 +210,28 @@ export class PayProfilesService {
       bankCode: dto.bankCode,
       bankAccountMasked: dto.bankAccount === null ? null : maskAccount(dto.bankAccount),
     }
+  }
+
+  /**
+   * `GET /profiles/:employeeId` is an audited S3 read (roadmap: "pay-profile
+   * reads ... purpose required"). `view()` itself stays DB-write-free (it
+   * only decrypts) so the slow crypto round trips it makes don't hold a
+   * transaction open; this commits the audit entry separately, the same
+   * split `employee.controller.ts`'s `prepareSensitiveRead`/
+   * `commitSensitiveReadAudit` pair uses. Action ends in
+   * `.sensitive.read` so kernel `AuditEmitter.emit` itself rejects a blank
+   * purpose — the enforcement does not depend on this method remembering to
+   * check.
+   */
+  async commitProfileReadAudit(tx: Queryable, employeeId: string, purpose: string, actorId: string, actorRole: string): Promise<void> {
+    await this.audit.emit(tx, 'payroll', {
+      actorId,
+      actorRole,
+      action: 'pay_profile.sensitive.read',
+      entity: 'pay_profile',
+      entityId: employeeId,
+      purpose,
+    })
   }
 
   async view(employeeId: string, purpose: string): Promise<PayProfileView> {

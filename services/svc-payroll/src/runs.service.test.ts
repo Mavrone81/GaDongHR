@@ -462,13 +462,32 @@ describe('COMMITTED RUNS ARE IMMUTABLE — corrections go through an adjustment 
     expect(h.recorder.recorded).toEqual([{ runId: run.id, statusAtRecord: 'approved' }])
   })
 
-  it('publishes payroll.committed and one payslip.issued per payslip, with NO amounts in either payload', async () => {
+  it('publishes payroll.committed and one payslip.issued per payslip, with NO amounts in either payload — plus one audit.* entry per lifecycle step, also with no amounts', async () => {
     const h = await harness()
     const run = await throughApproval(h)
     await h.service.commit(h.tx, run.id)
 
+    // `harness()`'s own setup calls `profilesService.upsert` (M7-1's pay
+    // profile write), which is itself now an audited write — hence
+    // `audit.pay_profile.created` leading every test built on this harness,
+    // not just this one. The four `audit.run.*` entries are this test's own
+    // create → calculate → review → approve → commit lifecycle.
     const topics = h.db.debugOutboxRows().map((r) => r.topic)
-    expect(topics).toEqual(['payroll.committed', 'payslip.issued'])
+    expect(topics).toEqual([
+      'audit.pay_profile.created',
+      'audit.run.created',
+      'audit.run.calculated',
+      'audit.run.reviewed',
+      'audit.run.approved',
+      'payroll.committed',
+      'payslip.issued',
+      'audit.run.committed',
+    ])
+    // `audit.run.calculated`'s `after` legitimately carries S1 AGGREGATE
+    // totals (`totalGrossSatang`/`totalNetSatang`, in satang, not baht) —
+    // '45000'/'44081' below are BASE-PAY-IN-BAHT/an engine fixture figure,
+    // never satang, so their absence still proves no baht-denominated
+    // amount leaked into any payload, audit or business event alike.
     const serialised = JSON.stringify(h.db.debugOutboxRows())
     expect(serialised).not.toContain('45000')
     expect(serialised).not.toContain('44081')
@@ -720,5 +739,81 @@ describe('year-to-date accumulates only from COMMITTED runs', () => {
     const listed = await h.service.list(PERIOD, h.tx)
     expect(listed.map((r) => r.id)).toContain(october.id)
     expect((await h.service.list(null, h.tx)).length).toBe(2)
+  })
+})
+
+describe('audit coverage — every run-lifecycle step reaches the PDPA trail (roadmap: "run created / calculated / reviewed / approved / committed")', () => {
+  function auditRows(h: Harness, action: string) {
+    return h.db.debugOutboxRows().filter((r) => r.topic === `audit.${action}`)
+  }
+
+  it('run.created carries who/when-implicit/run id/period, never an amount', async () => {
+    const h = await harness()
+    const run = await h.service.createRun(h.tx, {
+      period: PERIOD,
+      runType: 'regular',
+      preparedBy: PREPARER,
+      preparedByRole: 'payroll_officer',
+      periodStart: PERIOD_START,
+      periodEnd: PERIOD_END,
+      payDate: PAY_DATE,
+    })
+
+    const [row] = auditRows(h, 'run.created')
+    const payload = row?.payload as Record<string, unknown>
+    expect(payload).toMatchObject({ actorId: PREPARER, actorRole: 'payroll_officer', action: 'run.created', entity: 'payroll_run', entityId: run.id, beforeHash: null })
+    expect(payload['afterHash']).toEqual(expect.any(String))
+  })
+
+  it('run.calculated carries S1 aggregate totals in satang — never a per-employee figure', async () => {
+    const h = await harness()
+    const run = await draftRun(h)
+    await h.service.calculate(h.tx, run.id, [EMPLOYEE], PREPARER, 'payroll_officer')
+
+    const [row] = auditRows(h, 'run.calculated')
+    const payload = row?.payload as Record<string, unknown>
+    expect(payload).toMatchObject({ actorId: PREPARER, actorRole: 'payroll_officer', action: 'run.calculated', entity: 'payroll_run', entityId: run.id })
+    // The amounts are hashed before they ever reach the outbox — the
+    // property under test is that `afterHash` is populated (a real
+    // 'run.calculated' has aggregate totals to hash), not that any digit
+    // is readable in the payload — see `AuditEmitter`'s own contract.
+    expect(payload['afterHash']).toEqual(expect.any(String))
+    expect(JSON.stringify(payload)).not.toMatch(/\d{2,}\.\d\d/) // no baht-formatted figure anywhere
+  })
+
+  it('run.reviewed / run.approved / run.committed each carry their own actor', async () => {
+    const h = await harness()
+    const run = await draftRun(h)
+    await h.service.calculate(h.tx, run.id, [EMPLOYEE])
+    await h.service.review(h.tx, run.id, PREPARER, 'payroll_officer')
+    await h.service.approve(h.tx, run.id, APPROVER, 'payroll_manager')
+    await h.service.commit(h.tx, run.id, APPROVER, 'payroll_manager')
+
+    expect(auditRows(h, 'run.reviewed')[0]?.payload).toMatchObject({ actorId: PREPARER, actorRole: 'payroll_officer', action: 'run.reviewed' })
+    expect(auditRows(h, 'run.approved')[0]?.payload).toMatchObject({ actorId: APPROVER, actorRole: 'payroll_manager', action: 'run.approved' })
+    expect(auditRows(h, 'run.committed')[0]?.payload).toMatchObject({ actorId: APPROVER, actorRole: 'payroll_manager', action: 'run.committed', entity: 'payroll_run', entityId: run.id })
+  })
+
+  it('an adjustment run emits run.adjustment_created, distinct from an ordinary run.created', async () => {
+    const h = await harness()
+    const run = await throughApproval(h)
+    await h.service.commit(h.tx, run.id)
+    const adjustment = await h.service.createAdjustmentRun(h.tx, run.id, PREPARER, PAY_DATE, 'payroll_officer')
+
+    const [row] = auditRows(h, 'run.adjustment_created')
+    expect(row?.payload).toMatchObject({ actorId: PREPARER, actorRole: 'payroll_officer', action: 'run.adjustment_created', entity: 'payroll_run', entityId: adjustment.id })
+    // `throughApproval` itself created the ORIGINAL run via the ordinary
+    // path, so exactly one `run.created` exists (for that run) — the
+    // adjustment itself never emits a second one under that action name.
+    expect(auditRows(h, 'run.created')).toHaveLength(1)
+    expect(auditRows(h, 'run.created')[0]?.payload).toMatchObject({ entityId: run.id })
+  })
+
+  it('actor defaults to "unknown" rather than throwing when a caller omits it — e.g. every pre-existing call site in this file', async () => {
+    const h = await harness()
+    const run = await draftRun(h) // draftRun's createRun call predates preparedByRole
+    await h.service.calculate(h.tx, run.id, [EMPLOYEE]) // no actor args
+
+    expect(auditRows(h, 'run.calculated')[0]?.payload).toMatchObject({ actorId: 'unknown', actorRole: 'unknown' })
   })
 })

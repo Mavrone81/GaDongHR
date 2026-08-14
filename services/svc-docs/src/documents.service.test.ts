@@ -373,24 +373,28 @@ describe('DocumentsService — the stored file_ref is ciphertext, never a plaint
   })
 })
 
-describe('DocumentsService.commit — writes the row and a document.rendered outbox event in one transaction', () => {
-  it('writes exactly one docs.document row and one outbox row on commit', async () => {
+describe('DocumentsService.commit — writes the row, a document.rendered business event AND its audit entry in one transaction', () => {
+  it('writes exactly one docs.document row and two outbox rows (the business event and its audit.document.rendered entry) on commit', async () => {
     const { service, db } = makeService()
     const prepared = await service.prepare(payslipRequest())
     const conn = db.connect()
     await conn.query('BEGIN')
-    const result = await service.commit(conn, prepared)
+    const result = await service.commit(conn, prepared, 'hr-1', 'hr_admin')
     await conn.query('COMMIT')
 
     expect(db.debugDocuments()).toHaveLength(1)
-    expect(db.debugOutboxRows()).toHaveLength(1)
+    expect(db.debugOutboxRows()).toHaveLength(2)
     expect(db.debugOutboxRows()[0]).toMatchObject({
       topic: 'document.rendered',
       payload: { documentId: result.id, kind: 'payslip', lang: 'th', sha256: prepared.sha256 },
     })
+    expect(db.debugOutboxRows()[1]).toMatchObject({
+      topic: 'audit.document.rendered',
+      payload: { actorId: 'hr-1', actorRole: 'hr_admin', action: 'document.rendered', entity: 'document', entityId: result.id, beforeHash: null },
+    })
   })
 
-  it('rolls back cleanly: nothing is committed if COMMIT never runs', async () => {
+  it('rolls back cleanly: nothing is committed if COMMIT never runs — the audit entry rolls back with everything else', async () => {
     const { service, db } = makeService()
     const prepared = await service.prepare(payslipRequest())
     const conn = db.connect()

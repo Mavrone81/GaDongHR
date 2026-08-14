@@ -1,4 +1,4 @@
-import { GadongError, resolveEffective, sodViolation, writeOutbox } from '@gadong/kernel'
+import { AuditEmitter, GadongError, resolveEffective, sodViolation, writeOutbox } from '@gadong/kernel'
 import type { Queryable } from '@gadong/kernel'
 import { RulesRepository } from './rules.repository'
 import type { GovernanceClass, NewRuleRow, StatutoryRuleRow } from './rules.repository'
@@ -15,6 +15,8 @@ export interface ProposeRuleInput {
   governanceClass: GovernanceClass
   reason: string
   proposedBy: string
+  /** Optional so every existing caller (tests, anything predating this field) still compiles — falls back to `'unknown'` on the audit entry, matching every other service's "imprecise beats a 500" convention. */
+  proposedByRole?: string
 }
 
 function ruleNotFound(ruleKey: string, on: string): GadongError {
@@ -63,6 +65,7 @@ export class RulesService {
   constructor(
     private readonly repo: RulesRepository,
     private readonly now: () => Date = () => new Date(),
+    private readonly audit: AuditEmitter = new AuditEmitter(),
   ) {}
 
   private today(): string {
@@ -137,7 +140,25 @@ export class RulesService {
       approvedBy: null,
       reason: input.reason,
     }
-    return this.repo.insert(tx, row)
+    const inserted = await this.repo.insert(tx, row)
+
+    // "rule proposed / approved / rejected — governance actions on
+    // statutory data — the two-person-control audit trail" (roadmap
+    // audit-coverage brief). `after` never carries the proposed `value`
+    // itself raw — a statutory figure is exactly the kind of "config data"
+    // write the roadmap's audit contract covers, and `AuditEmitter` hashes
+    // it either way; `ruleKey`/`governanceClass` alone already say WHAT was
+    // proposed without needing the number to be readable in this entry.
+    await this.audit.emit(tx, 'config', {
+      actorId: input.proposedBy,
+      actorRole: input.proposedByRole ?? 'unknown',
+      action: 'rule.proposed',
+      entity: 'statutory_rule',
+      entityId: inserted.id,
+      after: { ruleKey: inserted.ruleKey, governanceClass: inserted.governanceClass, effectiveFrom: inserted.effectiveFrom },
+    })
+
+    return inserted
   }
 
   /**
@@ -149,7 +170,7 @@ export class RulesService {
    * migration). Publishes `rules.updated` to the outbox in the SAME
    * transaction as the status change (kernel `writeOutbox`).
    */
-  async approve(tx: Queryable, id: string, approvedBy: string): Promise<StatutoryRuleRow> {
+  async approve(tx: Queryable, id: string, approvedBy: string, approvedByRole = 'unknown'): Promise<StatutoryRuleRow> {
     const row = await this.repo.findById(id)
     if (!row) throw ruleVersionNotFound(id)
     if (row.status !== 'draft') throw notDraft(id)
@@ -164,6 +185,15 @@ export class RulesService {
     await writeOutbox(tx, 'config', 'rules.updated', {
       ruleKeys: [approved.ruleKey],
       effectiveFrom: approved.effectiveFrom,
+    })
+
+    await this.audit.emit(tx, 'config', {
+      actorId: approvedBy,
+      actorRole: approvedByRole,
+      action: 'rule.approved',
+      entity: 'statutory_rule',
+      entityId: approved.id,
+      after: { ruleKey: approved.ruleKey, effectiveFrom: approved.effectiveFrom, proposedBy: approved.proposedBy },
     })
 
     return approved

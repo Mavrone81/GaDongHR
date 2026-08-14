@@ -282,7 +282,7 @@ describe('service errors reach the client as their declared status and envelope'
   it('a sub-minimum wage on PUT /profiles is a 422 PAY-010 carrying the citation', async () => {
     const h = await controllerHarness()
     await expect(
-      h.controller.putProfile(EMPLOYEE, {
+      h.controller.putProfile({ userId: PREPARER } as never, EMPLOYEE, {
         basePayThb: '11000',
         payBasis: 'monthly',
         recurringItems: [],
@@ -299,12 +299,15 @@ describe('service errors reach the client as their declared status and envelope'
   it('an export of an uncommitted run is a 409 PAY-050 — a filing of figures that may still change', async () => {
     const h = await controllerHarness()
     const run = await preparedRun(h)
-    await expect(h.controller.statutoryExport(run.id, 'sso_1_10')).rejects.toMatchObject({ status: 409, response: { code: 'PAY-050' } })
+    await expect(h.controller.statutoryExport({ userId: PREPARER } as never, run.id, 'sso_1_10')).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'PAY-050' },
+    })
   })
 
   it('an unknown export kind is refused before any lookup happens', async () => {
     const h = await controllerHarness()
-    await expect(h.controller.statutoryExport('any', 'not_a_form')).rejects.toBeInstanceOf(HttpException)
+    await expect(h.controller.statutoryExport({ userId: PREPARER } as never, 'any', 'not_a_form')).rejects.toBeInstanceOf(HttpException)
   })
 
   it('an unknown bank format is a 422 PAY-051', async () => {
@@ -312,7 +315,10 @@ describe('service errors reach the client as their declared status and envelope'
     const run = await preparedRun(h)
     await h.runsService.approve(h.tx, run.id, APPROVER)
     await h.runsService.commit(h.tx, run.id)
-    await expect(h.controller.bankFile(run.id, { format: 'citibank' })).rejects.toMatchObject({ status: 422, response: { code: 'PAY-051' } })
+    await expect(h.controller.bankFile({ userId: PREPARER } as never, run.id, { format: 'citibank' })).rejects.toMatchObject({
+      status: 422,
+      response: { code: 'PAY-051' },
+    })
   })
 })
 
@@ -366,7 +372,7 @@ describe('the read routes', () => {
       },
       '2026-10-31',
     )
-    const view = await h.controller.getProfile(EMPLOYEE)
+    const view = await h.controller.getProfile({ userId: PREPARER } as never, EMPLOYEE)
     expect(view).toMatchObject({ basePayThb: '45000.00', payBasis: 'monthly', pfRatePercent: '5', bankCode: 'KBANK' })
     expect(view.bankAccountMasked).toBe('******7890')
   })

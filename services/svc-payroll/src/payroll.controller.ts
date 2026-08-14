@@ -130,15 +130,25 @@ export class PayrollController {
 
   @Get('profiles/:employeeId')
   @RequirePermission('payroll.profile.read')
-  async getProfile(@Param('employeeId') employeeId: string): Promise<PayProfileView> {
-    return this.runFailClosed(() => this.profiles.view(employeeId, 'payroll.profile.read'))
+  async getProfile(@Req() req: AuthenticatedRequest, @Param('employeeId') employeeId: string): Promise<PayProfileView> {
+    const purpose = 'payroll.profile.read'
+    return this.runFailClosed(async () => {
+      const view = await this.profiles.view(employeeId, purpose)
+      // The read itself never holds a transaction (slow crypto round trips
+      // — see `PayProfilesService.view`'s doc); the audit entry it produces
+      // is its own fast, separate write.
+      await withTransaction(this.pool, (tx) => this.profiles.commitProfileReadAudit(tx, employeeId, purpose, actorId(req), actorRole(req)))
+      return view
+    })
   }
 
   /** Rejects a base pay below the employee's provincial minimum with PAY-010, citing the province, the floor and the notification. */
   @Put('profiles/:employeeId')
   @RequirePermission('payroll.profile.write')
-  async putProfile(@Param('employeeId') employeeId: string, @Body() body: PayProfileInputDto): Promise<PayProfileView> {
-    return this.runFailClosed(() => withTransaction(this.pool, (tx) => this.profiles.upsert(tx, employeeId, body, today())))
+  async putProfile(@Req() req: AuthenticatedRequest, @Param('employeeId') employeeId: string, @Body() body: PayProfileInputDto): Promise<PayProfileView> {
+    return this.runFailClosed(() =>
+      withTransaction(this.pool, (tx) => this.profiles.upsert(tx, employeeId, body, today(), actorId(req), actorRole(req))),
+    )
   }
 
   // ---------------------------------------------------- M7-3 run lifecycle
@@ -153,6 +163,7 @@ export class PayrollController {
           period: body.period,
           runType: body.runType,
           preparedBy,
+          preparedByRole: actorRole(req),
           periodStart: body.periodStart,
           periodEnd: body.periodEnd,
           payDate: body.payDate,
@@ -170,8 +181,10 @@ export class PayrollController {
 
   @Post('runs/:id/calculate')
   @RequirePermission('payroll.run.calculate')
-  async calculate(@Param('id') id: string, @Body() body: CalculateBody): Promise<CalculationOutcome> {
-    return this.runFailClosed(() => withTransaction(this.pool, (tx) => this.runs.calculate(tx, id, body.employeeIds)))
+  async calculate(@Req() req: AuthenticatedRequest, @Param('id') id: string, @Body() body: CalculateBody): Promise<CalculationOutcome> {
+    return this.runFailClosed(() =>
+      withTransaction(this.pool, (tx) => this.runs.calculate(tx, id, body.employeeIds, actorId(req), actorRole(req))),
+    )
   }
 
   /** Line-level movement against the previous period's committed run; the threshold is config, and an employee with no prior period is always flagged. */
@@ -185,7 +198,7 @@ export class PayrollController {
   @RequirePermission('payroll.run.prepare')
   async review(@Req() req: AuthenticatedRequest, @Param('id') id: string): Promise<PayrollRunRow> {
     const reviewedBy = this.requireUserId(req)
-    return this.runFailClosed(() => withTransaction(this.pool, (tx) => this.runs.review(tx, id, reviewedBy)))
+    return this.runFailClosed(() => withTransaction(this.pool, (tx) => this.runs.review(tx, id, reviewedBy, actorRole(req))))
   }
 
   /** Preparer ≠ approver: a preparer approving their own run gets AUZ-409 from `RunsService`, and the DB CHECK refuses it too. */
@@ -193,13 +206,13 @@ export class PayrollController {
   @RequirePermission('payroll.run.approve')
   async approve(@Req() req: AuthenticatedRequest, @Param('id') id: string): Promise<PayrollRunRow> {
     const approvedBy = this.requireUserId(req)
-    return this.runFailClosed(() => withTransaction(this.pool, (tx) => this.runs.approve(tx, id, approvedBy)))
+    return this.runFailClosed(() => withTransaction(this.pool, (tx) => this.runs.approve(tx, id, approvedBy, actorRole(req))))
   }
 
   @Post('runs/:id/commit')
   @RequirePermission('payroll.run.commit')
-  async commit(@Param('id') id: string): Promise<PayrollRunRow> {
-    return this.runFailClosed(() => withTransaction(this.pool, (tx) => this.runs.commit(tx, id)))
+  async commit(@Req() req: AuthenticatedRequest, @Param('id') id: string): Promise<PayrollRunRow> {
+    return this.runFailClosed(() => withTransaction(this.pool, (tx) => this.runs.commit(tx, id, actorId(req), actorRole(req))))
   }
 
   /** Corrections to a committed run: a NEW run that references it, never an edit. */
@@ -208,7 +221,7 @@ export class PayrollController {
   async adjustmentRun(@Req() req: AuthenticatedRequest, @Body() body: AdjustmentRunBody): Promise<PayrollRunRow> {
     const preparedBy = this.requireUserId(req)
     return this.runFailClosed(() =>
-      withTransaction(this.pool, (tx) => this.runs.createAdjustmentRun(tx, body.targetRunId, preparedBy, body.payDate)),
+      withTransaction(this.pool, (tx) => this.runs.createAdjustmentRun(tx, body.targetRunId, preparedBy, body.payDate, actorRole(req))),
     )
   }
 
@@ -232,17 +245,17 @@ export class PayrollController {
 
   @Post('runs/:id/bank-file')
   @RequirePermission('payroll.export')
-  async bankFile(@Param('id') id: string, @Body() body: BankFileBody): Promise<BankFileResult> {
-    return this.runFailClosed(() => this.exports.renderBankFile(id, body.format, this.pool))
+  async bankFile(@Req() req: AuthenticatedRequest, @Param('id') id: string, @Body() body: BankFileBody): Promise<BankFileResult> {
+    return this.runFailClosed(() => this.exports.renderBankFile(id, body.format, this.pool, actorId(req), actorRole(req)))
   }
 
   @Post('runs/:id/exports/:kind')
   @RequirePermission('payroll.export')
-  async statutoryExport(@Param('id') id: string, @Param('kind') kind: string): Promise<GeneratedExport> {
+  async statutoryExport(@Req() req: AuthenticatedRequest, @Param('id') id: string, @Param('kind') kind: string): Promise<GeneratedExport> {
     if (!isStatutoryExportKind(kind)) {
       throw new HttpException(unsupportedBankFormat(kind, Object.keys(EXPORT_BUILDERS)).toEnvelope(), 422)
     }
-    return this.runFailClosed(() => this.exports.renderStatutory(id, kind, this.pool))
+    return this.runFailClosed(() => this.exports.renderStatutory(id, kind, this.pool, actorId(req), actorRole(req)))
   }
 
   // ------------------------------------------------------ M7-7 final pay
@@ -278,4 +291,12 @@ export class PayrollController {
       throw err
     }
   }
+}
+
+/** Same fallback `svc-onboarding`'s `employee.controller.ts` uses for its own audit entries: an imprecise actor beats a 500 on every audited write. */
+function actorId(req: AuthenticatedRequest): string {
+  return req.userId ?? 'unknown'
+}
+function actorRole(req: AuthenticatedRequest): string {
+  return req.actorRole ?? 'unknown'
 }

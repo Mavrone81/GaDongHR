@@ -119,19 +119,22 @@ describe('RulesController wiring', () => {
       proposedBy: 'hr-admin-1',
     }
 
-    const out = await controller.propose(body)
+    const out = await controller.propose({ userId: 'hr-admin-1', actorRole: 'hr_admin' } as never, body)
 
-    expect(propose).toHaveBeenCalledWith(expect.anything(), body)
+    // The controller adds `proposedByRole` from the request's OIDC-derived
+    // role — a caller-supplied `body.proposedByRole` (none here) would win;
+    // absent one, it falls back to `actorRole(req)`.
+    expect(propose).toHaveBeenCalledWith(expect.anything(), { ...body, proposedByRole: 'hr_admin' })
     expect(out).toMatchObject({ status: 'draft' })
   })
 
-  it('POST /rules/:id/approve forwards id and approvedBy', async () => {
+  it('POST /rules/:id/approve forwards id, approvedBy and the actor role', async () => {
     const approve = jest.fn().mockResolvedValue(fakeRow({ status: 'active', approvedBy: 'compliance-1' }))
     const controller = new RulesController(fakeRulesService({ approve }), fakePacksService(), fakePool())
 
-    const out = await controller.approve('rule-1', { approvedBy: 'compliance-1' })
+    const out = await controller.approve({ userId: 'compliance-1', actorRole: 'compliance_officer' } as never, 'rule-1', { approvedBy: 'compliance-1' })
 
-    expect(approve).toHaveBeenCalledWith(expect.anything(), 'rule-1', 'compliance-1')
+    expect(approve).toHaveBeenCalledWith(expect.anything(), 'rule-1', 'compliance-1', 'compliance_officer')
     expect(out).toMatchObject({ status: 'active', approvedBy: 'compliance-1' })
   })
 
@@ -189,7 +192,7 @@ describe('RulesController wiring', () => {
     const controller = new RulesController(fakeRulesService({ propose }), fakePacksService(), fakePool())
 
     try {
-      await controller.propose({
+      await controller.propose({ userId: 'hr-admin-1' } as never, {
         ruleKey: 'leave.annual.min_days',
         value: 4,
         unit: 'days',

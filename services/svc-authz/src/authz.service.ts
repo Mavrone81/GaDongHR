@@ -1,5 +1,7 @@
+import { AuditEmitter } from '@gadong/kernel'
 import type { Queryable } from '@gadong/kernel'
 import { AuthzRepository } from './authz.repository'
+import type { NewUserRoleGrant, UserRoleGrantRow } from './authz.repository'
 import { subtreeIds } from './org-tree'
 
 /**
@@ -38,7 +40,54 @@ function deniedDecision(): Decision {
  * outage (wrongly deny everything) — see `decide.wire-contract.test.ts`.
  */
 export class AuthzService {
-  constructor(private readonly repo: AuthzRepository) {}
+  constructor(
+    private readonly repo: AuthzRepository,
+    private readonly audit: AuditEmitter = new AuditEmitter(),
+  ) {}
+
+  /**
+   * `POST /users/:id/roles` — "grants and revocations (who granted what to
+   * whom)" (roadmap audit-coverage brief). `after` carries the role id and
+   * org scope (routing metadata, not S3 subject data), never anything about
+   * the grantee beyond their id, which is already `entityId`.
+   */
+  async grantRole(tx: Queryable, input: NewUserRoleGrant, grantedByRole = 'unknown'): Promise<UserRoleGrantRow> {
+    const row = await this.repo.insertUserRole(tx, input)
+
+    await this.audit.emit(tx, 'authz', {
+      actorId: input.grantedBy,
+      actorRole: grantedByRole,
+      action: 'role.granted',
+      entity: 'user_role_grant',
+      entityId: row.id,
+      after: { userId: row.userId, roleId: row.roleId, orgScopeUnitId: row.orgScopeUnitId },
+    })
+
+    return row
+  }
+
+  /**
+   * `DELETE /users/:id/roles/:roleId` — the other half of "grants and
+   * revocations". `deleteUserRoleGrants` can remove more than one row (a
+   * user may hold the same role at several org scopes); one audit entry
+   * covers the whole revocation request, with the count it actually
+   * affected — a single conceptual action, not N near-duplicate entries for
+   * what the caller experienced as one DELETE.
+   */
+  async revokeRole(tx: Queryable, userId: string, roleId: string, revokedBy: string, revokedByRole = 'unknown'): Promise<number> {
+    const deleted = await this.repo.deleteUserRoleGrants(tx, userId, roleId)
+
+    await this.audit.emit(tx, 'authz', {
+      actorId: revokedBy,
+      actorRole: revokedByRole,
+      action: 'role.revoked',
+      entity: 'user_role_grant',
+      entityId: userId,
+      after: { roleId, grantsRemoved: deleted },
+    })
+
+    return deleted
+  }
 
   /**
    * Task 8 brief §4, properties 1 and 3:

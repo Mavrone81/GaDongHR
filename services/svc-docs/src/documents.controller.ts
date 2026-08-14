@@ -1,8 +1,8 @@
-import { Body, Controller, Get, HttpException, Inject, Param, Post } from '@nestjs/common'
+import { Body, Controller, Get, HttpException, Inject, Param, Post, Req } from '@nestjs/common'
 import { GadongError, Public, RequirePermission, buildHealth, outboxDepth, withTransaction } from '@gadong/kernel'
-import type { HealthPayload, Locale } from '@gadong/kernel'
+import type { AuthenticatedRequest, HealthPayload, Locale } from '@gadong/kernel'
 import type { Pool } from 'pg'
-import { DocumentsService } from './documents.service'
+import { DOCUMENT_READ_PURPOSE, DocumentsService } from './documents.service'
 import type { RenderRequest } from './documents.service'
 import type { MergeFields } from './merge-fields'
 
@@ -68,7 +68,7 @@ export class DocumentsController {
 
   @Post('render')
   @RequirePermission('document.generate')
-  async render(@Body() body: RenderRequestBody): Promise<RenderResponseBody> {
+  async render(@Req() req: AuthenticatedRequest, @Body() body: RenderRequestBody): Promise<RenderResponseBody> {
     return this.runFailClosed(async () => {
       const input: RenderRequest = {
         kind: body.kind,
@@ -79,15 +79,21 @@ export class DocumentsController {
         html: body.html,
       }
       const prepared = await this.documentsService.prepare(input)
-      return withTransaction(this.pool, (tx) => this.documentsService.commit(tx, prepared))
+      return withTransaction(this.pool, (tx) => this.documentsService.commit(tx, prepared, actorId(req), actorRole(req)))
     })
   }
 
   @Get('documents/:id')
   @RequirePermission('document.read')
-  async getById(@Param('id') id: string): Promise<DocumentResponseBody> {
+  async getById(@Req() req: AuthenticatedRequest, @Param('id') id: string): Promise<DocumentResponseBody> {
     return this.runFailClosed(async () => {
-      const { meta, pdfBytes } = await this.documentsService.getDocument(id)
+      const purpose = DOCUMENT_READ_PURPOSE
+      const { meta, pdfBytes } = await this.documentsService.getDocument(id, purpose)
+      // The read/download itself never holds a transaction (MinIO GET +
+      // decrypt — see `DocumentsService.getDocument`'s doc); the audit
+      // entry is its own fast, separate write, same split
+      // `PayrollController.getProfile` uses.
+      await withTransaction(this.pool, (tx) => this.documentsService.commitReadAudit(tx, meta, purpose, actorId(req), actorRole(req)))
       return {
         id: meta.id,
         kind: meta.kind,
@@ -141,4 +147,12 @@ export class DocumentsController {
       throw err
     }
   }
+}
+
+/** Same fallback `svc-onboarding`'s `employee.controller.ts`/`svc-payroll`'s `payroll.controller.ts` use for their own audit entries: an imprecise actor beats a 500 on every audited write or read. */
+function actorId(req: AuthenticatedRequest): string {
+  return req.userId ?? 'unknown'
+}
+function actorRole(req: AuthenticatedRequest): string {
+  return req.actorRole ?? 'unknown'
 }

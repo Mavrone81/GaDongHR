@@ -1,6 +1,6 @@
-import { Body, Controller, Get, HttpException, Inject, Param, Post, Query } from '@nestjs/common'
+import { Body, Controller, Get, HttpException, Inject, Param, Post, Query, Req } from '@nestjs/common'
 import { GadongError, Public, RequirePermission, buildHealth, outboxDepth, withTransaction } from '@gadong/kernel'
-import type { HealthPayload } from '@gadong/kernel'
+import type { AuthenticatedRequest, HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { RulesService } from './rules.service'
 import type { ProposeRuleInput } from './rules.service'
@@ -53,15 +53,17 @@ export class RulesController {
 
   @Post('rules')
   @RequirePermission('config.rule.propose')
-  async propose(@Body() body: ProposeRuleInput): Promise<StatutoryRuleRow> {
-    return this.runFailClosed(() => withTransaction(this.pool, (tx) => this.rulesService.propose(tx, body)))
+  async propose(@Req() req: AuthenticatedRequest, @Body() body: ProposeRuleInput): Promise<StatutoryRuleRow> {
+    return this.runFailClosed(() =>
+      withTransaction(this.pool, (tx) => this.rulesService.propose(tx, { ...body, proposedByRole: body.proposedByRole ?? actorRole(req) })),
+    )
   }
 
   @Post('rules/:id/approve')
   @RequirePermission('config.rule.approve')
-  async approve(@Param('id') id: string, @Body() body: ApproveRuleBody): Promise<StatutoryRuleRow> {
+  async approve(@Req() req: AuthenticatedRequest, @Param('id') id: string, @Body() body: ApproveRuleBody): Promise<StatutoryRuleRow> {
     return this.runFailClosed(() =>
-      withTransaction(this.pool, (tx) => this.rulesService.approve(tx, id, body.approvedBy)),
+      withTransaction(this.pool, (tx) => this.rulesService.approve(tx, id, body.approvedBy, actorRole(req))),
     )
   }
 
@@ -116,4 +118,9 @@ export class RulesController {
       throw err
     }
   }
+}
+
+/** Same fallback every other controller's own audit wiring uses (`svc-onboarding`, `svc-payroll`, `svc-docs`): an imprecise role beats a 500 on every audited governance action. */
+function actorRole(req: AuthenticatedRequest): string {
+  return req.actorRole ?? 'unknown'
 }

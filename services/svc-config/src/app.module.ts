@@ -2,9 +2,17 @@ import 'reflect-metadata'
 import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_FILTER, APP_GUARD } from '@nestjs/core'
-import { AuthzClient, GadongErrorFilter, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
+import {
+  AuditEmitter,
+  AuthzClient,
+  DENIAL_AUDIT_SINK,
+  GadongErrorFilter,
+  PermissionGuard,
+  createOidcMiddlewareHandler,
+  createPool,
+} from '@gadong/kernel'
 import type { OidcMiddlewareHandler } from '@gadong/kernel'
-import type { AuthzTransport, Queryable } from '@gadong/kernel'
+import type { AuthzTransport, DenialAuditSink, Queryable } from '@gadong/kernel'
 import { DB_POOL, RulesController } from './rules.controller'
 import { RulesService } from './rules.service'
 import { RulesRepository } from './rules.repository'
@@ -89,6 +97,17 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
       // schema").
       useFactory: () => createPool(requiredEnv('DATABASE_URL'), 'config'),
     },
+    // One shared `AuditEmitter` (stateless — kernel `audit/emitter.ts`),
+    // matching `svc-payroll`/`svc-docs`'s `app.module.ts`.
+    { provide: AuditEmitter, useFactory: () => new AuditEmitter() },
+    {
+      // Wires `PermissionGuard`'s optional denial-audit sink (kernel
+      // `authz/guard.ts`) to this service's own `config.outbox` — see that
+      // file's "DENIAL AUDITING" doc.
+      provide: DENIAL_AUDIT_SINK,
+      useFactory: (pool: Queryable): DenialAuditSink => ({ pool, schema: 'config' }),
+      inject: [DB_POOL],
+    },
     {
       provide: RulesRepository,
       useFactory: (pool: Queryable) => new RulesRepository(pool),
@@ -96,8 +115,8 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
     },
     {
       provide: RulesService,
-      useFactory: (repo: RulesRepository) => new RulesService(repo),
-      inject: [RulesRepository],
+      useFactory: (repo: RulesRepository, audit: AuditEmitter) => new RulesService(repo, () => new Date(), audit),
+      inject: [RulesRepository, AuditEmitter],
     },
     {
       provide: PacksService,

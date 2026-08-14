@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { Injectable, Logger } from '@nestjs/common'
-import { CryptoClient, cryptoUnavailable, writeOutbox } from '@gadong/kernel'
+import { AuditEmitter, CryptoClient, cryptoUnavailable, writeOutbox } from '@gadong/kernel'
 import type { Locale, Queryable } from '@gadong/kernel'
 import { DocumentsRepository } from './documents.repository'
 import type { DocumentRow, NewDocumentRow } from './documents.repository'
@@ -90,6 +90,7 @@ export class DocumentsService {
     private readonly storage: ObjectStorage,
     private readonly crypto: CryptoClient,
     private readonly bucket: string,
+    private readonly audit: AuditEmitter = new AuditEmitter(),
   ) {}
 
   /**
@@ -154,7 +155,7 @@ export class DocumentsService {
     }
   }
 
-  async commit(tx: Queryable, prepared: PreparedDocument): Promise<RenderResult> {
+  async commit(tx: Queryable, prepared: PreparedDocument, actorId = 'unknown', actorRole = 'unknown'): Promise<RenderResult> {
     const newRow: NewDocumentRow = {
       kind: prepared.kind,
       entityType: prepared.entityType,
@@ -174,6 +175,21 @@ export class DocumentsService {
       sha256: row.sha256,
     })
 
+    // "document render (what template, for whom, by whom)" — roadmap
+    // audit-coverage brief. `after` carries the template `kind`/`lang` and
+    // WHICH entity the document is about, never the rendered content
+    // itself (that only ever exists as `fileRef`, already S3-envelope
+    // ciphertext, and as `sha256`, a content fingerprint — neither is a raw
+    // field this hashes further, they are already opaque).
+    await this.audit.emit(tx, 'docs', {
+      actorId,
+      actorRole,
+      action: 'document.rendered',
+      entity: 'document',
+      entityId: row.id,
+      after: { kind: row.kind, entityType: row.entityType, forEntityId: row.entityId, lang: row.lang },
+    })
+
     return { id: row.id, kind: row.kind, entityType: row.entityType, entityId: row.entityId, lang: row.lang, sha256: row.sha256 }
   }
 
@@ -185,6 +201,28 @@ export class DocumentsService {
     const pointer = JSON.parse(pointerJson) as { bucket: string; key: string }
     const pdfBytes = await this.storage.get(pointer.bucket, pointer.key)
     return { meta, pdfBytes }
+  }
+
+  /**
+   * `GET /documents/:id` is an audited S3 read AND the only way this
+   * service lets a caller download a document — one audit entry covers
+   * both "read" and "download" (roadmap audit-coverage brief; there is no
+   * separate download route to instrument). `getDocument` itself stays
+   * DB-write-free (MinIO GET + decrypt, both slow I/O — same reasoning as
+   * `prepare()`'s doc); this commits the audit entry as its own fast write,
+   * matching `PayProfilesService.commitProfileReadAudit`'s split. Action
+   * ends in `.sensitive.read` so kernel `AuditEmitter.emit` itself rejects
+   * a blank purpose.
+   */
+  async commitReadAudit(tx: Queryable, meta: DocumentRow, purpose: string, actorId: string, actorRole: string): Promise<void> {
+    await this.audit.emit(tx, 'docs', {
+      actorId,
+      actorRole,
+      action: 'document.sensitive.read',
+      entity: 'document',
+      entityId: meta.id,
+      purpose,
+    })
   }
 
   async health(): Promise<{ storage: 'up' | 'down'; fonts: 'up' | 'down' }> {

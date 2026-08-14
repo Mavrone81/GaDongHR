@@ -1,4 +1,4 @@
-import { CryptoClient, sodViolation, writeOutbox } from '@gadong/kernel'
+import { AuditEmitter, CryptoClient, sodViolation, writeOutbox } from '@gadong/kernel'
 import type { Queryable } from '@gadong/kernel'
 import {
   adjustmentTargetNotCommitted,
@@ -63,6 +63,8 @@ export interface CreateRunInput {
   period: string
   runType: RunType
   preparedBy: string
+  /** The audit trail's `actorRole` for `run.created` — optional so callers that predate this field (existing tests, `createAdjustmentRun`'s own construction) still compile; falls back to `'unknown'`, matching every other service's "an imprecise role beats a 500" convention. */
+  preparedByRole?: string
   periodStart: string
   periodEnd: string
   payDate: string
@@ -101,6 +103,7 @@ export class RunsService {
     private readonly exportRecorder: ExportRecorder,
     private readonly newId: () => string,
     private readonly now: () => string,
+    private readonly audit: AuditEmitter = new AuditEmitter(),
   ) {}
 
   // ---------------------------------------------------------------- draft
@@ -125,7 +128,7 @@ export class RunsService {
       if (target.status !== 'committed') throw adjustmentTargetNotCommitted(adjustsRunId, target.status)
     }
 
-    return this.runs.insert(tx, {
+    const row = await this.runs.insert(tx, {
       id: this.newId(),
       period: input.period,
       runType: input.runType,
@@ -137,14 +140,34 @@ export class RunsService {
       payDate: input.payDate,
       adjustsRunId,
     })
+
+    // "run created ... (who, when, run id, period)" — roadmap's PDPA audit
+    // trail. No `before`/`after` amounts here (a draft run has none yet);
+    // `after` carries only the shape of the run, never a money figure.
+    await this.audit.emit(tx, 'payroll', {
+      actorId: input.preparedBy,
+      actorRole: input.preparedByRole ?? 'unknown',
+      action: 'run.created',
+      entity: 'payroll_run',
+      entityId: row.id,
+      after: { period: row.period, runType: row.runType, adjustsRunId },
+    })
+
+    return row
   }
 
   /** Corrections to a committed run happen HERE and only here — never by editing the committed row. */
-  async createAdjustmentRun(tx: Queryable, targetRunId: string, preparedBy: string, payDate: string): Promise<PayrollRunRow> {
+  async createAdjustmentRun(
+    tx: Queryable,
+    targetRunId: string,
+    preparedBy: string,
+    payDate: string,
+    preparedByRole = 'unknown',
+  ): Promise<PayrollRunRow> {
     const target = await this.runs.findById(targetRunId, tx)
     if (target === null) throw runNotFound(targetRunId)
     if (target.status !== 'committed') throw adjustmentTargetNotCommitted(targetRunId, target.status)
-    return this.runs.insert(tx, {
+    const row = await this.runs.insert(tx, {
       id: this.newId(),
       period: target.period,
       runType: 'adjustment',
@@ -156,6 +179,17 @@ export class RunsService {
       payDate,
       adjustsRunId: targetRunId,
     })
+
+    await this.audit.emit(tx, 'payroll', {
+      actorId: preparedBy,
+      actorRole: preparedByRole,
+      action: 'run.adjustment_created',
+      entity: 'payroll_run',
+      entityId: row.id,
+      after: { period: row.period, adjustsRunId: targetRunId },
+    })
+
+    return row
   }
 
   // ------------------------------------------------------------ calculate
@@ -165,7 +199,13 @@ export class RunsService {
    * apiece. Recalculating a `calculated` run is legal (config or timesheet
    * moved); recalculating a committed one is not.
    */
-  async calculate(tx: Queryable, runId: string, employeeIds: string[]): Promise<CalculationOutcome> {
+  async calculate(
+    tx: Queryable,
+    runId: string,
+    employeeIds: string[],
+    actorId = 'unknown',
+    actorRole = 'unknown',
+  ): Promise<CalculationOutcome> {
     const run = await this.requireRun(runId, tx)
     this.assertMutable(run)
     if (run.status !== 'draft' && run.status !== 'calculated' && run.status !== 'reviewed') {
@@ -206,13 +246,39 @@ export class RunsService {
     await this.payInputs.releaseConsumedBy(tx, run.id, run.period)
 
     const payslipIds: string[] = []
+    // S1 aggregates ("totals as amounts-in-satang ... fine to carry" —
+    // roadmap audit-coverage brief), summed from the SAME plaintext
+    // `computeGrossToNet` already produced in memory below — no extra
+    // decrypt round trip just to populate the audit entry. Per-employee
+    // figures never appear here; only the run-wide sum does, and even that
+    // still only reaches the outbox as a hash (`AuditEmitter.emit`'s
+    // contract), never as a raw field.
+    let totalGrossSatang: Satang = 0n
+    let totalNetSatang: Satang = 0n
     for (const employeeId of employeeIds) {
-      const id = await this.calculateOne(tx, run, resolver, employeeId, totals.get(employeeId) ?? ZERO_TIMESHEET, periodEnd)
-      payslipIds.push(id)
+      const one = await this.calculateOne(tx, run, resolver, employeeId, totals.get(employeeId) ?? ZERO_TIMESHEET, periodEnd)
+      payslipIds.push(one.id)
+      totalGrossSatang += one.gross
+      totalNetSatang += one.net
     }
 
     const updated = await this.runs.setCalculated(tx, runId, resolver.snapshot(), boundVersion)
     if (updated === null) throw runNotFound(runId)
+
+    await this.audit.emit(tx, 'payroll', {
+      actorId,
+      actorRole,
+      action: 'run.calculated',
+      entity: 'payroll_run',
+      entityId: runId,
+      after: {
+        period: run.period,
+        payslipCount: payslipIds.length,
+        totalGrossSatang: totalGrossSatang.toString(),
+        totalNetSatang: totalNetSatang.toString(),
+      },
+    })
+
     return { run: updated, payslipIds }
   }
 
@@ -223,7 +289,7 @@ export class RunsService {
     employeeId: string,
     timesheet: TimesheetTotals,
     periodEnd: string,
-  ): Promise<string> {
+  ): Promise<{ id: string; gross: Satang; net: Satang }> {
     const employee = await this.refs.findEmployee(employeeId, tx)
     const profileRow = await this.profiles.findByEmployee(employeeId, tx)
     if (profileRow === null) throw payProfileNotFound(employeeId)
@@ -257,7 +323,8 @@ export class RunsService {
       rules,
     )
 
-    return this.writePayslip(tx, run, employeeId, employee?.empCode ?? null, employee?.preferredLang ?? null, result, ytd, periodEnd)
+    const id = await this.writePayslip(tx, run, employeeId, employee?.empCode ?? null, employee?.preferredLang ?? null, result, ytd, periodEnd)
+    return { id, gross: result.gross, net: result.net }
   }
 
   /**
@@ -503,12 +570,22 @@ export class RunsService {
 
   // --------------------------------------------------- review / approve
 
-  async review(tx: Queryable, runId: string, reviewedBy: string): Promise<PayrollRunRow> {
+  async review(tx: Queryable, runId: string, reviewedBy: string, reviewedByRole = 'unknown'): Promise<PayrollRunRow> {
     const run = await this.requireRun(runId, tx)
     this.assertMutable(run)
     if (run.status !== 'calculated') throw invalidRunTransition(runId, run.status, 'reviewed')
     const updated = await this.runs.setReviewed(tx, runId, reviewedBy)
     if (updated === null) throw runNotFound(runId)
+
+    await this.audit.emit(tx, 'payroll', {
+      actorId: reviewedBy,
+      actorRole: reviewedByRole,
+      action: 'run.reviewed',
+      entity: 'payroll_run',
+      entityId: runId,
+      after: { period: updated.period },
+    })
+
     return updated
   }
 
@@ -519,7 +596,7 @@ export class RunsService {
    * in that file, because a test that would still pass without the code it
    * claims to test is not evidence of anything.
    */
-  async approve(tx: Queryable, runId: string, approvedBy: string): Promise<PayrollRunRow> {
+  async approve(tx: Queryable, runId: string, approvedBy: string, approvedByRole = 'unknown'): Promise<PayrollRunRow> {
     const run = await this.requireRun(runId, tx)
     this.assertMutable(run)
 
@@ -537,12 +614,22 @@ export class RunsService {
 
     const updated = await this.runs.setApproved(tx, runId, approvedBy, this.now())
     if (updated === null) throw runNotFound(runId)
+
+    await this.audit.emit(tx, 'payroll', {
+      actorId: approvedBy,
+      actorRole: approvedByRole,
+      action: 'run.approved',
+      entity: 'payroll_run',
+      entityId: runId,
+      after: { period: updated.period, preparedBy: run.preparedBy },
+    })
+
     return updated
   }
 
   // ------------------------------------------------------------- commit
 
-  async commit(tx: Queryable, runId: string): Promise<PayrollRunRow> {
+  async commit(tx: Queryable, runId: string, actorId = 'unknown', actorRole = 'unknown'): Promise<PayrollRunRow> {
     const run = await this.requireRun(runId, tx)
     this.assertMutable(run)
     if (run.status !== 'approved') throw commitWithoutApproval(runId, run.status)
@@ -564,6 +651,23 @@ export class RunsService {
     for (const slip of slips) {
       await writeOutbox(tx, 'payroll', TOPIC_PAYSLIP_ISSUED, buildPayslipIssuedPayload(slip.id, runId, slip.employeeId, toLocale(slip.lang)))
     }
+
+    // "run committed ... (who, when, run id, period, totals ... fine to
+    // carry)" — the roadmap's audit brief. `payslipCount` is the S1
+    // aggregate carried here; per-employee amounts are deliberately never
+    // read back out of `slips` (they are still envelope-ciphertext at this
+    // point — decrypting every payslip just to sum a committed run's
+    // totals would add N crypto round trips to the one transaction that
+    // must not fail partway through, for a number `run.calculated`'s audit
+    // entry already recorded).
+    await this.audit.emit(tx, 'payroll', {
+      actorId,
+      actorRole,
+      action: 'run.committed',
+      entity: 'payroll_run',
+      entityId: runId,
+      after: { period: committed.period, payDate: committed.payDate, payslipCount: slips.length },
+    })
 
     return committed
   }

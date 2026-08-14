@@ -4,15 +4,17 @@ import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_FILTER, APP_GUARD } from '@nestjs/core'
 import {
+  AuditEmitter,
   AuthzClient,
   CryptoClient,
+  DENIAL_AUDIT_SINK,
   GadongErrorFilter,
   PermissionGuard,
   createOidcMiddlewareHandler,
   createPool,
 } from '@gadong/kernel'
 import type { OidcMiddlewareHandler } from '@gadong/kernel'
-import type { AuthzTransport, CryptoTransport, Queryable } from '@gadong/kernel'
+import type { AuthzTransport, CryptoTransport, DenialAuditSink, Queryable } from '@gadong/kernel'
 import { DB_POOL, DocumentsController } from './documents.controller'
 import { DocumentsService } from './documents.service'
 import { DocumentsRepository } from './documents.repository'
@@ -126,6 +128,17 @@ void EXPECTED_FONT_FAMILIES // documents the contract FONT_DESCRIPTORS above mus
       // else (global-constraints: "every service owns one schema").
       useFactory: () => createPool(requiredEnv('DATABASE_URL'), 'docs'),
     },
+    // One shared `AuditEmitter` (stateless — kernel `audit/emitter.ts`),
+    // matching `svc-payroll`'s `app.module.ts`.
+    { provide: AuditEmitter, useFactory: () => new AuditEmitter() },
+    {
+      // Wires `PermissionGuard`'s optional denial-audit sink (kernel
+      // `authz/guard.ts`) to this service's own `docs.outbox` — see that
+      // file's "DENIAL AUDITING" doc.
+      provide: DENIAL_AUDIT_SINK,
+      useFactory: (pool: Queryable): DenialAuditSink => ({ pool, schema: 'docs' }),
+      inject: [DB_POOL],
+    },
     {
       provide: DocumentsRepository,
       useFactory: (pool: Queryable) => new DocumentsRepository(pool),
@@ -163,8 +176,9 @@ void EXPECTED_FONT_FAMILIES // documents the contract FONT_DESCRIPTORS above mus
         renderer: ChromiumPdfRenderer,
         storage: MinioObjectStorage,
         crypto: CryptoClient,
-      ) => new DocumentsService(repo, templates, fonts, renderer, storage, crypto, requiredEnv('DOCS_BUCKET')),
-      inject: [DocumentsRepository, TemplateLoader, FontRegistry, ChromiumPdfRenderer, MinioObjectStorage, CryptoClient],
+        audit: AuditEmitter,
+      ) => new DocumentsService(repo, templates, fonts, renderer, storage, crypto, requiredEnv('DOCS_BUCKET'), audit),
+      inject: [DocumentsRepository, TemplateLoader, FontRegistry, ChromiumPdfRenderer, MinioObjectStorage, CryptoClient, AuditEmitter],
     },
   ],
 })

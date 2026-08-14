@@ -72,6 +72,56 @@ describe('RulesService.propose — floor validation (the compliance claim)', () 
     expect(row).toMatchObject({ value: 8, status: 'draft' })
   })
 
+  it('emits audit.rule.proposed with the actor, ruleKey and governanceClass — never the proposed value in the clear (roadmap: "governance actions on statutory data")', async () => {
+    const { service, db } = makeService()
+    const conn = db.connect()
+
+    const row = await service.propose(conn, {
+      ruleKey: 'leave.annual.min_days',
+      value: 8,
+      unit: 'days',
+      statutoryFloor: 6,
+      citation: 'LPA s.30',
+      effectiveFrom: '2027-01-01',
+      governanceClass: 'STATUTORY_FLOOR',
+      reason: 'generous policy',
+      proposedBy: 'hr-admin-1',
+      proposedByRole: 'hr_admin',
+    })
+
+    const [audit] = db.debugOutboxRows().filter((r) => r.topic === 'audit.rule.proposed')
+    expect(audit?.payload).toMatchObject({
+      actorId: 'hr-admin-1',
+      actorRole: 'hr_admin',
+      action: 'rule.proposed',
+      entity: 'statutory_rule',
+      entityId: row.id,
+      beforeHash: null,
+    })
+    expect((audit?.payload as Record<string, unknown>)['afterHash']).toEqual(expect.any(String))
+  })
+
+  it('a rejected proposal (below the statutory floor) emits NO audit entry — nothing was actually written', async () => {
+    const { service, db } = makeService()
+    const conn = db.connect()
+
+    await expect(
+      service.propose(conn, {
+        ruleKey: 'leave.annual.min_days',
+        value: 4,
+        unit: 'days',
+        statutoryFloor: 6,
+        citation: 'LPA s.30',
+        effectiveFrom: '2027-01-01',
+        governanceClass: 'STATUTORY_FLOOR',
+        reason: 'x',
+        proposedBy: 'hr-admin-1',
+      }),
+    ).rejects.toMatchObject({ code: 'CFG-422' })
+
+    expect(db.debugOutboxRows()).toHaveLength(0)
+  })
+
   it('CFG-422 also rejects a value above a statutory ceiling, citing the same rule', async () => {
     const { service, db } = makeService()
     const conn = db.connect()
@@ -155,7 +205,7 @@ describe('RulesService.approve — segregation of duties (service-layer check)',
     await expect(service.approve(conn, proposed.id, 'hr-admin-1')).rejects.toMatchObject({ code: 'AUZ-409' })
   })
 
-  it('activates the rule when the approver differs from the proposer, and publishes rules.updated to the outbox in the same transaction', async () => {
+  it('activates the rule when the approver differs from the proposer, and publishes rules.updated AND audit.rule.approved to the outbox in the same transaction', async () => {
     const { service, repo, db } = makeService()
     const conn = db.connect()
     await conn.query('BEGIN')
@@ -163,15 +213,26 @@ describe('RulesService.approve — segregation of duties (service-layer check)',
     await conn.query('COMMIT')
 
     await conn.query('BEGIN')
-    const approved = await service.approve(conn, proposed.id, 'compliance-approver-1')
+    const approved = await service.approve(conn, proposed.id, 'compliance-approver-1', 'compliance_officer')
     await conn.query('COMMIT')
 
     expect(approved).toMatchObject({ status: 'active', approvedBy: 'compliance-approver-1' })
     const outboxRows = db.debugOutboxRows()
-    expect(outboxRows).toHaveLength(1)
+    expect(outboxRows).toHaveLength(2)
     expect(outboxRows[0]).toMatchObject({
       topic: 'rules.updated',
       payload: { ruleKeys: ['leave.annual.min_days'], effectiveFrom: '1998-08-19' },
+    })
+    expect(outboxRows[1]).toMatchObject({
+      topic: 'audit.rule.approved',
+      payload: {
+        actorId: 'compliance-approver-1',
+        actorRole: 'compliance_officer',
+        action: 'rule.approved',
+        entity: 'statutory_rule',
+        entityId: proposed.id,
+        beforeHash: null,
+      },
     })
   })
 

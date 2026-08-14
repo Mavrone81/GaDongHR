@@ -31,10 +31,19 @@ function fakePool(overrides: Partial<Pool> = {}): Pool {
   } as unknown as Pool
 }
 
-type FakeAuthzService = Pick<AuthzService, 'decide'>
+type FakeAuthzService = Pick<AuthzService, 'decide' | 'grantRole' | 'revokeRole'>
 function fakeAuthzService(overrides: Partial<FakeAuthzService> = {}): AuthzService {
   const base: FakeAuthzService = {
     decide: jest.fn().mockResolvedValue({ allowed: true, scopeOrgUnitIds: 'self' }),
+    grantRole: jest.fn().mockResolvedValue({
+      id: 'grant-1',
+      userId: 'user-1',
+      roleId: 'role-1',
+      orgScopeUnitId: null,
+      grantedBy: 'admin-1',
+      grantedAt: '2026-01-01T00:00:00.000Z',
+    }),
+    revokeRole: jest.fn().mockResolvedValue(1),
     ...overrides,
   }
   return base as AuthzService
@@ -132,8 +141,8 @@ describe('AuthzController — GET /roles (Task 8 brief §2: authz.role.read)', (
 })
 
 describe('AuthzController — POST /users/:id/roles and DELETE /users/:id/roles/:roleId (authz.role.grant)', () => {
-  it('POST grants a role, optionally org-scoped, via a transaction', async () => {
-    const insertUserRole = jest.fn().mockResolvedValue({
+  it('POST grants a role, optionally org-scoped, via a transaction, and records who granted it', async () => {
+    const grantRole = jest.fn().mockResolvedValue({
       id: 'grant-1',
       userId: 'user-1',
       roleId: 'role-1',
@@ -141,21 +150,24 @@ describe('AuthzController — POST /users/:id/roles and DELETE /users/:id/roles/
       grantedBy: 'admin-1',
       grantedAt: '2026-01-01T00:00:00.000Z',
     })
-    const controller = new AuthzController(fakeAuthzService(), fakeAuthzRepo({ insertUserRole }), fakePool())
+    const controller = new AuthzController(fakeAuthzService({ grantRole }), fakeAuthzRepo(), fakePool())
 
-    const out = await controller.grantRole('user-1', { roleId: 'role-1', orgScopeUnitId: 'chonburi-plant', grantedBy: 'admin-1' })
-
-    expect(insertUserRole).toHaveBeenCalledWith(expect.anything(), {
-      userId: 'user-1',
+    const out = await controller.grantRole({ userId: 'admin-1', actorRole: 'authz_admin' } as never, 'user-1', {
       roleId: 'role-1',
       orgScopeUnitId: 'chonburi-plant',
       grantedBy: 'admin-1',
     })
+
+    expect(grantRole).toHaveBeenCalledWith(
+      expect.anything(),
+      { userId: 'user-1', roleId: 'role-1', orgScopeUnitId: 'chonburi-plant', grantedBy: 'admin-1' },
+      'authz_admin',
+    )
     expect(out).toMatchObject({ orgScopeUnitId: 'chonburi-plant' })
   })
 
   it('POST with no orgScopeUnitId grants a self-scoped role', async () => {
-    const insertUserRole = jest.fn().mockResolvedValue({
+    const grantRole = jest.fn().mockResolvedValue({
       id: 'grant-1',
       userId: 'user-1',
       roleId: 'role-1',
@@ -163,36 +175,35 @@ describe('AuthzController — POST /users/:id/roles and DELETE /users/:id/roles/
       grantedBy: 'admin-1',
       grantedAt: '2026-01-01T00:00:00.000Z',
     })
-    const controller = new AuthzController(fakeAuthzService(), fakeAuthzRepo({ insertUserRole }), fakePool())
+    const controller = new AuthzController(fakeAuthzService({ grantRole }), fakeAuthzRepo(), fakePool())
 
-    await controller.grantRole('user-1', { roleId: 'role-1', grantedBy: 'admin-1' })
+    await controller.grantRole({ userId: 'admin-1' } as never, 'user-1', { roleId: 'role-1', grantedBy: 'admin-1' })
 
-    expect(insertUserRole).toHaveBeenCalledWith(expect.anything(), {
-      userId: 'user-1',
-      roleId: 'role-1',
-      orgScopeUnitId: null,
-      grantedBy: 'admin-1',
-    })
-  })
-
-  it('POST rejects a roleId that does not exist with AUZ-404, without ever inserting', async () => {
-    const findRoleById = jest.fn().mockResolvedValue(null)
-    const insertUserRole = jest.fn()
-    const controller = new AuthzController(fakeAuthzService(), fakeAuthzRepo({ findRoleById, insertUserRole }), fakePool())
-
-    await expect(controller.grantRole('user-1', { roleId: 'ghost-role', grantedBy: 'admin-1' })).rejects.toBeInstanceOf(
-      HttpException,
+    expect(grantRole).toHaveBeenCalledWith(
+      expect.anything(),
+      { userId: 'user-1', roleId: 'role-1', orgScopeUnitId: null, grantedBy: 'admin-1' },
+      'unknown',
     )
-    expect(insertUserRole).not.toHaveBeenCalled()
   })
 
-  it('DELETE revokes every grant of that role for that user via a transaction', async () => {
-    const deleteUserRoleGrants = jest.fn().mockResolvedValue(2)
-    const controller = new AuthzController(fakeAuthzService(), fakeAuthzRepo({ deleteUserRoleGrants }), fakePool())
+  it('POST rejects a roleId that does not exist with AUZ-404, without ever granting', async () => {
+    const findRoleById = jest.fn().mockResolvedValue(null)
+    const grantRole = jest.fn()
+    const controller = new AuthzController(fakeAuthzService({ grantRole }), fakeAuthzRepo({ findRoleById }), fakePool())
 
-    const out = await controller.revokeRole('user-1', 'role-1')
+    await expect(
+      controller.grantRole({ userId: 'admin-1' } as never, 'user-1', { roleId: 'ghost-role', grantedBy: 'admin-1' }),
+    ).rejects.toBeInstanceOf(HttpException)
+    expect(grantRole).not.toHaveBeenCalled()
+  })
 
-    expect(deleteUserRoleGrants).toHaveBeenCalledWith(expect.anything(), 'user-1', 'role-1')
+  it('DELETE revokes every grant of that role for that user via a transaction, and records who revoked it', async () => {
+    const revokeRole = jest.fn().mockResolvedValue(2)
+    const controller = new AuthzController(fakeAuthzService({ revokeRole }), fakeAuthzRepo(), fakePool())
+
+    const out = await controller.revokeRole({ userId: 'admin-1', actorRole: 'authz_admin' } as never, 'user-1', 'role-1')
+
+    expect(revokeRole).toHaveBeenCalledWith(expect.anything(), 'user-1', 'role-1', 'admin-1', 'authz_admin')
     expect(out).toEqual({ deleted: 2 })
   })
 
@@ -247,7 +258,7 @@ describe('mapping a thrown GadongError to an HttpException (matches every other 
     const controller = new AuthzController(fakeAuthzService(), fakeAuthzRepo({ findRoleById }), fakePool())
 
     try {
-      await controller.grantRole('user-1', { roleId: 'ghost-role', grantedBy: 'admin-1' })
+      await controller.grantRole({ userId: 'admin-1' } as never, 'user-1', { roleId: 'ghost-role', grantedBy: 'admin-1' })
       throw new Error('expected rejection')
     } catch (thrown) {
       expect(thrown).toBeInstanceOf(HttpException)
