@@ -99,6 +99,23 @@ export interface DocsClient {
  * service; found and fixed while wiring authentication into this exact
  * call site, since a 404 and a 403 look identical from here ("not ok") and
  * this defect would otherwise have stayed masked behind the auth fix.
+ *
+ * The request BODY shape was a second, separate defect of the same kind,
+ * found later (real e2e run, past the auth fix): `svc-docs`'s real
+ * `POST /render` originally accepted only `mergeFields` substituted into
+ * one of its own fixed `templates/<kind>.<lang>.html` files, with no way
+ * for a caller to supply already-composed HTML — but `payslip-render.ts`'s
+ * `renderPayslipHtml` deliberately builds a full itemised payslip (every
+ * earning/deduction line, its own statutory citation, non-taxable
+ * payments kept separate from taxable ones, YTD) that no fixed
+ * `templates/payslip.*.html` (a handful of static placeholders — company
+ * name, employee name, one gross figure, one SSO figure) can represent
+ * without losing that detail. Rather than discard the itemised renderer
+ * `payslip-render.test.ts` already covers, `svc-docs`'s `POST /render`
+ * gained a caller-owned `html` input, mutually exclusive with
+ * `mergeFields` (`DocumentsService.resolveHtml`) — this client sends
+ * `html`, never `mergeFields`, and `entityType: 'payslip'` (the row's own
+ * subject, matching `entityId` already being the payslip's id).
  */
 export class HttpDocsClient implements DocsClient {
   constructor(
@@ -110,7 +127,7 @@ export class HttpDocsClient implements DocsClient {
     const res = await this.fetchImpl(`${this.baseUrl}/render`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ kind: 'payslip', entityId: input.payslipId, lang: input.lang, html: input.html }),
+      body: JSON.stringify({ kind: 'payslip', entityType: 'payslip', entityId: input.payslipId, lang: input.lang, html: input.html }),
     })
     if (!res.ok) throw new Error(`svc-docs returned ${res.status.toString()} rendering payslip ${input.payslipId}`)
     const body: unknown = await res.json()

@@ -13,14 +13,20 @@ import { htmlToPlainText } from './rendering/html-text'
 import type { ObjectStorage } from './storage/object-storage'
 import { resolveMergeFields, substituteTemplate } from './merge-fields'
 import type { MergeFields } from './merge-fields'
-import { documentNotFound, fontsUnavailable } from './errors'
+import { documentNotFound, fontsUnavailable, renderInputRequired } from './errors'
 
+/**
+ * `mergeFields` and `html` are mutually exclusive rendering INPUTS, not two
+ * required fields — see `renderInputRequired`'s doc for why a caller
+ * supplies one or the other, never both, never neither.
+ */
 export interface RenderRequest {
   kind: string
   lang: Locale
   entityType: string
   entityId: string
-  mergeFields: MergeFields
+  mergeFields?: MergeFields
+  html?: string
 }
 
 /** Everything committed to `docs.document` needs, computed BEFORE any database transaction opens — deliberately: rendering, encryption, and the MinIO put are all slow, external I/O, and must not hold a DB connection while they run (unlike `svc-config`'s pure-DB writes, this service's write path has real network calls in it). */
@@ -63,13 +69,14 @@ export const DOCUMENT_READ_PURPOSE = 'document.read'
  * `services/svc-config` `service`/no-SQL split.
  *
  * `prepare()` does every side effect that is NOT a database write: resolve
- * the template (with `en` fallback), substitute merge fields (dates/money
- * through the kernel's Buddhist-Era/THB formatters), verify every embedded
- * font actually covers the resulting text — the fail-loud check that
- * prevents the tofu-box failure the task brief describes — render the PDF,
- * put it in object storage, and envelope-encrypt the storage pointer.
- * `commit()` is the one DB write (`INSERT` + `document.rendered` outbox
- * event, same transaction, per ADR-005) and is deliberately tiny and fast.
+ * the document's HTML (either the `templates/` file with merge fields
+ * substituted in, or a caller-supplied `html` string verbatim — see
+ * `resolveHtml`), verify every embedded font actually covers the resulting
+ * text — the fail-loud check that prevents the tofu-box failure the task
+ * brief describes — render the PDF, put it in object storage, and
+ * envelope-encrypt the storage pointer. `commit()` is the one DB write
+ * (`INSERT` + `document.rendered` outbox event, same transaction, per
+ * ADR-005) and is deliberately tiny and fast.
  */
 @Injectable()
 export class DocumentsService {
@@ -85,12 +92,31 @@ export class DocumentsService {
     private readonly bucket: string,
   ) {}
 
-  async prepare(input: RenderRequest): Promise<PreparedDocument> {
+  /**
+   * `html` (verbatim) wins if the caller supplied it — no template lookup,
+   * no merge-field substitution, `effectiveLang` is simply the requested
+   * `lang` (there is no template to fall back to `en` FROM). Otherwise
+   * resolves `templates/<kind>.<lang>.html` (with its own `en` fallback)
+   * and substitutes `mergeFields` into it — `resolveMergeFields`/
+   * `substituteTemplate` throwing on a caller who supplied neither `html`
+   * nor `mergeFields` for a `kind` that HAS no template (e.g. `payslip`,
+   * once the caller-html path went live) would produce a confusing
+   * "template not found" or "cannot read fields of undefined" error, so
+   * this method validates the actual precondition — one of the two inputs
+   * present — before either path runs, and reports it precisely.
+   */
+  private resolveHtml(input: RenderRequest): { html: string; effectiveLang: Locale } {
+    if (input.html !== undefined) return { html: input.html, effectiveLang: input.lang }
+    if (input.mergeFields === undefined) throw renderInputRequired(input.kind)
+
     const resolution = this.templates.resolve(input.kind, input.lang, this.warnLogger())
     const effectiveLang = resolution.lang as Locale
-
     const resolvedFields = resolveMergeFields(input.mergeFields, effectiveLang)
-    const html = substituteTemplate(resolution.html, resolvedFields, input.kind, effectiveLang)
+    return { html: substituteTemplate(resolution.html, resolvedFields, input.kind, effectiveLang), effectiveLang }
+  }
+
+  async prepare(input: RenderRequest): Promise<PreparedDocument> {
+    const { html, effectiveLang } = this.resolveHtml(input)
     const plainText = htmlToPlainText(html)
 
     const missingGlyphs = this.missingGlyphsForLocale(effectiveLang, plainText)

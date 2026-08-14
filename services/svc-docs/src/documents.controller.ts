@@ -14,7 +14,10 @@ export interface RenderRequestBody {
   lang: Locale
   entityType: string
   entityId: string
-  mergeFields: MergeFields
+  /** Template-owned rendering. Mutually exclusive with `html` — see `DocumentsService.resolveHtml`'s doc. */
+  mergeFields?: MergeFields
+  /** Caller-owned rendering: the caller has already composed complete HTML and only needs this service's font-check/PDF/storage/encryption pipeline. Mutually exclusive with `mergeFields`. */
+  html?: string
 }
 
 export interface RenderResponseBody {
@@ -73,6 +76,7 @@ export class DocumentsController {
         entityType: body.entityType,
         entityId: body.entityId,
         mergeFields: body.mergeFields,
+        html: body.html,
       }
       const prepared = await this.documentsService.prepare(input)
       return withTransaction(this.pool, (tx) => this.documentsService.commit(tx, prepared))

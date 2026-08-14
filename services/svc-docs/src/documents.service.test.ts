@@ -251,6 +251,63 @@ describe('DocumentsService.prepare — missing merge fields fail loudly', () => 
   })
 })
 
+describe('DocumentsService.prepare — caller-owned HTML (mutually exclusive with mergeFields)', () => {
+  it('renders a caller-supplied html string verbatim, with no template lookup and no mergeFields substitution', async () => {
+    const { service, storage } = makeService()
+    const prepared = await service.prepare({
+      kind: 'payslip',
+      lang: 'th',
+      entityType: 'payslip',
+      entityId: 'payslip-1',
+      html: '<article class="payslip">สลิปเงินเดือน — itemised, no {{token}} anywhere</article>',
+    })
+    const text = await fetchRenderedText(storage, prepared)
+    expect(text).toContain('สลิปเงินเดือน — itemised, no {{token}} anywhere')
+  })
+
+  it('effectiveLang is exactly the requested lang — there is no template to fall back to English FROM', async () => {
+    const { service } = makeService()
+    const prepared = await service.prepare({
+      kind: 'payslip',
+      lang: 'zh',
+      entityType: 'payslip',
+      entityId: 'payslip-1',
+      html: '<article>plain ASCII, no CJK glyphs to check</article>',
+    })
+    expect(prepared.lang).toBe('zh')
+  })
+
+  it('still runs the font-coverage check against caller-supplied html — a glyph no registered font covers still fails loudly, not just template-substituted content', async () => {
+    const { service } = makeService([])
+    await expect(
+      service.prepare({
+        kind: 'payslip',
+        lang: 'th',
+        entityType: 'payslip',
+        entityId: 'payslip-1',
+        html: '<article>ค่าจ้าง</article>',
+      }),
+    ).rejects.toMatchObject({ code: 'DOC-500' })
+  })
+
+  it('DOC-400 renderInputRequired when neither html nor mergeFields is supplied — nothing to render', async () => {
+    const { service } = makeService()
+    await expect(
+      service.prepare({ kind: 'payslip', lang: 'th', entityType: 'payslip', entityId: 'payslip-1' }),
+    ).rejects.toMatchObject({ code: 'DOC-400' })
+  })
+
+  it('html wins over mergeFields if a caller somehow sends both — never a silent merge of the two rendering modes', async () => {
+    const { service, storage } = makeService()
+    const prepared = await service.prepare({
+      ...payslipRequest(),
+      html: '<article>caller html, not the template</article>',
+    })
+    const text = await fetchRenderedText(storage, prepared)
+    expect(text).toContain('<article>caller html, not the template</article>')
+  })
+})
+
 describe('DocumentsService.prepare — determinism (a regenerated payslip is provably identical)', () => {
   it('the same {kind, entityId, lang, mergeFields} produces the same sha256 across two independent calls', async () => {
     const { service: service1 } = makeService()

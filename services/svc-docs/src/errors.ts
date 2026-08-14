@@ -16,6 +16,20 @@ export function missingMergeFields(kind: string, lang: string, fields: string[])
 }
 
 /**
+ * `POST /render` needs either `mergeFields` (a template-owned document —
+ * `kind` resolves to a file under `templates/`, e.g. an onboarding
+ * contract) or `html` (a caller-owned document — the caller has already
+ * composed its own complete, itemised HTML and only needs this service's
+ * font-coverage check, PDF render, storage and encryption; e.g.
+ * `svc-payroll`'s itemised payslip, whose per-line statutory citations and
+ * YTD figures no fixed template captures). Neither present means there is
+ * nothing to turn into a PDF.
+ */
+export function renderInputRequired(kind: string): GadongError {
+  return new GadongError('DOC-400', 'docs.error.render_input_required', 400, [{ kind }])
+}
+
+/**
  * The document's text contains characters the fonts registered for its
  * language cannot draw — either because an expected font family never
  * loaded at all (a mis-built image) or because the text itself contains a
