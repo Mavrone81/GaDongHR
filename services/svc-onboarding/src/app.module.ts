@@ -2,8 +2,19 @@ import 'reflect-metadata'
 import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_FILTER, APP_GUARD } from '@nestjs/core'
-import { AuditEmitter, AuthzClient, CryptoClient, GadongErrorFilter, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
-import type { OidcMiddlewareHandler } from '@gadong/kernel'
+import {
+  AuditEmitter,
+  AuthzClient,
+  CryptoClient,
+  GadongErrorFilter,
+  MachineTokenClient,
+  PermissionGuard,
+  createAuthenticatedFetch,
+  createHttpTokenTransport,
+  createOidcMiddlewareHandler,
+  createPool,
+} from '@gadong/kernel'
+import type { AuthenticatedFetch, OidcMiddlewareHandler } from '@gadong/kernel'
 import type { AuthzTransport, CryptoTransport, Queryable } from '@gadong/kernel'
 import { DB_POOL, EmployeeController } from './employee.controller'
 import { CRYPTO_PROBE, HealthController } from './health.controller'
@@ -81,6 +92,25 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
 }
 
 /**
+ * S2S auth task: `svc-onboarding` calls `svc-config`'s `GET /rules/:key`
+ * (`config.rule.read`) and `svc-docs`'s `POST /render` (`document.generate`)
+ * — both guarded, deny-by-default routes. This is this service's own
+ * machine identity: an OAuth2 client_credentials client, authenticated
+ * against the SAME OIDC issuer `createOidcMiddleware` above validates
+ * incoming tokens against (`OIDC_TOKEN_URL` is the issuer's TOKEN endpoint;
+ * `OIDC_ISSUER`/`OIDC_JWKS_URI` above are for verifying tokens, this is for
+ * OBTAINING one). `S2S_CLIENT_ID`/`S2S_CLIENT_SECRET` come from the
+ * `svc-onboarding` realm client (`deploy/keycloak/realm-gadonghr.json`) —
+ * never hard-coded, matching every other credential in this file.
+ */
+function createMachineTokenClient(): MachineTokenClient {
+  return new MachineTokenClient(createHttpTokenTransport(requiredEnv('OIDC_TOKEN_URL')), {
+    clientId: requiredEnv('S2S_CLIENT_ID'),
+    clientSecret: requiredEnv('S2S_CLIENT_SECRET'),
+  })
+}
+
+/**
  * Phase 2 (this task) supersedes the Task 14 skeleton's deliberately
  * guard-free `AppModule`: `/employees*`/`/self-service/:token` are reached
  * by HR admins, managers and employees themselves, so — matching every
@@ -121,10 +151,18 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
     { provide: ProbationRepository, useFactory: (pool: Queryable) => new ProbationRepository(pool), inject: [DB_POOL] },
     { provide: AuditEmitter, useFactory: () => new AuditEmitter() },
     {
+      // S2S auth task: one machine-token client, one authenticated-fetch
+      // helper, shared by every outbound guarded call this service makes
+      // (config reads AND docs render) — matching `AuthzClient`/
+      // `CryptoClient`'s own one-instance-per-service lifetime.
+      provide: 'AUTHENTICATED_FETCH',
+      useFactory: (): AuthenticatedFetch => createAuthenticatedFetch(createMachineTokenClient()),
+    },
+    {
       provide: ChecklistService,
-      useFactory: (taskRepo: OnboardingTaskRepository) =>
-        new ChecklistService(taskRepo, createHttpConfigClient(process.env['CONFIG_URL'] ?? 'http://svc-config:3000')),
-      inject: [OnboardingTaskRepository],
+      useFactory: (taskRepo: OnboardingTaskRepository, authedFetch: AuthenticatedFetch) =>
+        new ChecklistService(taskRepo, createHttpConfigClient(process.env['CONFIG_URL'] ?? 'http://svc-config:3000', authedFetch)),
+      inject: [OnboardingTaskRepository, 'AUTHENTICATED_FETCH'],
     },
     {
       provide: EmployeeService,
@@ -146,9 +184,9 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
     },
     {
       provide: ContractService,
-      useFactory: (employeeRepo: EmployeeRepository, crypto: CryptoClient) =>
-        new ContractService(employeeRepo, crypto, createHttpDocsClient(process.env['DOCS_URL'] ?? 'http://svc-docs:3000')),
-      inject: [EmployeeRepository, CryptoClient],
+      useFactory: (employeeRepo: EmployeeRepository, crypto: CryptoClient, authedFetch: AuthenticatedFetch) =>
+        new ContractService(employeeRepo, crypto, createHttpDocsClient(process.env['DOCS_URL'] ?? 'http://svc-docs:3000', authedFetch)),
+      inject: [EmployeeRepository, CryptoClient, 'AUTHENTICATED_FETCH'],
     },
     {
       provide: SelfServiceService,

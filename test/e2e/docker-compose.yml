@@ -45,6 +45,14 @@ x-oidc-env: &oidc-env
   OIDC_AUDIENCE: gadonghr-services
   OIDC_JWKS_URI: http://oidc-issuer:8080/jwks
 
+# S2S auth task: the token endpoint every calling service's
+# `MachineTokenClient` (`packages/kernel/src/authz/machine-token.client.ts`)
+# authenticates against — separate from `OIDC_JWKS_URI` above (that's for
+# VERIFYING an incoming token; this is for OBTAINING one). Internal address,
+# same reasoning as `OIDC_JWKS_URI`/`AUTHZ_URL` elsewhere in this file.
+x-oidc-token-env: &oidc-token-env
+  OIDC_TOKEN_URL: http://oidc-issuer:8080/token
+
 services:
   oidc-issuer:
     build: { context: ./oidc-issuer }
@@ -52,6 +60,16 @@ services:
     environment:
       OIDC_ISSUER: https://e2e.gadonghr.internal/realms/gadonghr
       OIDC_AUDIENCE: gadonghr-services
+      # S2S auth task: the machine-principal client registry this stand-in
+      # authenticates client_credentials requests against — MUST match
+      # `test/e2e/harness.ts`'s `MACHINE_PRINCIPALS` exactly (both sides
+      # are literal values by necessity, same as `PORTS`/`PERSONAS`
+      # elsewhere in this harness; nothing here is derived from the other).
+      OIDC_CLIENTS: >-
+        {"svc-onboarding":{"secret":"e2e-svc-onboarding-secret","sub":"00000000-0000-4000-8000-0000e2e01001"},
+        "svc-payroll":{"secret":"e2e-svc-payroll-secret","sub":"00000000-0000-4000-8000-0000e2e01002"},
+        "svc-timesheet":{"secret":"e2e-svc-timesheet-secret","sub":"00000000-0000-4000-8000-0000e2e01003"},
+        "svc-scheduler":{"secret":"e2e-svc-scheduler-secret","sub":"00000000-0000-4000-8000-0000e2e01004"}}
     ports: ["18081:8080"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
@@ -187,12 +205,16 @@ services:
     build: { context: ../.., dockerfile: services/svc-onboarding/Dockerfile }
     <<: *node-defaults
     environment:
-      <<: *oidc-env
+      <<: [*oidc-env, *oidc-token-env]
       NODE_ENV: test
       DATABASE_URL: postgresql://onboarding:e2e-pw@postgres:5432/gadonghr
       AUTHZ_URL: http://svc-authz:3000
       CRYPTO_URL: http://svc-crypto:3000
       RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
+      # S2S auth task: this service's own machine identity — MUST match
+      # `OIDC_CLIENTS`/`MACHINE_PRINCIPALS` (oidc-issuer / harness.ts).
+      S2S_CLIENT_ID: svc-onboarding
+      S2S_CLIENT_SECRET: e2e-svc-onboarding-secret
     ports: ["18004:3000"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -205,12 +227,14 @@ services:
     build: { context: ../.., dockerfile: services/svc-scheduler/Dockerfile }
     <<: *node-defaults
     environment:
-      <<: *oidc-env
+      <<: [*oidc-env, *oidc-token-env]
       NODE_ENV: test
       DATABASE_URL: postgresql://scheduler:e2e-pw@postgres:5432/gadonghr
       AUTHZ_URL: http://svc-authz:3000
       CONFIG_URL: http://svc-config:3000
       RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
+      S2S_CLIENT_ID: svc-scheduler
+      S2S_CLIENT_SECRET: e2e-svc-scheduler-secret
     ports: ["18005:3000"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -222,12 +246,14 @@ services:
     build: { context: ../.., dockerfile: services/svc-timesheet/Dockerfile }
     <<: *node-defaults
     environment:
-      <<: *oidc-env
+      <<: [*oidc-env, *oidc-token-env]
       NODE_ENV: test
       DATABASE_URL: postgresql://timesheet:e2e-pw@postgres:5432/gadonghr
       AUTHZ_URL: http://svc-authz:3000
       CONFIG_URL: http://svc-config:3000
       RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
+      S2S_CLIENT_ID: svc-timesheet
+      S2S_CLIENT_SECRET: e2e-svc-timesheet-secret
     ports: ["18007:3000"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -289,7 +315,7 @@ services:
     build: { context: ../.., dockerfile: services/svc-payroll/Dockerfile }
     <<: *node-defaults
     environment:
-      <<: *oidc-env
+      <<: [*oidc-env, *oidc-token-env]
       NODE_ENV: test
       DATABASE_URL: postgresql://payroll:e2e-pw@postgres:5432/gadonghr
       AUTHZ_URL: http://svc-authz:3000
@@ -299,6 +325,8 @@ services:
       DOCS_URL: http://svc-docs:3000
       ONBOARDING_URL: http://svc-onboarding:3000
       RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
+      S2S_CLIENT_ID: svc-payroll
+      S2S_CLIENT_SECRET: e2e-svc-payroll-secret
     ports: ["18008:3000"]
     depends_on:
       postgres: { condition: service_healthy }

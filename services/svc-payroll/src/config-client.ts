@@ -34,28 +34,54 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null
 }
 
+/**
+ * Field names here MUST match `services/svc-config/src/rules.controller.ts`'s
+ * real JSON response — `RulesService`'s `EffectiveRuleView`
+ * (`rules.service.ts`) serialises `effectiveFrom`/`effectiveTo`/
+ * `statutoryFloor` in camelCase, never `effective_from`/`statutory_floor`
+ * snake_case. Found and fixed while wiring S2S auth into this exact call
+ * site (S2S auth task): this parser previously read the wrong (snake_case)
+ * keys, so EVERY real call here — independent of authentication — always
+ * fell through to `statutoryRuleNotResolved`, silently indistinguishable
+ * from "no such rule" or "denied". Invisible to this file's own tests
+ * (there were none exercising a realistic response body) and never
+ * reachable in the e2e lifecycle suite until the auth fix cleared the
+ * 403 that used to block every call before this one ever ran.
+ */
 function parseRuleResponse(ruleKey: string, on: string, body: unknown): StatutoryRuleView {
   if (!isRecord(body)) throw statutoryRuleNotResolved(ruleKey, on)
   const citation = body['citation']
-  const effectiveFrom = body['effective_from']
-  const effectiveTo = body['effective_to']
+  const effectiveFrom = body['effectiveFrom']
+  const effectiveTo = body['effectiveTo']
   if (typeof citation !== 'string' || typeof effectiveFrom !== 'string') throw statutoryRuleNotResolved(ruleKey, on)
   return {
     ruleKey,
     value: body['value'],
-    statutoryFloor: body['statutory_floor'] ?? null,
+    statutoryFloor: body['statutoryFloor'] ?? null,
     citation,
     effectiveFrom,
     effectiveTo: effectiveTo === null || effectiveTo === undefined ? null : String(effectiveTo),
   }
 }
 
-/** Real HTTP client. `baseUrl` comes from `CONFIG_URL` in `app.module.ts`, never a hard-coded hostname. */
+/**
+ * Real HTTP client. `baseUrl` comes from `CONFIG_URL` in `app.module.ts`,
+ * never a hard-coded hostname. `fetchImpl` defaults to the global `fetch`
+ * (every existing call site/test keeps working unchanged); `app.module.ts`
+ * passes `createAuthenticatedFetch(machineTokenClient)` (S2S auth task) so
+ * `GET /rules/:key` — guarded by `config.rule.read` — carries this
+ * service's own machine bearer token. `/health` deliberately still uses the
+ * plain, unauthenticated `fetch` — it is `@Public()` on the far side, and a
+ * health probe must not itself depend on a working token issuer.
+ */
 export class HttpConfigClient implements ConfigClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {}
 
   async getEffectiveRule(ruleKey: string, on: string): Promise<StatutoryRuleView | null> {
-    const res = await fetch(`${this.baseUrl}/rules/${encodeURIComponent(ruleKey)}?on=${encodeURIComponent(on)}`)
+    const res = await this.fetchImpl(`${this.baseUrl}/rules/${encodeURIComponent(ruleKey)}?on=${encodeURIComponent(on)}`)
     if (res.status === 404) return null
     if (!res.ok) throw statutoryRuleNotResolved(ruleKey, on)
     const body: unknown = await res.json()

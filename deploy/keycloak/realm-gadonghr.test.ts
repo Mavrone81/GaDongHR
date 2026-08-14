@@ -101,8 +101,15 @@ describe('deploy/keycloak/realm-gadonghr.json', () => {
     expect(realm.enabled).toBe(true)
   })
 
-  test('declares exactly two clients: web and seeder', () => {
-    expect(realm.clients.map((c) => c.clientId).sort()).toEqual(['seeder', 'web'])
+  test('declares exactly six clients: web, seeder, and the four S2S auth task machine principals', () => {
+    expect(realm.clients.map((c) => c.clientId).sort()).toEqual([
+      'seeder',
+      'svc-onboarding',
+      'svc-payroll',
+      'svc-scheduler',
+      'svc-timesheet',
+      'web',
+    ])
   })
 
   test('login with email, no self-registration, no default password reset', () => {
@@ -163,6 +170,33 @@ describe('deploy/keycloak/realm-gadonghr.json', () => {
     })
   })
 
+  describe('the four S2S auth task machine principals (svc-onboarding, svc-payroll, svc-timesheet, svc-scheduler)', () => {
+    const machineClientIds = ['svc-onboarding', 'svc-payroll', 'svc-timesheet', 'svc-scheduler'] as const
+
+    test.each(machineClientIds)('%s is confidential, service accounts on, standard flow off, no secret literal committed', (clientId) => {
+      const client = findClient(realm, clientId)
+      expect(client.publicClient).toBe(false)
+      expect(client.serviceAccountsEnabled).toBe(true)
+      expect(client.standardFlowEnabled).toBe(false)
+      // Same reasoning as `seeder`: a real secret checked into git is
+      // exactly what `deploy/scripts/seed.sh`'s Admin-REST-pin mechanism
+      // exists to avoid.
+      expect(client.secret).toBeUndefined()
+    })
+
+    test.each(machineClientIds)("%s's service-account user id is pinned in `users`, distinct from every other principal", (clientId) => {
+      const svcUser = realm.users?.find((u) => u.serviceAccountClientId === clientId)
+      expect(svcUser).toBeDefined()
+      const seedSh = readFileSync(join(DEPLOY_DIR, 'scripts', 'seed.sh'), 'utf8')
+      expect(seedSh).toContain(svcUser?.id ?? '<missing>')
+    })
+
+    test('every machine principal has a distinct service-account user id (no two principals collide on identity)', () => {
+      const ids = machineClientIds.map((clientId) => realm.users?.find((u) => u.serviceAccountClientId === clientId)?.id)
+      expect(new Set(ids).size).toBe(machineClientIds.length)
+    })
+  })
+
   test('token lifetimes match Security doc §6 (access token <= 15 min, SSO session <= 12h)', () => {
     expect(realm.accessTokenLifespan).toBeGreaterThan(0)
     expect(realm.accessTokenLifespan).toBeLessThanOrEqual(MAX_ACCESS_TOKEN_LIFESPAN_SEC)
@@ -185,7 +219,7 @@ describe('deploy/keycloak/realm-gadonghr.json', () => {
       audience = readConfiguredAudience()
     })
 
-    test.each(['web', 'seeder'] as const)('%s stamps an aud the middleware accepts', (clientId) => {
+    test.each(['web', 'seeder', 'svc-onboarding', 'svc-payroll', 'svc-timesheet', 'svc-scheduler'] as const)('%s stamps an aud the middleware accepts', (clientId) => {
       const client = findClient(realm, clientId)
       const mapper = client.protocolMappers?.find((m) => m.protocolMapper === 'oidc-audience-mapper')
       expect(mapper).toBeDefined()

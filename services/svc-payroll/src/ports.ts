@@ -25,12 +25,25 @@ export interface TimesheetClient {
   getLockedTotals(period: string, lockVersion: number): Promise<Map<string, TimesheetTotals>>
 }
 
+/**
+ * `fetchImpl` defaults to the global `fetch`; `app.module.ts` passes
+ * `createAuthenticatedFetch(machineTokenClient)` (S2S auth task) so this
+ * call — guarded by `timesheet.totals.read`, a permission granted to NO
+ * human role template (`services/svc-authz/src/seed/roles.ts`'s own doc on
+ * `PAYROLL_TIMESHEET_TOTALS_READ`) — carries `svc-payroll`'s own machine
+ * bearer token instead of the bare, unauthenticated request that route's
+ * own doc comment (`timesheet.controller.ts`) and the e2e lifecycle suite
+ * both previously documented as a known, open gap.
+ */
 export class HttpTimesheetClient implements TimesheetClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {}
 
   async getLockedTotals(period: string, lockVersion: number): Promise<Map<string, TimesheetTotals>> {
     const url = `${this.baseUrl}/periods/${encodeURIComponent(period)}/totals?lockVersion=${encodeURIComponent(String(lockVersion))}`
-    const res = await fetch(url)
+    const res = await this.fetchImpl(url)
     if (!res.ok) throw new Error(`svc-timesheet returned ${res.status.toString()} for ${period} @ v${lockVersion.toString()}`)
     const body: unknown = await res.json()
     const out = new Map<string, TimesheetTotals>()
@@ -64,11 +77,28 @@ export interface DocsClient {
   renderPayslip(input: { payslipId: string; lang: string; html: string }): Promise<{ fileRef: string }>
 }
 
+/**
+ * `fetchImpl` defaults to the global `fetch`; `app.module.ts` passes
+ * `createAuthenticatedFetch(machineTokenClient)` (S2S auth task) so this
+ * call — guarded by `document.generate` — carries `svc-payroll`'s machine
+ * bearer token.
+ *
+ * The URL is `{baseUrl}/render` — `services/svc-docs/src/documents.
+ * controller.ts`'s `DocumentsController` is mounted with `@Controller()`
+ * (no path prefix) and the render handler is `@Post('render')`, so
+ * `/documents/render` (this file's previous URL) 404s against the real
+ * service; found and fixed while wiring authentication into this exact
+ * call site, since a 404 and a 403 look identical from here ("not ok") and
+ * this defect would otherwise have stayed masked behind the auth fix.
+ */
 export class HttpDocsClient implements DocsClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {}
 
   async renderPayslip(input: { payslipId: string; lang: string; html: string }): Promise<{ fileRef: string }> {
-    const res = await fetch(`${this.baseUrl}/documents/render`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/render`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ kind: 'payslip', entityId: input.payslipId, lang: input.lang, html: input.html }),
@@ -98,13 +128,32 @@ export interface EmployeeDirectoryClient {
   getIdentities(employeeIds: readonly string[]): Promise<Map<string, EmployeeIdentity>>
 }
 
+/**
+ * `fetchImpl` defaults to the global `fetch`; `app.module.ts` passes
+ * `createAuthenticatedFetch(machineTokenClient)` (S2S auth task) so this
+ * call carries `svc-payroll`'s machine bearer token.
+ *
+ * NOTE (found while wiring this call site, out of this task's scope to
+ * fix): `svc-onboarding` has no `POST /employees/identities` route today —
+ * only `EmployeeController`'s `/employees*`/`/self-service/:token` routes
+ * exist (`services/svc-onboarding/src/employee.controller.ts`). This
+ * client — and the permission it is granted (`svc-payroll`'s realm
+ * client), matching this file's header on `IDENTITIES COME FROM
+ * svc-onboarding` — is wired and ready for when that route is built;
+ * calling it today 404s, independent of authentication. `renderStatutory`
+ * (`exports.service.ts`, the only caller of `getIdentities`) is not
+ * exercised by the e2e lifecycle suite, so this gap is not a CI blocker.
+ */
 export class HttpEmployeeDirectoryClient implements EmployeeDirectoryClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {}
 
   async getIdentities(employeeIds: readonly string[]): Promise<Map<string, EmployeeIdentity>> {
     const out = new Map<string, EmployeeIdentity>()
     if (employeeIds.length === 0) return out
-    const res = await fetch(`${this.baseUrl}/employees/identities`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/employees/identities`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       // The purpose travels with the request because reading a national ID

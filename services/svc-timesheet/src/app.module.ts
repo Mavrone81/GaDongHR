@@ -2,8 +2,17 @@ import 'reflect-metadata'
 import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_FILTER, APP_GUARD } from '@nestjs/core'
-import { AuthzClient, GadongErrorFilter, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
-import type { OidcMiddlewareHandler } from '@gadong/kernel'
+import {
+  AuthzClient,
+  GadongErrorFilter,
+  MachineTokenClient,
+  PermissionGuard,
+  createAuthenticatedFetch,
+  createHttpTokenTransport,
+  createOidcMiddlewareHandler,
+  createPool,
+} from '@gadong/kernel'
+import type { AuthenticatedFetch, OidcMiddlewareHandler } from '@gadong/kernel'
 import type { AuthzTransport, Queryable } from '@gadong/kernel'
 import { ConfigClient } from './config-client'
 import type { ConfigTransport } from './config-client'
@@ -41,11 +50,22 @@ function createHttpAuthzTransport(baseUrl: string): AuthzTransport {
   }
 }
 
-/** `svc-config` HTTP wiring for `ConfigClient` — every statutory figure `OtClassifier`/`ConsolidationService` evaluates against comes from here at runtime (brief CONSTRAINTS: never hard-coded). */
-function createHttpConfigTransport(baseUrl: string): ConfigTransport {
+/**
+ * `svc-config` HTTP wiring for `ConfigClient` — every statutory figure
+ * `OtClassifier`/`ConsolidationService` evaluates against comes from here
+ * at runtime (brief CONSTRAINTS: never hard-coded). `fetchImpl` defaults to
+ * the global `fetch`; the real caller below passes
+ * `createAuthenticatedFetch(machineTokenClient)` (S2S auth task) so
+ * `GET /rules/:key` — guarded by `config.rule.read` — carries
+ * `svc-timesheet`'s own machine bearer token instead of the bare,
+ * unauthenticated call this transport used to make (the exact gap the e2e
+ * lifecycle suite documented: "svc-timesheet cannot read its own
+ * OT-threshold config with no bearer token").
+ */
+function createHttpConfigTransport(baseUrl: string, fetchImpl: typeof fetch = fetch): ConfigTransport {
   return {
     async get(path) {
-      const res = await fetch(`${baseUrl}${path}`)
+      const res = await fetchImpl(`${baseUrl}${path}`)
       const text = await res.text()
       return text.length > 0 ? (JSON.parse(text) as unknown) : {}
     },
@@ -56,6 +76,21 @@ function requiredEnv(name: string): string {
   const value = process.env[name]
   if (!value) throw new Error(`svc-timesheet: ${name} is required`)
   return value
+}
+
+/**
+ * S2S auth task: `svc-timesheet` calls `svc-config`'s guarded `GET
+ * /rules/:key` (`config.rule.read`). `OIDC_TOKEN_URL` is the issuer's token
+ * endpoint (separate from `OIDC_ISSUER`/`OIDC_JWKS_URI` above, which are
+ * for VERIFYING incoming tokens); `S2S_CLIENT_ID`/`S2S_CLIENT_SECRET` come
+ * from the `svc-timesheet` realm client
+ * (`deploy/keycloak/realm-gadonghr.json`).
+ */
+function createMachineTokenClient(): MachineTokenClient {
+  return new MachineTokenClient(createHttpTokenTransport(requiredEnv('OIDC_TOKEN_URL')), {
+    clientId: requiredEnv('S2S_CLIENT_ID'),
+    clientSecret: requiredEnv('S2S_CLIENT_SECRET'),
+  })
 }
 
 /**
@@ -95,8 +130,14 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
     },
     {
+      provide: 'AUTHENTICATED_FETCH',
+      useFactory: (): AuthenticatedFetch => createAuthenticatedFetch(createMachineTokenClient()),
+    },
+    {
       provide: ConfigClient,
-      useFactory: () => new ConfigClient(createHttpConfigTransport(process.env['CONFIG_URL'] ?? 'http://svc-config:3000')),
+      useFactory: (authedFetch: AuthenticatedFetch) =>
+        new ConfigClient(createHttpConfigTransport(process.env['CONFIG_URL'] ?? 'http://svc-config:3000', authedFetch)),
+      inject: ['AUTHENTICATED_FETCH'],
     },
     {
       provide: DB_POOL,

@@ -54,6 +54,8 @@ export {
   OIDC_JWKS_REFRESH_DEBOUNCE_MS,
   OIDC_JWKS_MAX_KEYS,
 } from './authz/oidc.middleware'
+export type { TokenResponse, TokenTransport, MachineTokenClientOptions, AuthenticatedFetch } from './authz/machine-token.client'
+export { MachineTokenClient, createHttpTokenTransport, createHttpMachineTokenClient, createAuthenticatedFetch } from './authz/machine-token.client'
 export type { AuditEntry } from './audit/emitter'
 export { AuditEmitter } from './audit/emitter'
 export { canonicalJson, hashValue, sha256Hex } from './audit/canonical-json'

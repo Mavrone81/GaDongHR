@@ -278,28 +278,24 @@ describe('4. attendance -> timesheet -> OT classification', () => {
     expect(Array.isArray(days)).toBe(true)
   }, 15_000)
 
-  test('SEAM DEFECT (separate from #1, still open): manual-punch cannot complete because svc-timesheet cannot read its own OT-threshold config with no bearer token', async () => {
+  test('VERIFIED FIX (S2S auth task): manual-punch completes now that svc-timesheet presents its own machine bearer token to read its OT-threshold config', async () => {
     // svc-timesheet's ConsolidationService.recomputeDay calls
     // ConfigClient.getNumber('hours.regular.max_per_day') against
-    // svc-config's GET /rules/:key. That route requires
-    // config.rule.read (rules.controller.ts), but
-    // services/svc-timesheet/src/config-client.ts's HttpConfigTransport
-    // (app.module.ts's createHttpConfigTransport) sends a plain,
-    // unauthenticated fetch — the same "service-to-service, no bearer
-    // token" shape the totals route had before this session's fix, except
-    // this route was never marked @Public() OR given a machine
-    // permission. UNRELATED to seam defect #1 (the event bus, now fixed) —
-    // this is a genuinely different, still-open gap. See e2e-lifecycle.md.
+    // svc-config's GET /rules/:key (guarded by config.rule.read).
+    // services/svc-timesheet/src/app.module.ts's createHttpConfigTransport
+    // used to send a plain, unauthenticated fetch — the exact gap this
+    // task closed: svc-timesheet now authenticates as its own machine
+    // principal (kernel MachineTokenClient + createAuthenticatedFetch),
+    // granted config.rule.read via deploy/scripts/seed.sh's
+    // svc-timesheet-machine role (mirrored here by
+    // test/e2e/harness.ts's MACHINE_PRINCIPALS.timesheet grant).
     const res = await call('POST', `${BASE.timesheet}/manual-punch`, hrOfficerToken, {
       employeeId,
       punchedAt: '2026-08-10T09:00:00.000Z',
       direction: 'in',
     })
     console.log('[e2e] manual-punch ->', res.status, JSON.stringify(res.json))
-    // Documented, not fabricated: recording the REAL status so a future
-    // fix of the config-read seam turns this assertion red, which is the
-    // signal to update it.
-    expect([200, 201, 500]).toContain(res.status)
+    expect(res.status).toBeLessThan(300)
   })
 
   test('period create + lock works (does not depend on the config seam)', async () => {
@@ -558,19 +554,19 @@ describe('6. payroll immutability, post-commit', () => {
 
 // Deliberately skipped (describe.skip) — see the block comment immediately
 // below and e2e-lifecycle.md for exactly why.
-describe.skip('7. the OT-bearing money example — BLOCKED by a still-open seam (svc-timesheet cannot read svc-config with no bearer token), arithmetic committed for review, not asserted green', () => {
+describe.skip('7. the OT-bearing money example — arithmetic committed for review, not asserted green (test body not yet written)', () => {
   /**
-   * THIS BLOCK DOES NOT RUN. Section 5 above DOES assert a real committed
-   * payslip's headline figures for real (seam defect #1, the dead event
-   * bus, was fixed this session) — but with ZERO overtime, because getting
-   * a REAL computed `ot_15x`/`ot_2x`/`ot_3x` into `day_record` requires
-   * either `POST /manual-punch` (blocked — see section 4's still-open
-   * config-read seam) or a fully enrolled PIN credential plus the
-   * attendance-punch event path (not wired into this harness this
-   * session). The arithmetic below is preserved for when that seam is
-   * fixed and an OT-bearing scenario becomes reachable — turning this back
-   * on is a `describe.skip` -> `describe` change plus wiring the OT hours
-   * into a real day_record before locking the period.
+   * THIS BLOCK STILL DOES NOT RUN, but the reason changed (S2S auth task):
+   * the config-read seam that used to block `POST /manual-punch` is FIXED
+   * — see section 4's "VERIFIED FIX" test above, `manual-punch` now
+   * genuinely returns 2xx. What remains is unwritten TEST CODE, not a
+   * product defect: driving a real OT-bearing scenario into `day_record`
+   * (10h @ 1.5x + 4h @ 3x, via manual-punch or a real enrolled-PIN
+   * attendance-punch event path), locking the period, and asserting the
+   * committed payslip's exact bigint-satang figures below. Turning this
+   * back on is a `describe.skip` -> `describe` change plus writing that
+   * test body — out of this task's scope (machine identity for
+   * service-to-service calls), left here for whoever picks it up next.
    *
    * INPUT: monthly employee, base pay 25,000.00 THB/month, provinceCode
    * 'TH-10', period 2026-08, OT 10h @ 1.5x (LPA s.61) + 4h @ 3x (LPA

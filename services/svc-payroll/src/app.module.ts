@@ -7,11 +7,14 @@ import {
   AuthzClient,
   CryptoClient,
   GadongErrorFilter,
+  MachineTokenClient,
   PermissionGuard,
+  createAuthenticatedFetch,
+  createHttpTokenTransport,
   createOidcMiddlewareHandler,
   createPool,
 } from '@gadong/kernel'
-import type { AuthzTransport, CryptoTransport, OidcMiddlewareHandler, Queryable } from '@gadong/kernel'
+import type { AuthenticatedFetch, AuthzTransport, CryptoTransport, OidcMiddlewareHandler, Queryable } from '@gadong/kernel'
 import { CONFIG_HEALTH, CRYPTO_HEALTH, DB_POOL, PayrollController } from './payroll.controller'
 import type { HealthCheckPort } from './payroll.controller'
 import { HttpConfigClient } from './config-client'
@@ -89,6 +92,26 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
 }
 
 /**
+ * S2S auth task: `svc-payroll` has four outbound guarded calls —
+ * `svc-config` (`config.rule.read`), `svc-timesheet`
+ * (`timesheet.totals.read`), `svc-docs` (`document.generate`) and
+ * `svc-onboarding` (identities, not yet a real route — see `ports.ts`'s
+ * `HttpEmployeeDirectoryClient` doc) — all authenticated with the SAME
+ * machine identity, matching how one human bearer token already works
+ * against every route their grants allow. `OIDC_TOKEN_URL` is the issuer's
+ * token endpoint (separate from `OIDC_ISSUER`/`OIDC_JWKS_URI` above, which
+ * are for VERIFYING incoming tokens); `S2S_CLIENT_ID`/`S2S_CLIENT_SECRET`
+ * come from the `svc-payroll` realm client
+ * (`deploy/keycloak/realm-gadonghr.json`).
+ */
+function createMachineTokenClient(): MachineTokenClient {
+  return new MachineTokenClient(createHttpTokenTransport(requiredEnv('OIDC_TOKEN_URL')), {
+    clientId: requiredEnv('S2S_CLIENT_ID'),
+    clientSecret: requiredEnv('S2S_CLIENT_SECRET'),
+  })
+}
+
+/**
  * Phase 5 wiring: the gross-to-net engine, the run lifecycle, payslips,
  * bank files and statutory exports. `PermissionGuard` is mounted as
  * `APP_GUARD`, so every route that is not explicitly `@Public()` must
@@ -130,23 +153,36 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
       useFactory: () => new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000')),
     },
     {
+      // S2S auth task: one machine-token client, one authenticated-fetch
+      // helper, shared by every one of this service's four outbound
+      // guarded calls below — matching `AuthzClient`/`CryptoClient`'s own
+      // one-instance-per-service lifetime.
+      provide: 'AUTHENTICATED_FETCH',
+      useFactory: (): AuthenticatedFetch => createAuthenticatedFetch(createMachineTokenClient()),
+    },
+    {
       provide: HttpConfigClient,
-      useFactory: () => new HttpConfigClient(process.env['CONFIG_URL'] ?? 'http://svc-config:3000'),
+      useFactory: (authedFetch: AuthenticatedFetch) => new HttpConfigClient(process.env['CONFIG_URL'] ?? 'http://svc-config:3000', authedFetch),
+      inject: ['AUTHENTICATED_FETCH'],
     },
     // Bound to the interface so every consumer depends on the seam tests
     // substitute a fake through, not on the HTTP implementation.
     { provide: 'CONFIG_CLIENT', useExisting: HttpConfigClient },
     {
       provide: 'TIMESHEET_CLIENT',
-      useFactory: () => new HttpTimesheetClient(process.env['TIMESHEET_URL'] ?? 'http://svc-timesheet:3000'),
+      useFactory: (authedFetch: AuthenticatedFetch) => new HttpTimesheetClient(process.env['TIMESHEET_URL'] ?? 'http://svc-timesheet:3000', authedFetch),
+      inject: ['AUTHENTICATED_FETCH'],
     },
     {
       provide: 'DOCS_CLIENT',
-      useFactory: () => new HttpDocsClient(process.env['DOCS_URL'] ?? 'http://svc-docs:3000'),
+      useFactory: (authedFetch: AuthenticatedFetch) => new HttpDocsClient(process.env['DOCS_URL'] ?? 'http://svc-docs:3000', authedFetch),
+      inject: ['AUTHENTICATED_FETCH'],
     },
     {
       provide: 'DIRECTORY_CLIENT',
-      useFactory: () => new HttpEmployeeDirectoryClient(process.env['ONBOARDING_URL'] ?? 'http://svc-onboarding:3000'),
+      useFactory: (authedFetch: AuthenticatedFetch) =>
+        new HttpEmployeeDirectoryClient(process.env['ONBOARDING_URL'] ?? 'http://svc-onboarding:3000', authedFetch),
+      inject: ['AUTHENTICATED_FETCH'],
     },
 
     { provide: PayProfilesRepository, useFactory: (pool: Queryable) => new PayProfilesRepository(pool), inject: [DB_POOL] },

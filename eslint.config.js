@@ -85,6 +85,11 @@ module.exports = [
         exports: 'writable',
         console: 'readonly',
         Buffer: 'readonly',
+        // S2S auth task: the client_credentials form-body parser
+        // (`issueClientCredentialsToken`'s caller) uses the same global
+        // `URLSearchParams` every browser/Node runtime provides — not a
+        // new dependency, just a global this file didn't reference before.
+        URLSearchParams: 'readonly',
       },
     },
   },

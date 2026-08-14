@@ -32,9 +32,37 @@ export const PERSONAS = {
   employee: '00000000-0000-4000-8000-0000e2e00004',
   payrollPreparer: '00000000-0000-4000-8000-0000e2e00005',
   payrollApprover: '00000000-0000-4000-8000-0000e2e00006',
-  /** Holds `timesheet.totals.read` ONLY — the machine-only permission `GET /periods/:id/totals` is gated by (see timesheet.controller.ts's doc). Stands in for the client-credentials identity `svc-payroll` does not yet have in this deployment (see e2e-lifecycle.md's seam-defects list) — proves the ROUTE itself is correct for an authorized machine caller, distinct from proving `svc-payroll`'s own unauthenticated ports.ts client can reach it (it cannot, by design; asserted separately). */
+  /**
+   * Holds `timesheet.totals.read` ONLY — the machine-only permission `GET
+   * /periods/:id/totals` is gated by (see timesheet.controller.ts's doc).
+   * Pre-dates the S2S auth task's real fix (`svc-payroll`'s own
+   * `MACHINE_PRINCIPALS.payroll` below, now wired end-to-end via
+   * `ports.ts`'s `HttpTimesheetClient`); kept as a second, independent
+   * proof that the ROUTE itself is correct for any authorized machine
+   * caller, not just this specific principal.
+   */
   payrollMachine: '00000000-0000-4000-8000-0000e2e00007',
   noPermissions: '00000000-0000-4000-8000-0000e2e00099',
+}
+
+/**
+ * S2S auth task: the four calling services' own machine identities —
+ * `client_id`/`secret` MUST match `docker-compose.yml`'s `OIDC_CLIENTS`
+ * (oidc-issuer) and each service's own `S2S_CLIENT_ID`/`S2S_CLIENT_SECRET`
+ * exactly (three independently-literal copies by necessity, same as
+ * `PORTS`/`PERSONAS` elsewhere in this file — nothing here is derived from
+ * the other two). `sub` is the identity `up()` below grants svc-authz
+ * permissions to, and the identity `OidcMiddleware` populates
+ * `request.userId` with once that service presents a client_credentials
+ * token signed for it — proving the SAME validation path a human token
+ * goes through also accepts a machine one (kernel `oidc.middleware.ts`'s
+ * own doc: no parallel weaker path).
+ */
+export const MACHINE_PRINCIPALS = {
+  onboarding: { clientId: 'svc-onboarding', secret: 'e2e-svc-onboarding-secret', sub: '00000000-0000-4000-8000-0000e2e01001' },
+  payroll: { clientId: 'svc-payroll', secret: 'e2e-svc-payroll-secret', sub: '00000000-0000-4000-8000-0000e2e01002' },
+  timesheet: { clientId: 'svc-timesheet', secret: 'e2e-svc-timesheet-secret', sub: '00000000-0000-4000-8000-0000e2e01003' },
+  scheduler: { clientId: 'svc-scheduler', secret: 'e2e-svc-scheduler-secret', sub: '00000000-0000-4000-8000-0000e2e01004' },
 }
 
 async function compose(...args: string[]): Promise<string> {
@@ -233,6 +261,15 @@ export async function up(): Promise<void> {
   await grantRole(PERSONAS.payrollPreparer, 'payroll-officer', PERSONAS.seeder)
   await grantRole(PERSONAS.payrollApprover, 'payroll-approver', PERSONAS.seeder)
   await grantPermission(PERSONAS.payrollMachine, 'timesheet.totals.read', PERSONAS.seeder)
+
+  console.log('[harness] S2S auth task: granting the four machine principals their least-privilege permissions (mirrors deploy/scripts/seed.sh\'s svc-*-machine roles)')
+  await grantPermission(MACHINE_PRINCIPALS.onboarding.sub, 'config.rule.read', PERSONAS.seeder)
+  await grantPermission(MACHINE_PRINCIPALS.onboarding.sub, 'document.generate', PERSONAS.seeder)
+  await grantPermission(MACHINE_PRINCIPALS.payroll.sub, 'config.rule.read', PERSONAS.seeder)
+  await grantPermission(MACHINE_PRINCIPALS.payroll.sub, 'timesheet.totals.read', PERSONAS.seeder)
+  await grantPermission(MACHINE_PRINCIPALS.payroll.sub, 'document.generate', PERSONAS.seeder)
+  await grantPermission(MACHINE_PRINCIPALS.timesheet.sub, 'config.rule.read', PERSONAS.seeder)
+  await grantPermission(MACHINE_PRINCIPALS.scheduler.sub, 'config.rule.read', PERSONAS.seeder)
 
   console.log('[harness] seeding the org unit + position the lifecycle test hires into (onboarding.employee has real FKs into both; nothing in svc-onboarding\'s own HTTP API creates either, so this is test-data setup, not a shortcut)')
   await seedOnboardingOrgAndPosition('00000000-0000-4000-8000-0000000ac001', '00000000-0000-4000-8000-0000000ac002')

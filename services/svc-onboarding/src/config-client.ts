@@ -23,14 +23,16 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 /**
  * Real HTTP implementation: `GET {baseUrl}/rules/{ruleKey}`, the exact
  * shape `services/svc-config/src/rules.controller.ts`'s `getOne` serves.
- * Requires `config.rule.read` in production (service-to-service auth is
- * out of this task's scope — the same deferred-until-wired state
- * `svc-config`'s own `createHttpAuthzTransport` is in).
+ * Requires `config.rule.read` in production — `fetchImpl` defaults to the
+ * global `fetch` (every existing test/call site keeps working unchanged)
+ * but `app.module.ts` passes in `createAuthenticatedFetch(machineTokenClient)`
+ * (S2S auth task) so this call carries this service's own machine bearer
+ * token, the same way a human caller's browser carries theirs.
  */
-export function createHttpConfigClient(baseUrl: string): ConfigClient {
+export function createHttpConfigClient(baseUrl: string, fetchImpl: typeof fetch = fetch): ConfigClient {
   return {
     async getNumericRule(ruleKey: string): Promise<number> {
-      const res = await fetch(`${baseUrl}/rules/${encodeURIComponent(ruleKey)}`)
+      const res = await fetchImpl(`${baseUrl}/rules/${encodeURIComponent(ruleKey)}`)
       if (!res.ok) throw new Error(`svc-config: GET /rules/${ruleKey} responded ${String(res.status)}`)
       const body: unknown = await res.json()
       if (!isRecord(body) || typeof body['value'] !== 'number') {

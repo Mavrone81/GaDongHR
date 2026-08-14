@@ -100,6 +100,19 @@ COMPOSE_FILES=(-f "$DEPLOY_DIR/docker-compose.yml")
 # file's header for why.
 SEEDER_SERVICE_ACCOUNT_ID="00000000-0000-4000-8000-00005eed0001"
 
+# S2S auth task: the four machine principals' service-account ids, MUST
+# match `users[].id` in `deploy/keycloak/realm-gadonghr.json` exactly, same
+# reasoning as SEEDER_SERVICE_ACCOUNT_ID above. Forward-provisioned like
+# `DB_PASSWORD_ONBOARDING`/etc. in `deploy/.env.example` — svc-onboarding,
+# svc-payroll, svc-timesheet and svc-scheduler are not in
+# `docker-compose.yml`'s seven-platform-service set yet, but their realm
+# clients and svc-authz grants are seeded now so a later phase that adds
+# them needs no new bootstrap step, only a compose service block.
+SVC_ONBOARDING_SERVICE_ACCOUNT_ID="00000000-0000-4000-8000-00005ecc0001"
+SVC_PAYROLL_SERVICE_ACCOUNT_ID="00000000-0000-4000-8000-00005ecc0002"
+SVC_TIMESHEET_SERVICE_ACCOUNT_ID="00000000-0000-4000-8000-00005ecc0003"
+SVC_SCHEDULER_SERVICE_ACCOUNT_ID="00000000-0000-4000-8000-00005ecc0004"
+
 log() { printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"; }
 
 compose() {
@@ -120,6 +133,13 @@ require_healthy() {
 : "${KC_ADMIN_USER:?KC_ADMIN_USER must be set (source .env first) — the realm bootstrap admin, used only to pin the seeder client secret}"
 : "${KC_ADMIN_PASSWORD:?KC_ADMIN_PASSWORD must be set (source .env first)}"
 : "${KEYCLOAK_SEEDER_CLIENT_SECRET:?KEYCLOAK_SEEDER_CLIENT_SECRET must be set (source .env first) — the seeder client confidential secret}"
+# S2S auth task — the four machine principals' own confidential secrets,
+# pinned the same way KEYCLOAK_SEEDER_CLIENT_SECRET is (see this file's
+# header: realm-import JSON cannot safely carry a real secret).
+: "${KEYCLOAK_SVC_ONBOARDING_CLIENT_SECRET:?KEYCLOAK_SVC_ONBOARDING_CLIENT_SECRET must be set (source .env first)}"
+: "${KEYCLOAK_SVC_PAYROLL_CLIENT_SECRET:?KEYCLOAK_SVC_PAYROLL_CLIENT_SECRET must be set (source .env first)}"
+: "${KEYCLOAK_SVC_TIMESHEET_CLIENT_SECRET:?KEYCLOAK_SVC_TIMESHEET_CLIENT_SECRET must be set (source .env first)}"
+: "${KEYCLOAK_SVC_SCHEDULER_CLIENT_SECRET:?KEYCLOAK_SVC_SCHEDULER_CLIENT_SECRET must be set (source .env first)}"
 : "${POSTGRES_SUPERUSER:?POSTGRES_SUPERUSER must be set (source .env first)}"
 : "${POSTGRES_DB:?POSTGRES_DB must be set (source .env first)}"
 
@@ -167,12 +187,66 @@ WHERE r.code = 'seeder-bootstrap'
     WHERE ur.user_id = '${SEEDER_SERVICE_ACCOUNT_ID}'::uuid
       AND ur.role_id = r.id
   );
+
+-- S2S auth task: four more machine principals, same shape as
+-- seeder-bootstrap above — one small, purpose-built role per service,
+-- holding EXACTLY the permissions that service's own outbound HTTP calls
+-- need (least privilege, not a shared "services" super-role — a
+-- compromised svc-scheduler must not inherit svc-payroll's
+-- timesheet.totals.read). Grants (call sites, see each service's own
+-- app.module.ts/config-client.ts/ports.ts):
+--   svc-onboarding: config.rule.read (svc-config rules), document.generate
+--                   (svc-docs contract render)
+--   svc-payroll:    config.rule.read, timesheet.totals.read (svc-timesheet
+--                   locked totals — granted to NO human role template,
+--                   see seed/roles.ts's PAYROLL_TIMESHEET_TOTALS_READ),
+--                   document.generate (svc-docs payslip render)
+--   svc-timesheet:  config.rule.read (its own OT-threshold config read)
+--   svc-scheduler:  config.rule.read (guardrail/holiday/OT ceilings)
+INSERT INTO authz.role (code, name_i18n, is_system)
+VALUES
+  ('svc-onboarding-machine', '{"en":"svc-onboarding machine identity","th":"ตัวตนเครื่อง svc-onboarding"}'::jsonb, true),
+  ('svc-payroll-machine', '{"en":"svc-payroll machine identity","th":"ตัวตนเครื่อง svc-payroll"}'::jsonb, true),
+  ('svc-timesheet-machine', '{"en":"svc-timesheet machine identity","th":"ตัวตนเครื่อง svc-timesheet"}'::jsonb, true),
+  ('svc-scheduler-machine', '{"en":"svc-scheduler machine identity","th":"ตัวตนเครื่อง svc-scheduler"}'::jsonb, true)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO authz.role_permission (role_id, permission_code)
+SELECT r.id, p.code
+FROM authz.role r
+JOIN (
+  VALUES
+    ('svc-onboarding-machine', 'config.rule.read'),
+    ('svc-onboarding-machine', 'document.generate'),
+    ('svc-payroll-machine', 'config.rule.read'),
+    ('svc-payroll-machine', 'timesheet.totals.read'),
+    ('svc-payroll-machine', 'document.generate'),
+    ('svc-timesheet-machine', 'config.rule.read'),
+    ('svc-scheduler-machine', 'config.rule.read')
+) AS p(role_code, code) ON p.role_code = r.code
+ON CONFLICT (role_id, permission_code) DO NOTHING;
+
+INSERT INTO authz.user_role (user_id, role_id, granted_by)
+SELECT u.user_id::uuid, r.id, '${SEEDER_SERVICE_ACCOUNT_ID}'::uuid
+FROM (
+  VALUES
+    ('${SVC_ONBOARDING_SERVICE_ACCOUNT_ID}', 'svc-onboarding-machine'),
+    ('${SVC_PAYROLL_SERVICE_ACCOUNT_ID}', 'svc-payroll-machine'),
+    ('${SVC_TIMESHEET_SERVICE_ACCOUNT_ID}', 'svc-timesheet-machine'),
+    ('${SVC_SCHEDULER_SERVICE_ACCOUNT_ID}', 'svc-scheduler-machine')
+) AS u(user_id, role_code)
+JOIN authz.role r ON r.code = u.role_code
+WHERE NOT EXISTS (
+  SELECT 1 FROM authz.user_role ur
+  WHERE ur.user_id = u.user_id::uuid AND ur.role_id = r.id
+);
 SQL
 then
-  log "ERROR: could not grant the seeder its svc-authz permissions — is postgres reachable and is the 'authz' schema migrated?"
+  log "ERROR: could not grant the seeder/machine principals their svc-authz permissions — is postgres reachable and is the 'authz' schema migrated?"
   exit 1
 fi
 log "Seeder service account holds config.pack.import + authz.role.grant in svc-authz."
+log "S2S auth task: svc-onboarding/svc-payroll/svc-timesheet/svc-scheduler machine principals hold their least-privilege grants in svc-authz (forward-provisioned)."
 
 log "Importing svc-config's statutory rule packs..."
 require_healthy svc-config
@@ -192,6 +266,10 @@ if ! compose exec -T \
   -e KC_ADMIN_USER="$KC_ADMIN_USER" \
   -e KC_ADMIN_PASSWORD="$KC_ADMIN_PASSWORD" \
   -e KEYCLOAK_SEEDER_CLIENT_SECRET="$KEYCLOAK_SEEDER_CLIENT_SECRET" \
+  -e KEYCLOAK_SVC_ONBOARDING_CLIENT_SECRET="$KEYCLOAK_SVC_ONBOARDING_CLIENT_SECRET" \
+  -e KEYCLOAK_SVC_PAYROLL_CLIENT_SECRET="$KEYCLOAK_SVC_PAYROLL_CLIENT_SECRET" \
+  -e KEYCLOAK_SVC_TIMESHEET_CLIENT_SECRET="$KEYCLOAK_SVC_TIMESHEET_CLIENT_SECRET" \
+  -e KEYCLOAK_SVC_SCHEDULER_CLIENT_SECRET="$KEYCLOAK_SVC_SCHEDULER_CLIENT_SECRET" \
   svc-config node - <<'JS'
 const { readdirSync } = require('node:fs')
 const { join } = require('node:path')
@@ -241,30 +319,35 @@ async function getMasterAdminToken() {
   return (await res.json()).access_token
 }
 
-async function pinSeederSecret(adminToken) {
-  const listRes = await fetch(`${KC_BASE}/admin/realms/${REALM}/clients?clientId=seeder`, {
+// S2S auth task: generalised from the original seeder-only version so the
+// same idempotent Admin-REST-pin mechanism (see this file's header
+// "SIGNING:"-adjacent block on why a committed secret is unsafe) also pins
+// each of the four machine principals' confidential secrets — one call per
+// client, same shape, different clientId/secret.
+async function pinClientSecret(adminToken, clientId, secret) {
+  const listRes = await fetch(`${KC_BASE}/admin/realms/${REALM}/clients?clientId=${encodeURIComponent(clientId)}`, {
     headers: { authorization: `Bearer ${adminToken}` },
   })
   if (!listRes.ok) {
     throw new Error(
-      `Could not look up the 'seeder' client in realm '${REALM}' (HTTP ${listRes.status}) — has deploy/keycloak/realm-gadonghr.json been imported (--import-realm)?`,
+      `Could not look up the '${clientId}' client in realm '${REALM}' (HTTP ${listRes.status}) — has deploy/keycloak/realm-gadonghr.json been imported (--import-realm)?`,
     )
   }
   const clients = await listRes.json()
-  const seeder = clients[0]
-  if (!seeder) {
+  const client = clients[0]
+  if (!client) {
     throw new Error(
-      `No 'seeder' client found in realm '${REALM}' — has deploy/keycloak/realm-gadonghr.json been imported (--import-realm)?`,
+      `No '${clientId}' client found in realm '${REALM}' — has deploy/keycloak/realm-gadonghr.json been imported (--import-realm)?`,
     )
   }
-  const updated = { ...seeder, secret: process.env.KEYCLOAK_SEEDER_CLIENT_SECRET }
-  const putRes = await fetch(`${KC_BASE}/admin/realms/${REALM}/clients/${seeder.id}`, {
+  const updated = { ...client, secret }
+  const putRes = await fetch(`${KC_BASE}/admin/realms/${REALM}/clients/${client.id}`, {
     method: 'PUT',
     headers: { authorization: `Bearer ${adminToken}`, 'content-type': 'application/json' },
     body: JSON.stringify(updated),
   })
   if (!putRes.ok) {
-    throw new Error(`Could not set the seeder client's secret (HTTP ${putRes.status}).`)
+    throw new Error(`Could not set the '${clientId}' client's secret (HTTP ${putRes.status}).`)
   }
 }
 
@@ -293,7 +376,17 @@ async function getSeederToken() {
 
 async function main() {
   const adminToken = await getMasterAdminToken()
-  await pinSeederSecret(adminToken)
+  await pinClientSecret(adminToken, 'seeder', process.env.KEYCLOAK_SEEDER_CLIENT_SECRET)
+  // S2S auth task: pin the four machine principals' secrets too — every
+  // run, idempotent, same as the seeder above. Harmless today (none of
+  // these four services are in docker-compose.yml's seven-platform-service
+  // set yet — forward-provisioned) and exactly what makes them live the
+  // moment a later phase adds the compose service block, with no separate
+  // bootstrap step.
+  await pinClientSecret(adminToken, 'svc-onboarding', process.env.KEYCLOAK_SVC_ONBOARDING_CLIENT_SECRET)
+  await pinClientSecret(adminToken, 'svc-payroll', process.env.KEYCLOAK_SVC_PAYROLL_CLIENT_SECRET)
+  await pinClientSecret(adminToken, 'svc-timesheet', process.env.KEYCLOAK_SVC_TIMESHEET_CLIENT_SECRET)
+  await pinClientSecret(adminToken, 'svc-scheduler', process.env.KEYCLOAK_SVC_SCHEDULER_CLIENT_SECRET)
   const seederToken = await getSeederToken()
   console.log('Obtained a seeder client-credentials token from Keycloak.')
 

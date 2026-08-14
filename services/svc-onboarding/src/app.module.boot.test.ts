@@ -17,7 +17,12 @@ import { AppModule } from './app.module'
  * balancer / an uptime monitor does.
  */
 describe('AppModule boots under Nest (module wiring)', () => {
-  const requiredEnvKeys = ['DATABASE_URL', 'OIDC_ISSUER', 'OIDC_AUDIENCE', 'OIDC_JWKS_URI'] as const
+  // S2S auth task: `createMachineTokenClient()` (`app.module.ts`) now reads
+  // `OIDC_TOKEN_URL`/`S2S_CLIENT_ID`/`S2S_CLIENT_SECRET` at construction
+  // time via `requiredEnv` — the exact same "boot fails loudly, not with a
+  // request-time `UnknownDependenciesException`" contract this test file
+  // already exists to guard, so these three join the set this test fixes.
+  const requiredEnvKeys = ['DATABASE_URL', 'OIDC_ISSUER', 'OIDC_AUDIENCE', 'OIDC_JWKS_URI', 'OIDC_TOKEN_URL', 'S2S_CLIENT_ID', 'S2S_CLIENT_SECRET'] as const
   const savedEnv = new Map<string, string | undefined>()
 
   beforeEach(() => {
@@ -26,6 +31,9 @@ describe('AppModule boots under Nest (module wiring)', () => {
     process.env['OIDC_ISSUER'] = 'https://kc.gadonghr.test/auth/realms/gadong'
     process.env['OIDC_AUDIENCE'] = 'gadong-services'
     process.env['OIDC_JWKS_URI'] = 'https://kc.gadonghr.test/auth/realms/gadong/protocol/openid-connect/certs'
+    process.env['OIDC_TOKEN_URL'] = 'https://kc.gadonghr.test/auth/realms/gadong/protocol/openid-connect/token'
+    process.env['S2S_CLIENT_ID'] = 'svc-onboarding'
+    process.env['S2S_CLIENT_SECRET'] = 'test-secret'
   })
 
   afterEach(() => {

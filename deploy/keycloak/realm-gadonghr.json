@@ -98,6 +98,126 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "svc-onboarding",
+      "name": "GaDongHR svc-onboarding machine identity (S2S auth task)",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "gadonghr-services-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "",
+            "included.custom.audience": "gadonghr-services",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "svc-payroll",
+      "name": "GaDongHR svc-payroll machine identity (S2S auth task)",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "gadonghr-services-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "",
+            "included.custom.audience": "gadonghr-services",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "svc-timesheet",
+      "name": "GaDongHR svc-timesheet machine identity (S2S auth task)",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "gadonghr-services-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "",
+            "included.custom.audience": "gadonghr-services",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "svc-scheduler",
+      "name": "GaDongHR svc-scheduler machine identity (S2S auth task)",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "gadonghr-services-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "",
+            "included.custom.audience": "gadonghr-services",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
     }
   ],
 
@@ -108,6 +228,34 @@
       "enabled": true,
       "emailVerified": true,
       "serviceAccountClientId": "seeder"
+    },
+    {
+      "id": "00000000-0000-4000-8000-00005ecc0001",
+      "username": "service-account-svc-onboarding",
+      "enabled": true,
+      "emailVerified": true,
+      "serviceAccountClientId": "svc-onboarding"
+    },
+    {
+      "id": "00000000-0000-4000-8000-00005ecc0002",
+      "username": "service-account-svc-payroll",
+      "enabled": true,
+      "emailVerified": true,
+      "serviceAccountClientId": "svc-payroll"
+    },
+    {
+      "id": "00000000-0000-4000-8000-00005ecc0003",
+      "username": "service-account-svc-timesheet",
+      "enabled": true,
+      "emailVerified": true,
+      "serviceAccountClientId": "svc-timesheet"
+    },
+    {
+      "id": "00000000-0000-4000-8000-00005ecc0004",
+      "username": "service-account-svc-scheduler",
+      "enabled": true,
+      "emailVerified": true,
+      "serviceAccountClientId": "svc-scheduler"
     }
   ]
 }

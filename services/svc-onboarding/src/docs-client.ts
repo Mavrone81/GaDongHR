@@ -27,11 +27,11 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null
 }
 
-/** Real HTTP implementation: `POST {baseUrl}/render`, the exact shape `services/svc-docs/src/documents.controller.ts`'s `render` serves. Requires `document.generate` in production (service-to-service auth wiring deferred, same as `config-client.ts`). */
-export function createHttpDocsClient(baseUrl: string): DocsClient {
+/** Real HTTP implementation: `POST {baseUrl}/render`, the exact shape `services/svc-docs/src/documents.controller.ts`'s `render` serves. Requires `document.generate` in production — `fetchImpl` defaults to the global `fetch`; `app.module.ts` passes `createAuthenticatedFetch(machineTokenClient)` (S2S auth task) so this call carries this service's machine bearer token, same as `config-client.ts`. */
+export function createHttpDocsClient(baseUrl: string, fetchImpl: typeof fetch = fetch): DocsClient {
   return {
     async render(req: RenderContractRequest): Promise<RenderContractResult> {
-      const res = await fetch(`${baseUrl}/render`, {
+      const res = await fetchImpl(`${baseUrl}/render`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(req),
