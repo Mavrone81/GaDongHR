@@ -472,10 +472,26 @@ describe('5. payroll, for the REAL hired employee — seam defect #1 is fixed, s
     expect(mine).toBeDefined()
     payslipId = mine!.payslipId
 
-    // bigint satang -> the same "whole.hh" THB decimal string
-    // satangToBaht (money.ts) renders, so this comparison is exact, never
-    // a float — matching this whole codebase's money discipline.
-    const thb = (satang: number): string => `${(satang / 100).toFixed(2)}`
+    // bigint satang -> the exact string PayslipSummary renders. Contrary
+    // to this test's own money-arithmetic comments above (which stop at
+    // the bigint-satang result — money.ts's discipline, no floats), the
+    // in-app payslip read side (`payslips.service.ts`'s `summarise`) is a
+    // human-facing view: `GET /my/payslips`/`GET /runs/:id/payslips` are
+    // read by an employee or HR admin looking at a screen, not by a second
+    // arithmetic consumer, so every figure goes through kernel's
+    // `formatTHB` (currency sign + thousands grouping) — the SAME
+    // formatter `payslip-render.ts`'s `buildPayslipView` already uses for
+    // this module's other rendered view, `PayslipView`. This helper
+    // replicates `formatTHB`'s exact algorithm (still bigint-satang all
+    // the way through — `Number` only ever sees an integer baht count
+    // small enough for exact `toLocaleString` grouping, never a fraction)
+    // rather than asserting a plain decimal `payslips.service.ts` was
+    // never built to return.
+    const thb = (satang: number): string => {
+      const baht = Math.trunc(satang / 100)
+      const cents = String(satang % 100).padStart(2, '0')
+      return `฿${baht.toLocaleString('en-US')}.${cents}`
+    }
 
     expect(mine!.gross).toBe(thb(EXPECTED_GROSS_SATANG))
     expect(mine!.ssoEmployee).toBe(thb(EXPECTED_SSO_EMPLOYEE_SATANG))
