@@ -98,11 +98,19 @@ export async function seedOnboardingOrgAndPosition(orgUnitId: string, positionId
        ON CONFLICT (id) DO NOTHING`,
       [orgUnitId],
     )
+    // `code` is derived from `positionId`, and the conflict target is `code`,
+    // NOT `id`. Both matter, and the row-scope suite is what proved it: it
+    // calls this helper twice (one org unit per scope, to test cross-org-unit
+    // denial), which passed a fresh `positionId` each time but reused a
+    // hard-coded `'E2E-POS-1'` — so the second call collided on
+    // `position_code_key` while `ON CONFLICT (id)` looked at the wrong
+    // column entirely and never fired. A single-hire lifecycle test could
+    // never surface either half.
     await client.query(
       `INSERT INTO onboarding.position (id, code, title_i18n, org_unit_id)
-       VALUES ($1::uuid, 'E2E-POS-1', '{"en":"E2E Tester","th":"E2E Tester"}'::jsonb, $2::uuid)
-       ON CONFLICT (id) DO NOTHING`,
-      [positionId, orgUnitId],
+       VALUES ($1::uuid, $3::text, '{"en":"E2E Tester","th":"E2E Tester"}'::jsonb, $2::uuid)
+       ON CONFLICT (code) DO NOTHING`,
+      [positionId, orgUnitId, `E2E-POS-${positionId.slice(0, 8)}`],
     )
   })
 }
