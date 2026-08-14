@@ -146,6 +146,51 @@ describe('PermissionGuard', () => {
     await expect(guard.canActivate(context)).resolves.toBe(true)
   })
 
+  describe('request.authzScope (row-scoping fix)', () => {
+    it('attaches decision.scopeOrgUnitIds to the request on an allowed decision — the roadmap gap this closes: svc-authz returns it, and it used to be thrown away here', async () => {
+      const { guard } = guardWith({ allowed: true, scopeOrgUnitIds: ['org-a', 'org-b'] })
+      const controller = new FakeController()
+      const request: { userId?: string; authzScope?: unknown } = { userId: 'user-1' }
+      const context = fakeContext(controller.annotated, FakeController, request)
+
+      await expect(guard.canActivate(context)).resolves.toBe(true)
+      expect(request.authzScope).toEqual(['org-a', 'org-b'])
+    })
+
+    it('attaches "self" and "*" scopes verbatim, not just array scopes', async () => {
+      const { guard: selfGuard } = guardWith({ allowed: true, scopeOrgUnitIds: 'self' })
+      const selfRequest: { userId?: string; authzScope?: unknown } = { userId: 'user-1' }
+      await selfGuard.canActivate(fakeContext(new FakeController().annotated, FakeController, selfRequest))
+      expect(selfRequest.authzScope).toBe('self')
+
+      const { guard: allGuard } = guardWith({ allowed: true, scopeOrgUnitIds: '*' })
+      const allRequest: { userId?: string; authzScope?: unknown } = { userId: 'user-1' }
+      await allGuard.canActivate(fakeContext(new FakeController().annotated, FakeController, allRequest))
+      expect(allRequest.authzScope).toBe('*')
+    })
+
+    it('does not set request.authzScope when the decision denies', async () => {
+      const { guard } = guardWith({ allowed: false, scopeOrgUnitIds: [] })
+      const controller = new FakeController()
+      const request: { userId?: string; authzScope?: unknown } = { userId: 'user-1' }
+      const context = fakeContext(controller.annotated, FakeController, request)
+
+      await expect(guard.canActivate(context)).rejects.toMatchObject({ code: 'AUZ-403' })
+      expect(request.authzScope).toBeUndefined()
+    })
+
+    it('does not set request.authzScope on a @Public() route (no decision is ever fetched)', async () => {
+      const { guard, post } = guardWith({ allowed: true, scopeOrgUnitIds: '*' })
+      const controller = new PublicController()
+      const request: { userId?: string; authzScope?: unknown } = {}
+      const context = fakeContext(controller.health, PublicController, request)
+
+      await expect(guard.canActivate(context)).resolves.toBe(true)
+      expect(post).not.toHaveBeenCalled()
+      expect(request.authzScope).toBeUndefined()
+    })
+  })
+
   it('denies when svc-authz is unreachable — an authz outage must never become a bypass', async () => {
     const { guard } = guardWith(new Error('ECONNREFUSED'))
     const controller = new FakeController()

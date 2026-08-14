@@ -18,6 +18,9 @@ import type { AuthzTransport, CryptoTransport, DenialAuditSink, Queryable } from
 import { DB_POOL, DocumentsController } from './documents.controller'
 import { DocumentsService } from './documents.service'
 import { DocumentsRepository } from './documents.repository'
+import { EmployeeRefRepository } from './employee-ref.repository'
+import { PayslipRefRepository } from './payslip-ref.repository'
+import { EventsConsumer } from './events.consumer'
 import { TemplateLoader } from './templates'
 import { FontRegistry } from './fonts/font-registry'
 import type { FontDescriptor } from './fonts/font-registry'
@@ -145,6 +148,27 @@ void EXPECTED_FONT_FAMILIES // documents the contract FONT_DESCRIPTORS above mus
       inject: [DB_POOL],
     },
     {
+      // Row-scoping fix local read models (roadmap "🔴 Open security gap")
+      // — see `employee-ref.repository.ts`/`payslip-ref.repository.ts`.
+      provide: EmployeeRefRepository,
+      useFactory: (pool: Queryable) => new EmployeeRefRepository(pool),
+      inject: [DB_POOL],
+    },
+    {
+      provide: PayslipRefRepository,
+      useFactory: (pool: Queryable) => new PayslipRefRepository(pool),
+      inject: [DB_POOL],
+    },
+    {
+      // `main.ts#wireEventBus` resolves this via `app.get(EventsConsumer)`
+      // to dispatch `employee.created`/`employee.updated`/`employee
+      // .terminated`/`payslip.issued` — same pattern as
+      // `services/svc-timesheet/src/main.ts`.
+      provide: EventsConsumer,
+      useFactory: (employeeRefs: EmployeeRefRepository, payslipRefs: PayslipRefRepository) => new EventsConsumer(employeeRefs, payslipRefs),
+      inject: [EmployeeRefRepository, PayslipRefRepository],
+    },
+    {
       provide: TemplateLoader,
       useFactory: () => new TemplateLoader(TEMPLATES_DIR),
     },
@@ -176,9 +200,21 @@ void EXPECTED_FONT_FAMILIES // documents the contract FONT_DESCRIPTORS above mus
         renderer: ChromiumPdfRenderer,
         storage: MinioObjectStorage,
         crypto: CryptoClient,
+        employeeRefs: EmployeeRefRepository,
+        payslipRefs: PayslipRefRepository,
         audit: AuditEmitter,
-      ) => new DocumentsService(repo, templates, fonts, renderer, storage, crypto, requiredEnv('DOCS_BUCKET'), audit),
-      inject: [DocumentsRepository, TemplateLoader, FontRegistry, ChromiumPdfRenderer, MinioObjectStorage, CryptoClient, AuditEmitter],
+      ) => new DocumentsService(repo, templates, fonts, renderer, storage, crypto, requiredEnv('DOCS_BUCKET'), employeeRefs, payslipRefs, audit),
+      inject: [
+        DocumentsRepository,
+        TemplateLoader,
+        FontRegistry,
+        ChromiumPdfRenderer,
+        MinioObjectStorage,
+        CryptoClient,
+        EmployeeRefRepository,
+        PayslipRefRepository,
+        AuditEmitter,
+      ],
     },
   ],
 })

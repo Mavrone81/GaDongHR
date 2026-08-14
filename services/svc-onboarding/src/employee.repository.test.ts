@@ -186,14 +186,58 @@ describe('EmployeeRepository — against FakeOnboardingDb (relational behaviour)
     await repo.insert(conn, newEmployee({ empCode: 'E3', orgUnitId: 'org-a', status: 'active', nationalIdBidx: Buffer.from('b3') }))
     await conn.query('COMMIT')
 
-    const byOrg = await repo.list({ orgUnitId: 'org-a' })
+    const byOrg = await repo.list({ orgUnitId: 'org-a' }, '*', 'caller-1')
     expect(byOrg.map((r) => r.empCode).sort()).toEqual(['E1', 'E3'])
 
-    const byStatus = await repo.list({ status: 'active' })
+    const byStatus = await repo.list({ status: 'active' }, '*', 'caller-1')
     expect(byStatus.map((r) => r.empCode).sort()).toEqual(['E2', 'E3'])
 
-    const byBoth = await repo.list({ orgUnitId: 'org-a', status: 'active' })
+    const byBoth = await repo.list({ orgUnitId: 'org-a', status: 'active' }, '*', 'caller-1')
     expect(byBoth.map((r) => r.empCode)).toEqual(['E3'])
+  })
+
+  describe('list() row-scoping (roadmap "🔴 Open security gap")', () => {
+    it('an org-unit array scope restricts the result to those org units only, regardless of filter', async () => {
+      const db = new FakeOnboardingDb()
+      const conn = db.connect()
+      const repo = new EmployeeRepository(conn)
+
+      await conn.query('BEGIN')
+      await repo.insert(conn, newEmployee({ empCode: 'E1', orgUnitId: 'org-a', status: 'active', nationalIdBidx: Buffer.from('sb1') }))
+      await repo.insert(conn, newEmployee({ empCode: 'E2', orgUnitId: 'org-b', status: 'active', nationalIdBidx: Buffer.from('sb2') }))
+      await repo.insert(conn, newEmployee({ empCode: 'E3', orgUnitId: 'org-c', status: 'active', nationalIdBidx: Buffer.from('sb3') }))
+      await conn.query('COMMIT')
+
+      const scoped = await repo.list({}, ['org-a', 'org-b'], 'caller-1')
+      expect(scoped.map((r) => r.empCode).sort()).toEqual(['E1', 'E2'])
+    })
+
+    it("'self' scope returns exactly the caller's own row, never any other", async () => {
+      const db = new FakeOnboardingDb()
+      const conn = db.connect()
+      const repo = new EmployeeRepository(conn)
+
+      await conn.query('BEGIN')
+      const self = await repo.insert(conn, newEmployee({ empCode: 'ESELF', orgUnitId: 'org-a', status: 'active', nationalIdBidx: Buffer.from('sb4') }))
+      await repo.insert(conn, newEmployee({ empCode: 'EOTHER', orgUnitId: 'org-a', status: 'active', nationalIdBidx: Buffer.from('sb5') }))
+      await conn.query('COMMIT')
+
+      const scoped = await repo.list({}, 'self', self.id)
+      expect(scoped.map((r) => r.id)).toEqual([self.id])
+    })
+
+    it('an empty org-unit array scope returns no rows at all, without querying', async () => {
+      const db = new FakeOnboardingDb()
+      const conn = db.connect()
+      const repo = new EmployeeRepository(conn)
+
+      await conn.query('BEGIN')
+      await repo.insert(conn, newEmployee({ empCode: 'E1', orgUnitId: 'org-a', status: 'active', nationalIdBidx: Buffer.from('sb6') }))
+      await conn.query('COMMIT')
+
+      const scoped = await repo.list({}, [], 'caller-1')
+      expect(scoped).toEqual([])
+    })
   })
 
   it('a rolled-back insert() is not visible after ROLLBACK', async () => {

@@ -206,7 +206,7 @@ describe('EmployeeService.getProfile — decrypts S2 fields, excludes S3', () =>
     const input = validInput()
     const { id } = await createEmployee(service, db, input)
 
-    const profile = await service.getProfile(id)
+    const profile = await service.getProfile(id, 'caller-1', '*')
     expect(profile.firstNameTh).toBe(input.firstNameTh)
     expect(profile.lastNameEn).toBe(input.lastNameEn)
     expect(profile.email).toBe(input.email)
@@ -217,7 +217,33 @@ describe('EmployeeService.getProfile — decrypts S2 fields, excludes S3', () =>
 
   it('ONB-003 for an unknown id', async () => {
     const { service } = makeHarness()
-    await expect(service.getProfile('no-such-id')).rejects.toMatchObject({ code: 'ONB-003' })
+    await expect(service.getProfile('no-such-id', 'caller-1', '*')).rejects.toMatchObject({ code: 'ONB-003' })
+  })
+})
+
+describe('EmployeeService.getProfile — row-scoping fix (roadmap "🔴 Open security gap")', () => {
+  it("'self' scope allows the employee reading their own profile", async () => {
+    const { db, service } = makeHarness()
+    const { id } = await createEmployee(service, db, validInput())
+    await expect(service.getProfile(id, id, 'self')).resolves.toMatchObject({ id })
+  })
+
+  it("'self' scope denies (ONB-070) reading a DIFFERENT employee's profile — the flagship vulnerability shape, for onboarding's own employee records", async () => {
+    const { db, service } = makeHarness()
+    const { id } = await createEmployee(service, db, validInput())
+    await expect(service.getProfile(id, 'someone-else', 'self')).rejects.toMatchObject({ code: 'ONB-070' })
+  })
+
+  it('an org-unit array scope allows a caller whose scope covers the row\'s org unit, and denies one that does not', async () => {
+    const { db, service } = makeHarness()
+    const { id } = await createEmployee(service, db, validInput({ orgUnitId: 'org-a' }))
+    await expect(service.getProfile(id, 'manager-1', ['org-a'])).resolves.toMatchObject({ id })
+    await expect(service.getProfile(id, 'manager-2', ['org-b'])).rejects.toMatchObject({ code: 'ONB-070' })
+  })
+
+  it('404 (not found) takes precedence over 403 (out of scope) — a missing id never leaks scope information', async () => {
+    const { service } = makeHarness()
+    await expect(service.getProfile('no-such-id', 'someone', 'self')).rejects.toMatchObject({ code: 'ONB-003' })
   })
 })
 
@@ -227,12 +253,39 @@ describe('EmployeeService.list — no sensitive decryption', () => {
     await createEmployee(service, db, validInput({ empCode: 'EMP-A', orgUnitId: 'org-a' }))
     await createEmployee(service, db, validInput({ empCode: 'EMP-B', nationalId: '3109900764416', orgUnitId: 'org-b' }))
 
-    const all = await service.list({})
+    const all = await service.list({}, 'caller-1', '*')
     expect(all.map((e) => e.empCode).sort()).toEqual(['EMP-A', 'EMP-B'])
     expect(all[0]).not.toHaveProperty('nationalId')
 
-    const scoped = await service.list({ orgUnitId: 'org-a' })
+    const scoped = await service.list({ orgUnitId: 'org-a' }, 'caller-1', '*')
     expect(scoped.map((e) => e.empCode)).toEqual(['EMP-A'])
+  })
+})
+
+describe('EmployeeService.list — row-scoping fix', () => {
+  it("an org-unit array scope silently restricts the list to in-scope org units (no filter given) — a manager sees only their own team", async () => {
+    const { db, service } = makeHarness()
+    await createEmployee(service, db, validInput({ empCode: 'EMP-A', orgUnitId: 'org-a' }))
+    await createEmployee(service, db, validInput({ empCode: 'EMP-B', nationalId: '3109900764416', orgUnitId: 'org-b' }))
+
+    const scoped = await service.list({}, 'manager-1', ['org-a'])
+    expect(scoped.map((e) => e.empCode)).toEqual(['EMP-A'])
+  })
+
+  it('an explicit org_unit filter outside the caller\'s scope is rejected with ONB-071, not silently emptied', async () => {
+    const { db, service } = makeHarness()
+    await createEmployee(service, db, validInput({ empCode: 'EMP-A', orgUnitId: 'org-a' }))
+
+    await expect(service.list({ orgUnitId: 'org-b' }, 'manager-1', ['org-a'])).rejects.toMatchObject({ code: 'ONB-071' })
+  })
+
+  it("'self' scope lists exactly the caller's own record", async () => {
+    const { db, service } = makeHarness()
+    const { id } = await createEmployee(service, db, validInput({ empCode: 'EMP-SELF' }))
+    await createEmployee(service, db, validInput({ empCode: 'EMP-OTHER', nationalId: '3109900764416' }))
+
+    const scoped = await service.list({}, id, 'self')
+    expect(scoped.map((e) => e.empCode)).toEqual(['EMP-SELF'])
   })
 })
 
@@ -240,14 +293,20 @@ describe('EmployeeService sensitive read — GET /employees/:id/sensitive (M1-1 
   it('rejects a read with no purpose (ONB-021)', async () => {
     const { db, service } = makeHarness()
     const { id } = await createEmployee(service, db, validInput())
-    await expect(service.prepareSensitiveRead(id, ['national_id'], '')).rejects.toMatchObject({ code: 'ONB-021' })
-    await expect(service.prepareSensitiveRead(id, ['national_id'], '   ')).rejects.toMatchObject({ code: 'ONB-021' })
+    await expect(service.prepareSensitiveRead(id, ['national_id'], '', 'caller-1', '*')).rejects.toMatchObject({ code: 'ONB-021' })
+    await expect(service.prepareSensitiveRead(id, ['national_id'], '   ', 'caller-1', '*')).rejects.toMatchObject({ code: 'ONB-021' })
   })
 
   it('rejects an unknown field name (ONB-022)', async () => {
     const { db, service } = makeHarness()
     const { id } = await createEmployee(service, db, validInput())
-    await expect(service.prepareSensitiveRead(id, ['not_a_real_field'], 'kyc-check')).rejects.toMatchObject({ code: 'ONB-022' })
+    await expect(service.prepareSensitiveRead(id, ['not_a_real_field'], 'kyc-check', 'caller-1', '*')).rejects.toMatchObject({ code: 'ONB-022' })
+  })
+
+  it("out-of-scope caller is denied (ONB-070) before any decrypt happens — sensitive fields are S3-class, no weaker check than getProfile's", async () => {
+    const { db, service } = makeHarness()
+    const { id } = await createEmployee(service, db, validInput())
+    await expect(service.prepareSensitiveRead(id, ['national_id'], 'kyc-check', 'someone-else', 'self')).rejects.toMatchObject({ code: 'ONB-070' })
   })
 
   it('with a purpose, decrypts every requested field and emits exactly one audit entry per field', async () => {
@@ -255,7 +314,7 @@ describe('EmployeeService sensitive read — GET /employees/:id/sensitive (M1-1 
     const input = validInput()
     const { id } = await createEmployee(service, db, input)
 
-    const values = await service.prepareSensitiveRead(id, ['national_id', 'bank_account'], 'annual KYC refresh')
+    const values = await service.prepareSensitiveRead(id, ['national_id', 'bank_account'], 'annual KYC refresh', 'caller-1', '*')
     expect(values['national_id']).toBe(input.nationalId)
     expect(values['bank_account']).toBe(input.bankAccount)
 
@@ -277,7 +336,7 @@ describe('EmployeeService sensitive read — GET /employees/:id/sensitive (M1-1 
     const { db, service } = makeHarness()
     const input = validInput()
     const { id } = await createEmployee(service, db, input)
-    await service.prepareSensitiveRead(id, ['national_id'], 'purpose')
+    await service.prepareSensitiveRead(id, ['national_id'], 'purpose', 'caller-1', '*')
 
     const conn = db.connect()
     await conn.query('BEGIN')
@@ -377,7 +436,7 @@ describe('EmployeeService.prepareUpdate/commitUpdate — PATCH re-encrypts chang
     await service.commitUpdate(conn, prepared, 'hr-1', 'hr-officer')
     await conn.query('COMMIT')
 
-    const profileValues = await service.prepareSensitiveRead(id1, ['national_id'], 'verify update')
+    const profileValues = await service.prepareSensitiveRead(id1, ['national_id'], 'verify update', 'caller-1', '*')
     expect(profileValues['national_id']).toBe('1902970000199')
   })
 

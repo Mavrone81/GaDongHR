@@ -64,7 +64,7 @@ describe('SelfServiceService.submit — idempotent under retry (XC-EVENTS: tripl
     const updateEvents = harness.db.debugOutboxRows().filter((r) => r.topic === 'employee.updated')
     expect(updateEvents).toHaveLength(1) // one effect, not three
 
-    const profile = await harness.employeeService.getProfile(id)
+    const profile = await harness.employeeService.getProfile(id, id, 'self')
     expect(profile.phone).toBe('0899999999')
   })
 
@@ -84,7 +84,7 @@ describe('SelfServiceService.submit — idempotent under retry (XC-EVENTS: tripl
 
     const updateEvents = harness.db.debugOutboxRows().filter((r) => r.topic === 'employee.updated')
     expect(updateEvents).toHaveLength(2)
-    const profile = await harness.employeeService.getProfile(id)
+    const profile = await harness.employeeService.getProfile(id, id, 'self')
     expect(profile.phone).toBe('0822222222')
   })
 
@@ -104,7 +104,7 @@ describe('SelfServiceService.submit — idempotent under retry (XC-EVENTS: tripl
     await conn2.query('COMMIT')
 
     expect(result).toMatchObject({ id }) // NOT 'duplicate' — the rolled-back attempt never committed
-    const profile = await harness.employeeService.getProfile(id)
+    const profile = await harness.employeeService.getProfile(id, id, 'self')
     expect(profile.phone).toBe('0833333333')
   })
 })

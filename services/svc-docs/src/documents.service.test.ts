@@ -4,6 +4,8 @@ import { Logger } from '@nestjs/common'
 import { DocumentsService } from './documents.service'
 import type { RenderRequest } from './documents.service'
 import { DocumentsRepository } from './documents.repository'
+import { EmployeeRefRepository } from './employee-ref.repository'
+import { PayslipRefRepository } from './payslip-ref.repository'
 import { TemplateLoader } from './templates'
 import { FontRegistry } from './fonts/font-registry'
 import type { FontDescriptor } from './fonts/font-registry'
@@ -27,6 +29,8 @@ function makeService(fontDescriptors: FontDescriptor[] = ALL_FONTS): {
   db: FakeDocsDb
   storage: FakeObjectStorage
   renderer: FakePdfRenderer
+  employeeRefs: EmployeeRefRepository
+  payslipRefs: PayslipRefRepository
 } {
   const db = new FakeDocsDb()
   const repo = new DocumentsRepository(db.asPool())
@@ -35,8 +39,10 @@ function makeService(fontDescriptors: FontDescriptor[] = ALL_FONTS): {
   const renderer = new FakePdfRenderer()
   const storage = new FakeObjectStorage()
   const crypto = new CryptoClient(fakeCryptoTransport())
-  const service = new DocumentsService(repo, templates, fonts, renderer, storage, crypto, BUCKET)
-  return { service, db, storage, renderer }
+  const employeeRefs = new EmployeeRefRepository(db.asPool())
+  const payslipRefs = new PayslipRefRepository(db.asPool())
+  const service = new DocumentsService(repo, templates, fonts, renderer, storage, crypto, BUCKET, employeeRefs, payslipRefs)
+  return { service, db, storage, renderer, employeeRefs, payslipRefs }
 }
 
 function payslipRequest(overrides: Partial<RenderRequest> = {}): RenderRequest {
@@ -360,7 +366,9 @@ describe('DocumentsService — the stored file_ref is ciphertext, never a plaint
     await conn.query('COMMIT')
 
     const expectedBytes = await fetchRenderedText(storage, prepared)
-    const retrieved = await service.getDocument(result.id)
+    // `payslipRequest()` -> entityType: 'employee', entityId: 'emp-1' — the
+    // caller IS the document's owner, so `'self'` scope must allow this.
+    const retrieved = await service.getDocument(result.id, 'emp-1', 'self')
 
     expect(retrieved.meta.id).toBe(result.id)
     expect(retrieved.meta.sha256).toBe(prepared.sha256)
@@ -369,7 +377,83 @@ describe('DocumentsService — the stored file_ref is ciphertext, never a plaint
 
   it('getDocument() throws DOC-404 for an id that was never committed', async () => {
     const { service } = makeService()
-    await expect(service.getDocument('00000000-0000-0000-0000-000000000000')).rejects.toMatchObject({ code: 'DOC-404' })
+    await expect(service.getDocument('00000000-0000-0000-0000-000000000000', 'emp-1', '*')).rejects.toMatchObject({ code: 'DOC-404' })
+  })
+})
+
+describe('DocumentsService.getDocument — row-scoping fix (roadmap "🔴 Open security gap")', () => {
+  async function commitEmployeeDoc(service: DocumentsService, db: FakeDocsDb, entityId: string): Promise<{ id: string }> {
+    const prepared = await service.prepare(payslipRequest({ entityType: 'employee', entityId }))
+    const conn = db.connect()
+    await conn.query('BEGIN')
+    const result = await service.commit(conn, prepared)
+    await conn.query('COMMIT')
+    return result
+  }
+
+  it('"*" scope reads any employee-owned document, no ownership lookup required', async () => {
+    const { service, db } = makeService()
+    const { id } = await commitEmployeeDoc(service, db, 'emp-owner')
+    await expect(service.getDocument(id, 'someone-else', '*')).resolves.toMatchObject({ meta: { id } })
+  })
+
+  it('"self" scope allows the owner and denies (DOC-070) every other caller — the exact vulnerability the roadmap names: "An employee who enumerates a document id reaches a colleague\'s payslip"', async () => {
+    const { service, db } = makeService()
+    const { id } = await commitEmployeeDoc(service, db, 'emp-owner')
+
+    await expect(service.getDocument(id, 'emp-owner', 'self')).resolves.toMatchObject({ meta: { id } })
+    await expect(service.getDocument(id, 'emp-intruder', 'self')).rejects.toMatchObject({ code: 'DOC-070' })
+  })
+
+  it('an org-unit array scope allows a caller whose scope covers the owner\'s org unit', async () => {
+    const { service, db, employeeRefs } = makeService()
+    const { id } = await commitEmployeeDoc(service, db, 'emp-owner')
+    await employeeRefs.upsert(db.asPool(), { employeeId: 'emp-owner', orgUnitId: 'org-a' })
+
+    await expect(service.getDocument(id, 'manager-1', ['org-a'])).resolves.toMatchObject({ meta: { id } })
+    await expect(service.getDocument(id, 'manager-2', ['org-b'])).rejects.toMatchObject({ code: 'DOC-070' })
+  })
+
+  it('an org-unit array scope fails closed (DOC-070) when the owner has no synced employee_ref row yet', async () => {
+    const { service, db } = makeService()
+    const { id } = await commitEmployeeDoc(service, db, 'emp-not-yet-synced')
+    await expect(service.getDocument(id, 'manager-1', ['org-a'])).rejects.toMatchObject({ code: 'DOC-070' })
+  })
+
+  it('a payslip document resolves its owner via docs.payslip_ref (entity_id is the payslip id, not the employee id) — "self" allows the true owner and denies everyone else', async () => {
+    const { service, db, payslipRefs } = makeService()
+    const prepared = await service.prepare(payslipRequest({ entityType: 'payslip', entityId: 'payslip-77' }))
+    const conn = db.connect()
+    await conn.query('BEGIN')
+    const result = await service.commit(conn, prepared)
+    await conn.query('COMMIT')
+    await payslipRefs.upsert(db.asPool(), { payslipId: 'payslip-77', employeeId: 'emp-real-owner' })
+
+    await expect(service.getDocument(result.id, 'emp-real-owner', 'self')).resolves.toMatchObject({ meta: { id: result.id } })
+    await expect(service.getDocument(result.id, 'emp-different-employee', 'self')).rejects.toMatchObject({ code: 'DOC-070' })
+  })
+
+  it('a payslip document fails closed (DOC-070) under "self" scope when payslip.issued has not synced docs.payslip_ref yet — a lagging read model must not be treated as "no owner to check"', async () => {
+    const { service, db } = makeService()
+    const prepared = await service.prepare(payslipRequest({ entityType: 'payslip', entityId: 'payslip-unsynced' }))
+    const conn = db.connect()
+    await conn.query('BEGIN')
+    const result = await service.commit(conn, prepared)
+    await conn.query('COMMIT')
+
+    await expect(service.getDocument(result.id, 'anyone', 'self')).rejects.toMatchObject({ code: 'DOC-070' })
+  })
+
+  it('an unrecognised entity_type fails closed (DOC-070) under any non-"*" scope', async () => {
+    const { service, db } = makeService()
+    const prepared = await service.prepare(payslipRequest({ entityType: 'something-new', entityId: 'whatever' }))
+    const conn = db.connect()
+    await conn.query('BEGIN')
+    const result = await service.commit(conn, prepared)
+    await conn.query('COMMIT')
+
+    await expect(service.getDocument(result.id, 'anyone', 'self')).rejects.toMatchObject({ code: 'DOC-070' })
+    await expect(service.getDocument(result.id, 'anyone', '*')).resolves.toMatchObject({ meta: { id: result.id } })
   })
 })
 

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { AuditEmitter, CryptoClient, isBlankPurpose, writeOutbox } from '@gadong/kernel'
-import type { Queryable } from '@gadong/kernel'
+import { AuditEmitter, CryptoClient, isBlankPurpose, scopeAllowsEmployee, scopeAllowsOrgUnit, writeOutbox } from '@gadong/kernel'
+import type { AuthzScope, Queryable } from '@gadong/kernel'
 import { EmployeeRepository } from './employee.repository'
 import type { ClockInMethod, EmployeePatch, EmployeeRow, EmploymentType, Lang, NewEmployeeRow, EmployeeStatus } from './employee.repository'
 import { ChecklistService } from './checklist.service'
@@ -10,8 +10,10 @@ import { isValidThaiNationalId } from './national-id'
 import {
   duplicateNationalId,
   employeeNotFound,
+  employeeOutOfScope,
   invalidNationalId,
   lifecycleGuardFailed,
+  orgUnitOutOfScope,
   purposeRequired,
   terminationReasonRequired,
   unknownSensitiveField,
@@ -264,9 +266,21 @@ export class EmployeeService {
 
   // --- read ---
 
-  async getProfile(id: string): Promise<EmployeeProfile> {
+  /**
+   * Row-scoping fix (roadmap "🔴 Open security gap"): `callerId`/`scope`
+   * are REQUIRED, not optional (see `@gadong/kernel`'s `authz/scope.ts`
+   * design-decision note — an unscoped call site must not compile). Unlike
+   * `svc-docs` (no cross-schema access to an employee's org unit — needs a
+   * synced local read model) `onboarding.employee` IS the org-unit source
+   * of truth, so the check runs directly against the row this method
+   * already fetched — no separate ref table, no risk of a stale read
+   * model. 404 (not found) is checked BEFORE 403 (out of scope), matching
+   * `svc-docs`/`svc-timesheet`'s established ordering.
+   */
+  async getProfile(id: string, callerId: string, scope: AuthzScope): Promise<EmployeeProfile> {
     const row = await this.repo.findById(id)
     if (!row) throw employeeNotFound(id)
+    if (!scopeAllowsEmployee(scope, callerId, id, row.orgUnitId)) throw employeeOutOfScope(id)
 
     const [firstNameTh, lastNameTh, firstNameEn, lastNameEn, dob, addressJson, phone, email] = await Promise.all([
       this.crypto.decrypt(id, 'first_name_th', row.firstNameTh, PROFILE_READ_PURPOSE),
@@ -290,21 +304,49 @@ export class EmployeeService {
     }
   }
 
-  /** `GET /employees?org_unit&status` — no S3 (or S2) decryption at all, deliberately: a list view over potentially many rows must not fan out into one crypto round trip per field per row. */
-  async list(filter: EmployeeListFilter): Promise<EmployeeSummary[]> {
-    const rows = await this.repo.list(filter)
+  /**
+   * `GET /employees?org_unit&status` — no S3 (or S2) decryption at all,
+   * deliberately: a list view over potentially many rows must not fan out
+   * into one crypto round trip per field per row.
+   *
+   * Row-scoping fix: `callerId`/`scope` REQUIRED (same design-decision
+   * note as `getProfile`). A caller-supplied `filter.orgUnitId` is checked
+   * against `scope` FIRST and rejected with 403 (`orgUnitOutOfScope`,
+   * mirroring `svc-timesheet`'s `TSH-070` on `GET /teams/:orgUnit/days`) —
+   * an explicitly-named org unit the caller cannot see is treated the same
+   * as an explicitly-named employee id they cannot see, not silently
+   * emptied. With no `orgUnitId` filter, `repo.list` applies `scope`
+   * itself and returns whatever that caller can see — empty is a normal,
+   * unremarkable result for a plain list query (list-route convention;
+   * see `onboarding-errors.ts#employeeOutOfScope`'s doc for why a
+   * single-id route differs).
+   */
+  async list(filter: EmployeeListFilter, callerId: string, scope: AuthzScope): Promise<EmployeeSummary[]> {
+    if (filter.orgUnitId !== undefined && !scopeAllowsOrgUnit(scope, filter.orgUnitId)) {
+      throw orgUnitOutOfScope(filter.orgUnitId)
+    }
+    const rows = await this.repo.list(filter, scope, callerId)
     return rows.map(toEmployeeSummary)
   }
 
   // --- GET /employees/:id/sensitive ---
 
-  /** External I/O only (decrypt calls) — no DB write. Purpose validated first (ONB-021), same "blank" definition kernel's `AuditEmitter` uses. */
-  async prepareSensitiveRead(id: string, fields: string[], purpose: string): Promise<Record<string, string | null>> {
+  /**
+   * External I/O only (decrypt calls) — no DB write. Purpose validated
+   * first (ONB-021), same "blank" definition kernel's `AuditEmitter` uses.
+   *
+   * Row-scoping fix: `callerId`/`scope` REQUIRED, same reasoning as
+   * `getProfile` — this route is arguably MORE sensitive (national ID,
+   * bank account: S3 class), so it gets exactly the same ownership check,
+   * not a weaker one.
+   */
+  async prepareSensitiveRead(id: string, fields: string[], purpose: string, callerId: string, scope: AuthzScope): Promise<Record<string, string | null>> {
     if (isBlankPurpose(purpose)) throw purposeRequired()
     for (const f of fields) if (!SENSITIVE_FIELD_NAMES.has(f)) throw unknownSensitiveField(f)
 
     const row = await this.repo.findById(id)
     if (!row) throw employeeNotFound(id)
+    if (!scopeAllowsEmployee(scope, callerId, id, row.orgUnitId)) throw employeeOutOfScope(id)
 
     const values: Record<string, string | null> = {}
     for (const field of fields) {

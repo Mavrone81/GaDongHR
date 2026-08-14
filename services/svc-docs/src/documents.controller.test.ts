@@ -1,6 +1,7 @@
 import { HttpException } from '@nestjs/common'
 import { APP_GUARD } from '@nestjs/core'
 import { GadongError, PERMISSION_METADATA_KEY, writeOutbox } from '@gadong/kernel'
+import type { AuthenticatedRequest } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { DocumentsController, DB_POOL } from './documents.controller'
 import type { RenderRequestBody } from './documents.controller'
@@ -62,6 +63,10 @@ function fakeDocumentsService(overrides: Partial<FakeDocumentsService> = {}): Do
   return base as DocumentsService
 }
 
+function fakeRequest(overrides: Partial<AuthenticatedRequest> = {}): AuthenticatedRequest {
+  return { userId: 'user-1', authzScope: '*', ...overrides }
+}
+
 function renderBody(overrides: Partial<RenderRequestBody> = {}): RenderRequestBody {
   return {
     kind: 'payslip',
@@ -93,16 +98,36 @@ describe('DocumentsController wiring', () => {
     expect(out).toMatchObject({ id: 'doc-1', sha256: prepared.sha256 })
   })
 
-  it('GET /documents/:id forwards id and returns metadata plus base64 content', async () => {
+  it('GET /documents/:id forwards id, callerId and scope, and returns metadata plus base64 content', async () => {
     const getDocument = jest.fn().mockResolvedValue({ meta: fakeDocumentRow({ id: 'doc-2' }), pdfBytes: Buffer.from('hello-pdf') })
     const commitReadAudit = jest.fn().mockResolvedValue(undefined)
     const controller = new DocumentsController(fakeDocumentsService({ getDocument, commitReadAudit }), fakePool())
 
-    const out = await controller.getById({ userId: 'hr-1', actorRole: 'hr_admin' } as never, 'doc-2')
+    const out = await controller.getById('doc-2', fakeRequest({ userId: 'hr-1', actorRole: 'hr_admin', authzScope: ['org-a'] }))
 
-    expect(getDocument).toHaveBeenCalledWith('doc-2', 'document.read')
+    expect(getDocument).toHaveBeenCalledWith('doc-2', 'hr-1', ['org-a'], 'document.read')
     expect(commitReadAudit).toHaveBeenCalledWith(expect.anything(), fakeDocumentRow({ id: 'doc-2' }), 'document.read', 'hr-1', 'hr_admin')
     expect(out).toMatchObject({ id: 'doc-2', kind: 'payslip', contentBase64: Buffer.from('hello-pdf').toString('base64') })
+  })
+
+  it('GET /documents/:id throws 401 (not the guard\'s job to have caught this — defensive) when req.userId is somehow unset', async () => {
+    const controller = new DocumentsController(fakeDocumentsService(), fakePool())
+    await expect(controller.getById('doc-2', { authzScope: '*' })).rejects.toMatchObject({ getStatus: expect.any(Function) })
+    try {
+      await controller.getById('doc-2', { authzScope: '*' })
+    } catch (thrown) {
+      expect((thrown as HttpException).getStatus()).toBe(401)
+    }
+  })
+
+  it('GET /documents/:id throws 500 (not silently "*") when req.authzScope is somehow unset despite an allowed decision', async () => {
+    const controller = new DocumentsController(fakeDocumentsService(), fakePool())
+    try {
+      await controller.getById('doc-2', { userId: 'user-1' })
+      throw new Error('expected rejection')
+    } catch (thrown) {
+      expect((thrown as HttpException).getStatus()).toBe(500)
+    }
   })
 
   it('GET /health reports db:up, storage:up, fonts:up as overall status ok', async () => {
@@ -156,11 +181,25 @@ describe('DocumentsController wiring', () => {
     const controller = new DocumentsController(fakeDocumentsService({ getDocument: jest.fn().mockRejectedValue(err) }), fakePool())
 
     try {
-      await controller.getById({ userId: 'hr-1' } as never, 'missing')
+      await controller.getById('missing', fakeRequest({ userId: 'hr-1' }))
       throw new Error('expected rejection')
     } catch (thrown) {
       expect(thrown).toBeInstanceOf(HttpException)
       expect((thrown as HttpException).getStatus()).toBe(404)
+    }
+  })
+
+  it('maps a thrown DOC-070 (out of scope) to a 403 HttpException on GET /documents/:id — cross-employee denial', async () => {
+    const err = new GadongError('DOC-070', 'docs.error.document_out_of_scope', 403, [{ id: 'someone-elses-doc' }])
+    const controller = new DocumentsController(fakeDocumentsService({ getDocument: jest.fn().mockRejectedValue(err) }), fakePool())
+
+    try {
+      await controller.getById('someone-elses-doc', fakeRequest({ userId: 'employee-a', authzScope: 'self' }))
+      throw new Error('expected rejection')
+    } catch (thrown) {
+      expect(thrown).toBeInstanceOf(HttpException)
+      expect((thrown as HttpException).getStatus()).toBe(403)
+      expect((thrown as HttpException).getResponse()).toMatchObject({ code: 'DOC-070' })
     }
   })
 })

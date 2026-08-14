@@ -393,6 +393,24 @@ export class FakeOnboardingConnection implements Queryable {
       const status = paramFor(s, params, 'status = \\$')
       if (orgUnitId !== undefined) rows = rows.filter((r) => r.org_unit_id === orgUnitId)
       if (status !== undefined) rows = rows.filter((r) => r.status === status)
+
+      // Row-scoping fix (`employee.repository.ts#list`): the scope clause
+      // is appended AFTER the caller's own filter clauses, matched by its
+      // own distinct SQL shape rather than reusing `paramFor` above (whose
+      // simple `col = $N` pattern would also match inside `org_unit_id =
+      // ANY($N)`, and `id = $N` needs to be told apart from a plain
+      // caller-filter column that never appears in `list()`'s own filter
+      // set anyway).
+      const selfScopeMatch = /\bid = \$(\d+)/i.exec(s)
+      if (selfScopeMatch?.[1]) {
+        const selfId = params[Number(selfScopeMatch[1]) - 1]
+        rows = rows.filter((r) => r.id === selfId)
+      }
+      const orgUnitScopeMatch = /org_unit_id = ANY\(\$(\d+)\)/i.exec(s)
+      if (orgUnitScopeMatch?.[1]) {
+        const orgUnitIds = params[Number(orgUnitScopeMatch[1]) - 1] as string[]
+        rows = rows.filter((r) => orgUnitIds.includes(r.org_unit_id))
+      }
       return [...rows].sort((a, b) => b.created_at.getTime() - a.created_at.getTime()) as unknown as Array<Record<string, unknown>>
     }
     throw new Error(`FakeOnboardingDb: unrecognised SELECT on onboarding.employee: ${s}`)

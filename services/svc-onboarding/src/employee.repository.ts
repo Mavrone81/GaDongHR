@@ -1,4 +1,4 @@
-import type { Queryable } from '@gadong/kernel'
+import type { AuthzScope, Queryable } from '@gadong/kernel'
 
 export type EmploymentType = 'monthly' | 'daily' | 'hourly' | 'contract'
 export type EmployeeStatus = 'draft' | 'onboarding' | 'active' | 'cancelled' | 'terminated'
@@ -212,7 +212,23 @@ export class EmployeeRepository {
     return rows.length > 0 && rows[0] !== undefined ? mapRow(rows[0]) : null
   }
 
-  async list(filter: EmployeeListFilter): Promise<EmployeeRow[]> {
+  /**
+   * Row-scoping fix (roadmap "🔴 Open security gap"): `scope`/`callerId`
+   * are REQUIRED, not optional — see `@gadong/kernel`'s `authz/scope.ts`
+   * design-decision note (an unscoped call site must not compile). Applied
+   * as an extra `WHERE` constraint alongside `filter`'s caller-chosen
+   * `orgUnitId`/`status`, so the scope narrows the result set no matter
+   * what the caller asked for — even if `EmployeeService.list` somehow
+   * forgot its own pre-check against `filter.orgUnitId`, this method
+   * cannot return a row outside `scope` on its own.
+   *
+   * `scope === 'self'` resolves to `WHERE id = callerId` — a caller with
+   * only a self grant listing employees sees exactly their own record (not
+   * an error; an empty-if-filtered-out list, per this route's own
+   * list-route convention — see `onboarding-errors.ts#employeeOutOfScope`'s
+   * doc for why a single-id route differs).
+   */
+  async list(filter: EmployeeListFilter, scope: AuthzScope, callerId: string): Promise<EmployeeRow[]> {
     const clauses: string[] = []
     const params: unknown[] = []
     if (filter.orgUnitId !== undefined) {
@@ -222,6 +238,14 @@ export class EmployeeRepository {
     if (filter.status !== undefined) {
       params.push(filter.status)
       clauses.push(`status = $${String(params.length)}`)
+    }
+    if (scope === 'self') {
+      params.push(callerId)
+      clauses.push(`id = $${String(params.length)}`)
+    } else if (scope !== '*') {
+      if (scope.length === 0) return []
+      params.push(scope)
+      clauses.push(`org_unit_id = ANY($${String(params.length)})`)
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
     const { rows } = await this.db.query(

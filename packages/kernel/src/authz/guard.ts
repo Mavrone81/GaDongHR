@@ -5,6 +5,7 @@ import { GadongError, permissionDenied } from '../errors'
 import { AuditEmitter } from '../audit/emitter'
 import type { Queryable } from '../outbox/outbox'
 import { AuthzClient } from './client'
+import type { AuthzScope } from './client'
 
 /**
  * Metadata key `@RequirePermission` writes and `PermissionGuard` reads,
@@ -83,6 +84,21 @@ export const Public = (): MethodDecorator & ClassDecorator => SetMetadata(PUBLIC
  * `userId` is optional because "no authenticated principal" is a real,
  * expected shape this guard must handle locally, not assume away
  * (fix round 1, IMPORTANT 4).
+ *
+ * `authzScope` is written by `PermissionGuard.canActivate` itself (never by
+ * `OidcMiddleware`, which only ever sets `userId`/`actorRole`) — it is the
+ * row-scoping fix for the roadmap's "🔴 Open security gap — permissions are
+ * too coarse for row-level access": `AuthzClient.decide()` already computes
+ * `Decision.scopeOrgUnitIds`, and until this field existed every service
+ * that wanted it had to either ignore it (the vulnerability) or call
+ * `decide()` a second time itself (`svc-timesheet`'s `org-scope.ts`, the
+ * one place in this codebase that did). Optional because it is only ever
+ * set on the ALLOWED path — a denied or public request never reaches the
+ * line that assigns it, so a handler must not read it without first having
+ * been reached at all (which, for anything but a `@Public()` route, implies
+ * it IS set — TypeScript's optionality here is about the two paths that
+ * never assign it, not about services needing to guess a fallback).
+ * Consumers apply it with `authz/scope.ts`'s pure helper functions.
  */
 export interface AuthenticatedRequest {
   userId?: string
@@ -95,6 +111,7 @@ export interface AuthenticatedRequest {
    * object was built through the middleware.
    */
   actorRole?: string
+  authzScope?: AuthzScope
 }
 
 /**
@@ -239,6 +256,15 @@ export class PermissionGuard implements CanActivate {
       await this.recordDenial(request, permission)
       throw permissionDenied(permission)
     }
+
+    // The row-scoping fix: the boolean gate above only answers "may this
+    // user perform this action" — `decision.scopeOrgUnitIds` is "on which
+    // rows", and previously nothing kept it past this method returning.
+    // Attaching it here, on the SAME `Decision` this call already fetched,
+    // is what lets a repository apply it as a WHERE constraint without a
+    // second `AuthzClient.decide()` round trip (see `AuthenticatedRequest
+    // .authzScope`'s doc and `authz/scope.ts`).
+    request.authzScope = decision.scopeOrgUnitIds
 
     return true
   }
