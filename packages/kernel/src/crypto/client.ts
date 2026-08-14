@@ -113,14 +113,24 @@ export class CryptoClient {
     let response: unknown
     try {
       response = await this.transport.post('/encrypt', { fields: reqs })
-    } catch {
+    } catch (err) {
       // Fail closed: any transport rejection (network error, timeout, sealed Vault
       // relayed as an error) becomes CRY-503, never a raw error the caller might
-      // mishandle as "skip and continue".
+      // mishandle as "skip and continue". Logged (never the field values
+      // themselves) so "svc-crypto unreachable" and "svc-crypto reachable but
+      // its own response was rejected below" are distinguishable from the
+      // caller's own logs — this exact ambiguity cost two full CI investigations
+      // before a temporary, hand-added instrumentation pass found the real cause
+      // (see `.superpowers/sdd/02-modules/ci-gates-fix.md`). The thrown error is
+      // unchanged; this is strictly additive.
+      console.error('CryptoClient.encryptBatch: transport rejected /encrypt —', err)
       throw cryptoUnavailable()
     }
 
-    if (!isEncryptResponse(response)) throw cryptoUnavailable()
+    if (!isEncryptResponse(response)) {
+      console.error('CryptoClient.encryptBatch: /encrypt responded but not with a {fields:{...}} shape')
+      throw cryptoUnavailable()
+    }
 
     const out = new Map<string, Buffer>()
     for (const req of reqs) {
@@ -129,13 +139,21 @@ export class CryptoClient {
       // rather than returning a map the caller could partially trust — that gap
       // is exactly how a plaintext column would get written believing it was
       // encrypted.
-      if (typeof encoded !== 'string') throw cryptoUnavailable()
+      if (typeof encoded !== 'string') {
+        console.error(`CryptoClient.encryptBatch: /encrypt's response is missing field "${req.field}"`)
+        throw cryptoUnavailable()
+      }
 
       const buf = Buffer.from(encoded, 'base64')
       // A too-short decode (e.g. "" decoding to 0 bytes, or svc-crypto echoing
       // plaintext back) cannot be genuine ciphertext per the fixed wire layout —
       // treat it as a crypto failure, not a value to hand the caller.
-      if (buf.length < MIN_CIPHERTEXT_BYTES) throw cryptoUnavailable()
+      if (buf.length < MIN_CIPHERTEXT_BYTES) {
+        console.error(
+          `CryptoClient.encryptBatch: field "${req.field}" decoded to ${String(buf.length)} bytes, below MIN_CIPHERTEXT_BYTES=${String(MIN_CIPHERTEXT_BYTES)} — never logs the ciphertext or plaintext itself`,
+        )
+        throw cryptoUnavailable()
+      }
 
       out.set(req.field, buf)
     }
@@ -164,11 +182,16 @@ export class CryptoClient {
     let response: unknown
     try {
       response = await this.transport.post('/decrypt', body)
-    } catch {
+    } catch (err) {
+      // See encryptBatch's identical catch above — logged, not weakened.
+      console.error('CryptoClient.decrypt: transport rejected /decrypt —', err)
       throw cryptoUnavailable()
     }
 
-    if (!isDecryptResponse(response)) throw cryptoUnavailable()
+    if (!isDecryptResponse(response)) {
+      console.error('CryptoClient.decrypt: /decrypt responded but not with a {value:string} shape')
+      throw cryptoUnavailable()
+    }
     return response.value
   }
 
@@ -178,18 +201,26 @@ export class CryptoClient {
     let response: unknown
     try {
       response = await this.transport.post('/bidx', body)
-    } catch {
+    } catch (err) {
+      // See encryptBatch's identical catch above — logged, not weakened.
+      console.error('CryptoClient.blindIndex: transport rejected /bidx —', err)
       throw cryptoUnavailable()
     }
 
-    if (!isBidxResponse(response)) throw cryptoUnavailable()
+    if (!isBidxResponse(response)) {
+      console.error('CryptoClient.blindIndex: /bidx responded but not with a {bidx:string} shape')
+      throw cryptoUnavailable()
+    }
 
     const buf = Buffer.from(response.bidx, 'base64')
     // HMAC-SHA256 output is exactly 32 bytes, always — so this is an equality check,
     // not a floor. Too short lets unrelated rows collide on a truncated/empty index;
     // too long can't collide with a real bidx, but is still a malformed value we must
     // not write to a `<field>_bidx` column.
-    if (buf.length !== BIDX_BYTES) throw cryptoUnavailable()
+    if (buf.length !== BIDX_BYTES) {
+      console.error(`CryptoClient.blindIndex: /bidx returned ${String(buf.length)} bytes, expected exactly ${String(BIDX_BYTES)}`)
+      throw cryptoUnavailable()
+    }
 
     return buf
   }
