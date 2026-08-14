@@ -2,7 +2,8 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "module": "commonjs",
-    "moduleResolution": "node",
+    "moduleResolution": "node10",
+    "ignoreDeprecations": "6.0",
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -11,5 +12,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["scripts/**/*.ts", "src/api/**/*.ts", "src/lib/**/*.ts", "../test/e2e/harness.ts", "../test/e2e/lib/**/*.ts"]
+  "include": ["scripts/**/*.ts", "src/api/**/*.ts", "../test/e2e/harness.ts", "../test/e2e/lib/**/*.ts"],
+  "exclude": ["**/*.test.ts", "**/*.test.tsx", "**/node_modules/**"]
 }

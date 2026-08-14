@@ -21,11 +21,16 @@
  *
  * WHAT THIS PROVES, HONESTLY:
  *   - attendance: a REAL `POST /punches/code` through this app's own
- *     `svcAttendance.ts` client. The realistic outcome (task brief, e2e
- *     findings) is a 4xx `invalidAlternativeCredential` — PIN enrolment is
- *     out of scope — and this script asserts nothing about the punch
- *     succeeding, only that the ROUTE answers for real through this app's
- *     client code, exactly like `test/e2e/lifecycle.e2e.test.ts`'s own
+ *     `svcAttendance.ts` client. Observed (a real run, not a prediction):
+ *     `403 AUZ-403 authz.error.denied` — `PERSONAS.employee` granted only
+ *     the `employee-ess` role template here does not itself carry
+ *     `attendance.punch.code` in this harness's seed data, so the
+ *     PermissionGuard denies before PIN enrolment is even reached. A
+ *     *real* employee with the punch permission would instead hit the
+ *     task brief's known e2e finding (`invalidAlternativeCredential`, no
+ *     PIN enrolled) — either way this script asserts nothing about the
+ *     punch succeeding, only that the ROUTE answers for real through this
+ *     app's client code, same as `test/e2e/lifecycle.e2e.test.ts`'s own
  *     equivalent assertion.
  *   - timesheet: a REAL `GET /my/days` (200, real data or a real empty
  *     list) and `GET /periods` (a real 403 for an employee-scoped token,
