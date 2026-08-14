@@ -6,12 +6,15 @@ import {
   AuthzClient,
   CryptoClient,
   GadongErrorFilter,
+  MachineTokenClient,
   PermissionGuard,
+  createAuthenticatedFetch,
+  createHttpTokenTransport,
   createOidcMiddlewareHandler,
   createPool,
 } from '@gadong/kernel'
 import type { OidcMiddlewareHandler } from '@gadong/kernel'
-import type { AuthzTransport, CryptoTransport, Queryable } from '@gadong/kernel'
+import type { AuthenticatedFetch, AuthzTransport, CryptoTransport, Queryable } from '@gadong/kernel'
 import { CRYPTO_HEALTH, DB_POOL, ClaimsController } from './claims.controller'
 import type { HealthCheckPort } from './claims.controller'
 import { ClaimTypesRepository } from './claim-types.repository'
@@ -38,11 +41,21 @@ function createHttpAuthzTransport(baseUrl: string): AuthzTransport {
   }
 }
 
-/** `svc-crypto` HTTP transport — the real implementation of kernel's `CryptoTransport` port, same shape `services/svc-docs/src/app.module.ts` uses. Every receipt `file_ref` (M6-2) is envelope-encrypted through this before write; `CryptoClient.encryptBatch` fails closed (`CRY-503`) on any transport rejection. */
-function createHttpCryptoTransport(baseUrl: string): CryptoTransport {
+/**
+ * `svc-crypto` HTTP transport — the real implementation of kernel's
+ * `CryptoTransport` port. Every receipt `file_ref` (M6-2) is
+ * envelope-encrypted through this before write; `CryptoClient.encryptBatch`
+ * fails closed (`CRY-503`) on any transport rejection. crypto-auth task:
+ * `svc-crypto` now guards `/encrypt` with `PermissionGuard` — svc-claims
+ * only ever WRITES a receipt pointer (`ClaimsService`, `claims.service.ts`),
+ * never reads one back, so it holds `crypto.encrypt` ONLY, never
+ * `crypto.decrypt`/`crypto.bidx` (least privilege). Takes an
+ * `AuthenticatedFetch` instead of the bare global `fetch` it used before.
+ */
+function createHttpCryptoTransport(baseUrl: string, fetchImpl: typeof fetch): CryptoTransport {
   return {
     async post(path, body) {
-      const res = await fetch(`${baseUrl}${path}`, {
+      const res = await fetchImpl(`${baseUrl}${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -57,6 +70,22 @@ function requiredEnv(name: string): string {
   const value = process.env[name]
   if (!value) throw new Error(`svc-claims: ${name} is required`)
   return value
+}
+
+/**
+ * crypto-auth task: this service's own machine identity for its one
+ * outbound guarded call (svc-crypto) — an OAuth2 client_credentials
+ * client, authenticated against the SAME OIDC issuer `createOidcMiddleware`
+ * below validates incoming tokens against. `S2S_CLIENT_ID`/
+ * `S2S_CLIENT_SECRET` come from the `svc-claims` realm client
+ * (`deploy/keycloak/realm-gadonghr.json`) — same pattern
+ * `svc-onboarding`/`svc-payroll` established for the S2S auth task.
+ */
+function createMachineTokenClient(): MachineTokenClient {
+  return new MachineTokenClient(createHttpTokenTransport(requiredEnv('OIDC_TOKEN_URL')), {
+    clientId: requiredEnv('S2S_CLIENT_ID'),
+    clientSecret: requiredEnv('S2S_CLIENT_SECRET'),
+  })
 }
 
 /** Identical wiring/reasoning to `services/svc-config`'s `createOidcMiddleware` — populates `request.userId` from a verified bearer token, ahead of `PermissionGuard`. */
@@ -105,8 +134,16 @@ function createHttpHealthCheck(url: string): HealthCheckPort {
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
     },
     {
+      // crypto-auth task: one machine-token client, one authenticated-fetch
+      // helper, for this service's one outbound guarded call (svc-crypto).
+      provide: 'AUTHENTICATED_FETCH',
+      useFactory: (): AuthenticatedFetch => createAuthenticatedFetch(createMachineTokenClient()),
+    },
+    {
       provide: CryptoClient,
-      useFactory: () => new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000')),
+      useFactory: (authedFetch: AuthenticatedFetch) =>
+        new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000', authedFetch)),
+      inject: ['AUTHENTICATED_FETCH'],
     },
     {
       provide: DB_POOL,

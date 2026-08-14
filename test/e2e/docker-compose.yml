@@ -69,7 +69,9 @@ services:
         {"svc-onboarding":{"secret":"e2e-svc-onboarding-secret","sub":"00000000-0000-4000-8000-0000e2e01001"},
         "svc-payroll":{"secret":"e2e-svc-payroll-secret","sub":"00000000-0000-4000-8000-0000e2e01002"},
         "svc-timesheet":{"secret":"e2e-svc-timesheet-secret","sub":"00000000-0000-4000-8000-0000e2e01003"},
-        "svc-scheduler":{"secret":"e2e-svc-scheduler-secret","sub":"00000000-0000-4000-8000-0000e2e01004"}}
+        "svc-scheduler":{"secret":"e2e-svc-scheduler-secret","sub":"00000000-0000-4000-8000-0000e2e01004"},
+        "svc-attendance":{"secret":"e2e-svc-attendance-secret","sub":"00000000-0000-4000-8000-0000e2e01005"},
+        "svc-docs":{"secret":"e2e-svc-docs-secret","sub":"00000000-0000-4000-8000-0000e2e01006"}}
     ports: ["18081:8080"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
@@ -190,7 +192,11 @@ services:
     build: { context: ../.., dockerfile: services/svc-crypto/Dockerfile }
     <<: *node-defaults
     environment:
+      <<: *oidc-env
       NODE_ENV: test
+      # crypto-auth task: PermissionGuard's own AuthzClient — svc-crypto now
+      # guards /encrypt, /decrypt and /bidx.
+      AUTHZ_URL: http://svc-authz:3000
       VAULT_ADDR: http://vault:8200
       VAULT_APPROLE_ID: ${VAULT_APPROLE_ID:-unset}
       VAULT_APPROLE_SECRET_FILE: /run/secrets/vault_approle_secret
@@ -199,6 +205,7 @@ services:
       - ./runtime/vault_approle_secret:/run/secrets/vault_approle_secret:ro
     depends_on:
       vault: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
     healthcheck: *http-health
 
   svc-onboarding:
@@ -269,7 +276,7 @@ services:
     build: { context: ../.., dockerfile: services/svc-attendance/Dockerfile }
     <<: *node-defaults
     environment:
-      <<: *oidc-env
+      <<: [*oidc-env, *oidc-token-env]
       NODE_ENV: test
       DATABASE_URL: postgresql://attendance:e2e-pw@postgres:5432/gadonghr
       AUTHZ_URL: http://svc-authz:3000
@@ -278,6 +285,10 @@ services:
       ATTENDANCE_CREDENTIAL_PEPPER: e2e-attendance-pepper
       FACE_ENGINE_URL: http://compreface.invalid:8000
       RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
+      # crypto-auth task: this service's own machine identity — MUST match
+      # `OIDC_CLIENTS`/`MACHINE_PRINCIPALS` (oidc-issuer / harness.ts).
+      S2S_CLIENT_ID: svc-attendance
+      S2S_CLIENT_SECRET: e2e-svc-attendance-secret
     ports: ["18006:3000"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -290,7 +301,7 @@ services:
     build: { context: ../.., dockerfile: services/svc-docs/Dockerfile }
     <<: *node-defaults
     environment:
-      <<: *oidc-env
+      <<: [*oidc-env, *oidc-token-env]
       NODE_ENV: test
       DATABASE_URL: postgresql://docs:e2e-pw@postgres:5432/gadonghr
       AUTHZ_URL: http://svc-authz:3000
@@ -302,6 +313,10 @@ services:
       MINIO_SECRET_KEY: e2e-minio-password
       DOCS_BUCKET: gadonghr-docs-e2e
       RABBITMQ_URL: amqp://e2e-rabbitmq-user:e2e-rabbitmq-password@rabbitmq:5672
+      # crypto-auth task: this service's own machine identity — MUST match
+      # `OIDC_CLIENTS`/`MACHINE_PRINCIPALS` (oidc-issuer / harness.ts).
+      S2S_CLIENT_ID: svc-docs
+      S2S_CLIENT_SECRET: e2e-svc-docs-secret
     ports: ["18009:3000"]
     depends_on:
       postgres: { condition: service_healthy }

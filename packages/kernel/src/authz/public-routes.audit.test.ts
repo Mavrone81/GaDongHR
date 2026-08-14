@@ -97,6 +97,14 @@ const EXPECTED_PUBLIC_ROUTES: PublicRoute[] = [
   // the product, and `services/svc-payroll/src/payroll.controller.test.ts`
   // asserts independently that no other route there is public.
   { service: 'svc-payroll', method: 'GET', path: 'health' },
+  // Added by the crypto-auth task: `svc-crypto` now mounts `PermissionGuard`
+  // globally (defense-in-depth fix — it used to accept `/encrypt`/`/decrypt`/
+  // `/bidx` with zero authentication), so its own healthcheck — called by
+  // compose, the deploy script and monitoring with no bearer token — needs
+  // the same `@Public()` bypass every other guarded service's health route
+  // already has. `crypto.controller.test.ts`'s own suite asserts
+  // independently that `/encrypt`/`/decrypt`/`/bidx` are NOT public.
+  { service: 'svc-crypto', method: 'GET', path: 'health' },
 ]
 
 function routeKeyString(r: PublicRoute): string {

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpException, Post } from '@nestjs/common'
-import { GadongError, buildHealth } from '@gadong/kernel'
+import { GadongError, Public, RequirePermission, buildHealth } from '@gadong/kernel'
 import type { EncryptRequest, FieldClass, HealthPayload } from '@gadong/kernel'
 import { CryptoService } from './crypto.service'
 
@@ -34,28 +34,34 @@ interface BidxResponse {
  * first and match it exactly — a mismatch is a runtime failure no test
  * here would catch").
  *
- * **Deliberately no `@RequirePermission` on this controller or any of its
- * routes, and `AppModule` deliberately does not register the kernel's
- * `PermissionGuard`.** Every other service's routes are reached by an
- * authenticated end user and must declare a permission (deny-by-default);
- * `svc-crypto` is reached only by the other 14 services, service-to-service,
- * through `CryptoClient` — there is no end-user principal to check a
- * permission against here. This is the one service in the system where an
- * unannotated route is correct, not an oversight — see
- * `crypto.controller.test.ts`'s "deliberately declares no permissions"
- * suite, which is the guardrail against a future reader "fixing" this.
+ * **crypto-auth task (defense-in-depth fix):** `svc-crypto` used to mount
+ * no guard at all — reachable, unauthenticated, by any container on the
+ * shared `gadong-internal` bridge network, not just its intended callers.
+ * `AppModule` now mounts the kernel's `PermissionGuard` globally, and every
+ * route below declares the least-privilege permission a calling service's
+ * machine token must hold: `crypto.encrypt` for `/encrypt`, `crypto.decrypt`
+ * for `/decrypt`, `crypto.bidx` for `/bidx` — three DISTINCT permissions,
+ * not one coarse `crypto.access`, specifically so a service that only ever
+ * encrypts (e.g. `svc-claims`, `svc-leave`) cannot also decrypt merely by
+ * virtue of being a valid crypto caller. `GET /health` stays `@Public()` —
+ * Docker's healthcheck, the deploy script and monitoring carry no bearer
+ * token, matching every other service's health route. See
+ * `deploy/scripts/seed.sh`'s per-service grants table for which service
+ * holds which of the three, and why.
  */
 @Controller()
 export class CryptoController {
   constructor(private readonly cryptoService: CryptoService) {}
 
   @Post('encrypt')
+  @RequirePermission('crypto.encrypt')
   async encrypt(@Body() body: EncryptBody): Promise<EncryptResponse> {
     const fields = await this.runFailClosed(() => this.cryptoService.encryptBatch(body.fields))
     return { fields }
   }
 
   @Post('decrypt')
+  @RequirePermission('crypto.decrypt')
   async decrypt(@Body() body: DecryptBody): Promise<DecryptResponse> {
     const value = await this.runFailClosed(() =>
       this.cryptoService.decrypt(body.entityId, body.field, body.ciphertext, body.purpose),
@@ -64,12 +70,14 @@ export class CryptoController {
   }
 
   @Post('bidx')
+  @RequirePermission('crypto.bidx')
   async bidx(@Body() body: BidxBody): Promise<BidxResponse> {
     const bidx = await this.runFailClosed(() => this.cryptoService.bidx(body.fieldClass, body.field, body.value))
     return { bidx }
   }
 
   @Get('health')
+  @Public()
   async health(): Promise<HealthPayload> {
     const vault = await this.cryptoService.health()
     return buildHealth('svc-crypto', { vault })

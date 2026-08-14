@@ -56,10 +56,19 @@ function createHttpHealthCheck(url: string): HealthCheckPort {
   }
 }
 
-function createHttpCryptoTransport(baseUrl: string): CryptoTransport {
+/**
+ * crypto-auth task: `svc-crypto` now guards `/encrypt`/`/decrypt` with
+ * `PermissionGuard` (least-privilege `crypto.encrypt`/`crypto.decrypt` —
+ * svc-payroll holds both, never `crypto.bidx`, which it never calls). This
+ * transport takes an `AuthenticatedFetch` — the SAME `AUTHENTICATED_FETCH`
+ * this service's other four outbound guarded calls already share below —
+ * rather than the bare global `fetch` it used before, so every request now
+ * carries this service's machine bearer token.
+ */
+function createHttpCryptoTransport(baseUrl: string, fetchImpl: typeof fetch): CryptoTransport {
   return {
     async post(path, body) {
-      const res = await fetch(`${baseUrl}${path}`, {
+      const res = await fetchImpl(`${baseUrl}${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -94,17 +103,18 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
 }
 
 /**
- * S2S auth task: `svc-payroll` has four outbound guarded calls —
- * `svc-config` (`config.rule.read`), `svc-timesheet`
- * (`timesheet.totals.read`), `svc-docs` (`document.generate`) and
+ * S2S auth task (+ crypto-auth task): `svc-payroll` has FIVE outbound
+ * guarded calls — `svc-config` (`config.rule.read`), `svc-timesheet`
+ * (`timesheet.totals.read`), `svc-docs` (`document.generate`),
  * `svc-onboarding` (identities, not yet a real route — see `ports.ts`'s
- * `HttpEmployeeDirectoryClient` doc) — all authenticated with the SAME
- * machine identity, matching how one human bearer token already works
- * against every route their grants allow. `OIDC_TOKEN_URL` is the issuer's
- * token endpoint (separate from `OIDC_ISSUER`/`OIDC_JWKS_URI` above, which
- * are for VERIFYING incoming tokens); `S2S_CLIENT_ID`/`S2S_CLIENT_SECRET`
- * come from the `svc-payroll` realm client
- * (`deploy/keycloak/realm-gadonghr.json`).
+ * `HttpEmployeeDirectoryClient` doc), and `svc-crypto`
+ * (`crypto.encrypt`/`crypto.decrypt` — every pay-profile/payslip/ytd field)
+ * — all authenticated with the SAME machine identity, matching how one
+ * human bearer token already works against every route their grants allow.
+ * `OIDC_TOKEN_URL` is the issuer's token endpoint (separate from
+ * `OIDC_ISSUER`/`OIDC_JWKS_URI` above, which are for VERIFYING incoming
+ * tokens); `S2S_CLIENT_ID`/`S2S_CLIENT_SECRET` come from the `svc-payroll`
+ * realm client (`deploy/keycloak/realm-gadonghr.json`).
  */
 function createMachineTokenClient(): MachineTokenClient {
   return new MachineTokenClient(createHttpTokenTransport(requiredEnv('OIDC_TOKEN_URL')), {
@@ -167,16 +177,19 @@ function createMachineTokenClient(): MachineTokenClient {
       useFactory: () => createHttpHealthCheck(`${process.env['CONFIG_URL'] ?? 'http://svc-config:3000'}/health`),
     },
     {
-      provide: CryptoClient,
-      useFactory: () => new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000')),
-    },
-    {
       // S2S auth task: one machine-token client, one authenticated-fetch
-      // helper, shared by every one of this service's four outbound
-      // guarded calls below — matching `AuthzClient`/`CryptoClient`'s own
-      // one-instance-per-service lifetime.
+      // helper, shared by every one of this service's FIVE outbound
+      // guarded calls below (config, timesheet, docs, onboarding, and now
+      // crypto-auth task's svc-crypto) — matching `AuthzClient`/
+      // `CryptoClient`'s own one-instance-per-service lifetime.
       provide: 'AUTHENTICATED_FETCH',
       useFactory: (): AuthenticatedFetch => createAuthenticatedFetch(createMachineTokenClient()),
+    },
+    {
+      provide: CryptoClient,
+      useFactory: (authedFetch: AuthenticatedFetch) =>
+        new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000', authedFetch)),
+      inject: ['AUTHENTICATED_FETCH'],
     },
     {
       provide: HttpConfigClient,

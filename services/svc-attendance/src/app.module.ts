@@ -7,12 +7,15 @@ import {
   AuthzClient,
   CryptoClient,
   GadongErrorFilter,
+  MachineTokenClient,
   PermissionGuard,
+  createAuthenticatedFetch,
+  createHttpTokenTransport,
   createOidcMiddlewareHandler,
   createPool,
 } from '@gadong/kernel'
 import type { OidcMiddlewareHandler } from '@gadong/kernel'
-import type { AuthzTransport, CryptoTransport, Queryable } from '@gadong/kernel'
+import type { AuthenticatedFetch, AuthzTransport, CryptoTransport, Queryable } from '@gadong/kernel'
 import { AttendanceController, CRYPTO_HEALTH, DB_POOL, FACE_ENGINE_HEALTH } from './attendance.controller'
 import type { HealthCheckPort } from './attendance.controller'
 import { EnrolmentController } from './enrolment.controller'
@@ -59,14 +62,38 @@ function createHttpAuthzTransport(baseUrl: string): AuthzTransport {
   }
 }
 
-function createHttpCryptoTransport(baseUrl: string): CryptoTransport {
+/**
+ * crypto-auth task: `svc-crypto` now guards `/encrypt`/`/decrypt` with
+ * `PermissionGuard` (svc-attendance holds both — `DeviceService` writes AND
+ * reads the device secret field, never `crypto.bidx`, which it never
+ * calls). Takes an `AuthenticatedFetch` instead of the bare global `fetch`
+ * it used before.
+ */
+function createHttpCryptoTransport(baseUrl: string, fetchImpl: typeof fetch): CryptoTransport {
   return {
     async post(path, body) {
-      const res = await fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const res = await fetchImpl(`${baseUrl}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       const text = await res.text()
       return text.length > 0 ? (JSON.parse(text) as unknown) : {}
     },
   }
+}
+
+/**
+ * crypto-auth task: this service's own machine identity — an OAuth2
+ * client_credentials client, authenticated against the SAME OIDC issuer
+ * `createOidcMiddleware` below validates incoming tokens against
+ * (`OIDC_TOKEN_URL` is the issuer's TOKEN endpoint; `OIDC_ISSUER`/
+ * `OIDC_JWKS_URI` are for verifying tokens, this is for OBTAINING one).
+ * `S2S_CLIENT_ID`/`S2S_CLIENT_SECRET` come from the `svc-attendance` realm
+ * client (`deploy/keycloak/realm-gadonghr.json`) — same pattern
+ * `svc-onboarding`/`svc-payroll` already established for the S2S auth task.
+ */
+function createMachineTokenClient(): MachineTokenClient {
+  return new MachineTokenClient(createHttpTokenTransport(requiredEnv('OIDC_TOKEN_URL')), {
+    clientId: requiredEnv('S2S_CLIENT_ID'),
+    clientSecret: requiredEnv('S2S_CLIENT_SECRET'),
+  })
 }
 
 function createHttpHealthCheck(url: string): HealthCheckPort {
@@ -141,8 +168,18 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
     },
     {
+      // crypto-auth task: one machine-token client, one authenticated-fetch
+      // helper, for this service's one outbound guarded call (svc-crypto) —
+      // matching `AuthzClient`/`CryptoClient`'s own one-instance-per-service
+      // lifetime, same pattern `svc-onboarding`/`svc-payroll` established.
+      provide: 'AUTHENTICATED_FETCH',
+      useFactory: (): AuthenticatedFetch => createAuthenticatedFetch(createMachineTokenClient()),
+    },
+    {
       provide: CryptoClient,
-      useFactory: () => new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000')),
+      useFactory: (authedFetch: AuthenticatedFetch) =>
+        new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000', authedFetch)),
+      inject: ['AUTHENTICATED_FETCH'],
     },
     {
       provide: DB_POOL,

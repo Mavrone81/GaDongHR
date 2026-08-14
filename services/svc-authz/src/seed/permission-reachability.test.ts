@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { BIOMETRIC_TEMPLATE_READ, PAYROLL_TIMESHEET_TOTALS_READ, ROLE_TEMPLATES } from './roles'
+import { BIOMETRIC_TEMPLATE_READ, CRYPTO_BIDX, CRYPTO_DECRYPT, CRYPTO_ENCRYPT, PAYROLL_TIMESHEET_TOTALS_READ, ROLE_TEMPLATES } from './roles'
 
 /**
  * The general form of Task 14c's defect: `notify.notification.read`,
@@ -52,10 +52,17 @@ const SERVICES_DIR = join(REPO_ROOT, 'services')
  * removing this exemption without also removing that decorator use would
  * correctly fail this test — the exemption only says "zero ROLE_TEMPLATES
  * grants are fine here", not "this permission is unused".
+ *
+ * `crypto.encrypt`/`crypto.decrypt`/`crypto.bidx` (crypto-auth task) are the
+ * same shape as `timesheet.totals.read`: each IS currently referenced by a
+ * real `@RequirePermission` (`crypto.controller.ts`'s `encrypt`/`decrypt`/
+ * `bidx`), and each is a machine-only grant — see `roles.ts`'s doc on
+ * `CRYPTO_ENCRYPT` for why no human role may ever hold any of the three.
  */
 const BIOMETRIC_EXEMPTION = BIOMETRIC_TEMPLATE_READ
 const PAYROLL_TOTALS_EXEMPTION = PAYROLL_TIMESHEET_TOTALS_READ
-const UNREACHABLE_BY_DESIGN = new Set([BIOMETRIC_EXEMPTION, PAYROLL_TOTALS_EXEMPTION])
+const CRYPTO_EXEMPTIONS = [CRYPTO_ENCRYPT, CRYPTO_DECRYPT, CRYPTO_BIDX]
+const UNREACHABLE_BY_DESIGN = new Set([BIOMETRIC_EXEMPTION, PAYROLL_TOTALS_EXEMPTION, ...CRYPTO_EXEMPTIONS])
 
 /**
  * Every `.ts` file under `services/<name>/src/`, recursively, excluding
@@ -151,7 +158,7 @@ describe('Every permission referenced by @RequirePermission is grantable (Task 1
     expect(required.has('document.read')).toBe(true)
   })
 
-  it('every @RequirePermission code (except the two machine-only exemptions) is granted to at least one role template', () => {
+  it('every @RequirePermission code (except the machine-only exemptions) is granted to at least one role template', () => {
     const unreachable = [...required].filter((code) => !UNREACHABLE_BY_DESIGN.has(code) && !granted.has(code)).sort()
     expect(unreachable).toEqual([])
   })
@@ -160,8 +167,16 @@ describe('Every permission referenced by @RequirePermission is grantable (Task 1
     expect(required.has(PAYROLL_TOTALS_EXEMPTION)).toBe(true)
   })
 
+  it('parser sanity: crypto.encrypt/crypto.decrypt/crypto.bidx are actually found in source (crypto.controller.ts) — the exemptions are not exempting dead references', () => {
+    for (const code of CRYPTO_EXEMPTIONS) expect(required.has(code)).toBe(true)
+  })
+
   it('the biometric.template.read exemption itself is still granted to zero roles — the exemption must not become a loophole', () => {
     expect(granted.has(BIOMETRIC_EXEMPTION)).toBe(false)
+  })
+
+  it('the crypto.encrypt/crypto.decrypt/crypto.bidx exemptions are still granted to zero roles — machine-only, never a human role', () => {
+    for (const code of CRYPTO_EXEMPTIONS) expect(granted.has(code)).toBe(false)
   })
 
   it('the timesheet.totals.read exemption itself is still granted to zero roles — machine-only, never a human role', () => {

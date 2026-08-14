@@ -13,11 +13,18 @@ import { AppModule } from './app.module'
  * `.get()` is called, so no real MinIO server is needed to boot.
  */
 describe('AppModule boots under Nest (module wiring)', () => {
+  // crypto-auth task: `createMachineTokenClient()` (`app.module.ts`) now
+  // reads `OIDC_TOKEN_URL`/`S2S_CLIENT_ID`/`S2S_CLIENT_SECRET` at
+  // construction time via `requiredEnv` — same "boot fails loudly" contract
+  // this test file already exists to guard.
   const requiredEnvKeys = [
     'DATABASE_URL',
     'OIDC_ISSUER',
     'OIDC_AUDIENCE',
     'OIDC_JWKS_URI',
+    'OIDC_TOKEN_URL',
+    'S2S_CLIENT_ID',
+    'S2S_CLIENT_SECRET',
     'MINIO_ENDPOINT',
     'MINIO_ACCESS_KEY',
     'MINIO_SECRET_KEY',
@@ -31,6 +38,9 @@ describe('AppModule boots under Nest (module wiring)', () => {
     process.env['OIDC_ISSUER'] = 'https://kc.gadonghr.test/auth/realms/gadong'
     process.env['OIDC_AUDIENCE'] = 'gadong-services'
     process.env['OIDC_JWKS_URI'] = 'https://kc.gadonghr.test/auth/realms/gadong/protocol/openid-connect/certs'
+    process.env['OIDC_TOKEN_URL'] = 'https://kc.gadonghr.test/auth/realms/gadong/protocol/openid-connect/token'
+    process.env['S2S_CLIENT_ID'] = 'svc-docs'
+    process.env['S2S_CLIENT_SECRET'] = 'test-secret'
     process.env['MINIO_ENDPOINT'] = 'minio.test.invalid'
     process.env['MINIO_ACCESS_KEY'] = 'test-access-key'
     process.env['MINIO_SECRET_KEY'] = 'test-secret-key'

@@ -20,7 +20,21 @@ import { AppModule } from './app.module'
  * route handler chain — never at `tsc` time.
  */
 describe('AppModule boots under Nest (module wiring)', () => {
-  const requiredEnvKeys = ['DATABASE_URL', 'OIDC_ISSUER', 'OIDC_AUDIENCE', 'OIDC_JWKS_URI', 'ATTENDANCE_CREDENTIAL_PEPPER'] as const
+  // crypto-auth task: `createMachineTokenClient()` (`app.module.ts`) now
+  // reads `OIDC_TOKEN_URL`/`S2S_CLIENT_ID`/`S2S_CLIENT_SECRET` at
+  // construction time via `requiredEnv` — same "boot fails loudly" contract
+  // this test file already exists to guard (see svc-onboarding's identical
+  // fixture from the S2S auth task).
+  const requiredEnvKeys = [
+    'DATABASE_URL',
+    'OIDC_ISSUER',
+    'OIDC_AUDIENCE',
+    'OIDC_JWKS_URI',
+    'OIDC_TOKEN_URL',
+    'S2S_CLIENT_ID',
+    'S2S_CLIENT_SECRET',
+    'ATTENDANCE_CREDENTIAL_PEPPER',
+  ] as const
   const savedEnv = new Map<string, string | undefined>()
 
   beforeEach(() => {
@@ -29,6 +43,9 @@ describe('AppModule boots under Nest (module wiring)', () => {
     process.env['OIDC_ISSUER'] = 'https://kc.gadonghr.test/auth/realms/gadong'
     process.env['OIDC_AUDIENCE'] = 'gadong-services'
     process.env['OIDC_JWKS_URI'] = 'https://kc.gadonghr.test/auth/realms/gadong/protocol/openid-connect/certs'
+    process.env['OIDC_TOKEN_URL'] = 'https://kc.gadonghr.test/auth/realms/gadong/protocol/openid-connect/token'
+    process.env['S2S_CLIENT_ID'] = 'svc-attendance'
+    process.env['S2S_CLIENT_SECRET'] = 'test-secret'
     process.env['ATTENDANCE_CREDENTIAL_PEPPER'] = 'test-boot-pepper-not-for-production'
   })
 

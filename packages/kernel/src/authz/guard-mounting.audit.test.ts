@@ -103,16 +103,6 @@ const STANDARD_PATTERN_EXCEPTIONS: ServiceException[] = [
       'the mounting.',
   },
   {
-    service: 'svc-crypto',
-    pattern: 'none',
-    unguardedRoutes: ['POST encrypt', 'POST decrypt', 'POST bidx', 'GET health'],
-    reason:
-      'Called service-to-service only, never by a browser, and holds no notion of a human principal. ' +
-      'Its three business routes are exempted as service-to-service in web/ui-coverage.json. Mounting ' +
-      'PermissionGuard would require every calling service to hold a permission on behalf of a user ' +
-      'whose identity is irrelevant to an envelope-encryption call.',
-  },
-  {
     service: 'svc-i18n',
     pattern: 'none',
     unguardedRoutes: ['GET bundles/:locale', 'GET glossary', 'GET health'],
@@ -178,11 +168,20 @@ function servicesWithAModule(): string[] {
  * Comments must be stripped before matching. Every service that
  * DELIBERATELY does not mount the global guard explains that in a doc
  * comment which quotes the exact provider line it is declining to use
- * (svc-crypto: "Deliberately no `{ provide: APP_GUARD, useClass:
- * PermissionGuard }` here"; svc-i18n and svc-authz likewise). A naive
- * source-wide match therefore reports every one of them as mounting the
- * guard — the precise inverse of the truth, and a false PASS for a service
- * that guards nothing.
+ * (svc-i18n and svc-authz). A naive source-wide match therefore reports
+ * every one of them as mounting the guard — the precise inverse of the
+ * truth, and a false PASS for a service that guards nothing.
+ *
+ * crypto-auth task: `svc-crypto` used to be a third `pattern: 'none'`
+ * exception here (called service-to-service only, no human principal to
+ * check a permission against) — but "no human principal" was never a
+ * reason `PermissionGuard` cannot apply; a machine's `client_credentials`
+ * token populates `request.userId` through the exact same `OidcMiddleware`
+ * path a human token does (`packages/kernel/src/authz/
+ * machine-token.client.ts`'s file header). `svc-crypto` now mounts the
+ * standard pattern like every other guarded service and is no longer in
+ * `STANDARD_PATTERN_EXCEPTIONS` at all — see `services/svc-crypto/src/
+ * app.module.ts` and `crypto.controller.ts`.
  */
 function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')

@@ -113,6 +113,16 @@ SVC_PAYROLL_SERVICE_ACCOUNT_ID="00000000-0000-4000-8000-00005ecc0002"
 SVC_TIMESHEET_SERVICE_ACCOUNT_ID="00000000-0000-4000-8000-00005ecc0003"
 SVC_SCHEDULER_SERVICE_ACCOUNT_ID="00000000-0000-4000-8000-00005ecc0004"
 
+# crypto-auth task: four more machine principals' service-account ids, same
+# matching rule as the four above. svc-docs is already in
+# `docker-compose.yml`'s live service set; svc-attendance/svc-claims/
+# svc-leave are forward-provisioned the same way the S2S auth task's four
+# were before their compose service blocks existed.
+SVC_ATTENDANCE_SERVICE_ACCOUNT_ID="00000000-0000-4000-8000-00005ecc0005"
+SVC_CLAIMS_SERVICE_ACCOUNT_ID="00000000-0000-4000-8000-00005ecc0006"
+SVC_LEAVE_SERVICE_ACCOUNT_ID="00000000-0000-4000-8000-00005ecc0007"
+SVC_DOCS_SERVICE_ACCOUNT_ID="00000000-0000-4000-8000-00005ecc0008"
+
 log() { printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"; }
 
 compose() {
@@ -140,6 +150,12 @@ require_healthy() {
 : "${KEYCLOAK_SVC_PAYROLL_CLIENT_SECRET:?KEYCLOAK_SVC_PAYROLL_CLIENT_SECRET must be set (source .env first)}"
 : "${KEYCLOAK_SVC_TIMESHEET_CLIENT_SECRET:?KEYCLOAK_SVC_TIMESHEET_CLIENT_SECRET must be set (source .env first)}"
 : "${KEYCLOAK_SVC_SCHEDULER_CLIENT_SECRET:?KEYCLOAK_SVC_SCHEDULER_CLIENT_SECRET must be set (source .env first)}"
+# crypto-auth task — the four svc-crypto-calling machine principals' own
+# confidential secrets, pinned the same way.
+: "${KEYCLOAK_SVC_ATTENDANCE_CLIENT_SECRET:?KEYCLOAK_SVC_ATTENDANCE_CLIENT_SECRET must be set (source .env first)}"
+: "${KEYCLOAK_SVC_CLAIMS_CLIENT_SECRET:?KEYCLOAK_SVC_CLAIMS_CLIENT_SECRET must be set (source .env first)}"
+: "${KEYCLOAK_SVC_LEAVE_CLIENT_SECRET:?KEYCLOAK_SVC_LEAVE_CLIENT_SECRET must be set (source .env first)}"
+: "${KEYCLOAK_SVC_DOCS_CLIENT_SECRET:?KEYCLOAK_SVC_DOCS_CLIENT_SECRET must be set (source .env first)}"
 : "${POSTGRES_SUPERUSER:?POSTGRES_SUPERUSER must be set (source .env first)}"
 : "${POSTGRES_DB:?POSTGRES_DB must be set (source .env first)}"
 
@@ -188,27 +204,47 @@ WHERE r.code = 'seeder-bootstrap'
       AND ur.role_id = r.id
   );
 
--- S2S auth task: four more machine principals, same shape as
--- seeder-bootstrap above — one small, purpose-built role per service,
--- holding EXACTLY the permissions that service's own outbound HTTP calls
--- need (least privilege, not a shared "services" super-role — a
--- compromised svc-scheduler must not inherit svc-payroll's
--- timesheet.totals.read). Grants (call sites, see each service's own
--- app.module.ts/config-client.ts/ports.ts):
+-- S2S auth task (+ crypto-auth task additions below): one small,
+-- purpose-built role per service, holding EXACTLY the permissions that
+-- service's own outbound HTTP calls need (least privilege, not a shared
+-- "services" super-role — a compromised svc-scheduler must not inherit
+-- svc-payroll's timesheet.totals.read, and a service that only ever
+-- encrypts must never hold crypto.decrypt). Grants (call sites, see each
+-- service's own app.module.ts/config-client.ts/ports.ts):
 --   svc-onboarding: config.rule.read (svc-config rules), document.generate
---                   (svc-docs contract render)
+--                   (svc-docs contract render), crypto.encrypt +
+--                   crypto.decrypt + crypto.bidx (svc-crypto — the only
+--                   caller that both writes AND reads identity fields and
+--                   computes blind indexes for national_id/email lookups)
 --   svc-payroll:    config.rule.read, timesheet.totals.read (svc-timesheet
 --                   locked totals — granted to NO human role template,
 --                   see seed/roles.ts's PAYROLL_TIMESHEET_TOTALS_READ),
---                   document.generate (svc-docs payslip render)
+--                   document.generate (svc-docs payslip render),
+--                   crypto.encrypt + crypto.decrypt (svc-crypto — every
+--                   pay-profile/payslip/ytd field, never crypto.bidx: it
+--                   never blind-indexes anything)
 --   svc-timesheet:  config.rule.read (its own OT-threshold config read)
 --   svc-scheduler:  config.rule.read (guardrail/holiday/OT ceilings)
+--   svc-attendance: crypto.encrypt + crypto.decrypt (svc-crypto —
+--                   DeviceService writes AND reads the device-secret
+--                   field, never crypto.bidx)
+--   svc-claims:     crypto.encrypt ONLY (svc-crypto — ClaimsService only
+--                   ever WRITES a receipt file_ref, never reads one back)
+--   svc-leave:      crypto.encrypt ONLY (svc-crypto — RequestsService only
+--                   ever WRITES a medical-certificate pointer)
+--   svc-docs:       crypto.encrypt + crypto.decrypt (svc-crypto — writes
+--                   file_ref on generate, decrypts it back to serve a
+--                   previously rendered document, never crypto.bidx)
 INSERT INTO authz.role (code, name_i18n, is_system)
 VALUES
   ('svc-onboarding-machine', '{"en":"svc-onboarding machine identity","th":"ตัวตนเครื่อง svc-onboarding"}'::jsonb, true),
   ('svc-payroll-machine', '{"en":"svc-payroll machine identity","th":"ตัวตนเครื่อง svc-payroll"}'::jsonb, true),
   ('svc-timesheet-machine', '{"en":"svc-timesheet machine identity","th":"ตัวตนเครื่อง svc-timesheet"}'::jsonb, true),
-  ('svc-scheduler-machine', '{"en":"svc-scheduler machine identity","th":"ตัวตนเครื่อง svc-scheduler"}'::jsonb, true)
+  ('svc-scheduler-machine', '{"en":"svc-scheduler machine identity","th":"ตัวตนเครื่อง svc-scheduler"}'::jsonb, true),
+  ('svc-attendance-machine', '{"en":"svc-attendance machine identity","th":"ตัวตนเครื่อง svc-attendance"}'::jsonb, true),
+  ('svc-claims-machine', '{"en":"svc-claims machine identity","th":"ตัวตนเครื่อง svc-claims"}'::jsonb, true),
+  ('svc-leave-machine', '{"en":"svc-leave machine identity","th":"ตัวตนเครื่อง svc-leave"}'::jsonb, true),
+  ('svc-docs-machine', '{"en":"svc-docs machine identity","th":"ตัวตนเครื่อง svc-docs"}'::jsonb, true)
 ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO authz.role_permission (role_id, permission_code)
@@ -218,11 +254,22 @@ JOIN (
   VALUES
     ('svc-onboarding-machine', 'config.rule.read'),
     ('svc-onboarding-machine', 'document.generate'),
+    ('svc-onboarding-machine', 'crypto.encrypt'),
+    ('svc-onboarding-machine', 'crypto.decrypt'),
+    ('svc-onboarding-machine', 'crypto.bidx'),
     ('svc-payroll-machine', 'config.rule.read'),
     ('svc-payroll-machine', 'timesheet.totals.read'),
     ('svc-payroll-machine', 'document.generate'),
+    ('svc-payroll-machine', 'crypto.encrypt'),
+    ('svc-payroll-machine', 'crypto.decrypt'),
     ('svc-timesheet-machine', 'config.rule.read'),
-    ('svc-scheduler-machine', 'config.rule.read')
+    ('svc-scheduler-machine', 'config.rule.read'),
+    ('svc-attendance-machine', 'crypto.encrypt'),
+    ('svc-attendance-machine', 'crypto.decrypt'),
+    ('svc-claims-machine', 'crypto.encrypt'),
+    ('svc-leave-machine', 'crypto.encrypt'),
+    ('svc-docs-machine', 'crypto.encrypt'),
+    ('svc-docs-machine', 'crypto.decrypt')
 ) AS p(role_code, code) ON p.role_code = r.code
 ON CONFLICT (role_id, permission_code) DO NOTHING;
 
@@ -233,7 +280,11 @@ FROM (
     ('${SVC_ONBOARDING_SERVICE_ACCOUNT_ID}', 'svc-onboarding-machine'),
     ('${SVC_PAYROLL_SERVICE_ACCOUNT_ID}', 'svc-payroll-machine'),
     ('${SVC_TIMESHEET_SERVICE_ACCOUNT_ID}', 'svc-timesheet-machine'),
-    ('${SVC_SCHEDULER_SERVICE_ACCOUNT_ID}', 'svc-scheduler-machine')
+    ('${SVC_SCHEDULER_SERVICE_ACCOUNT_ID}', 'svc-scheduler-machine'),
+    ('${SVC_ATTENDANCE_SERVICE_ACCOUNT_ID}', 'svc-attendance-machine'),
+    ('${SVC_CLAIMS_SERVICE_ACCOUNT_ID}', 'svc-claims-machine'),
+    ('${SVC_LEAVE_SERVICE_ACCOUNT_ID}', 'svc-leave-machine'),
+    ('${SVC_DOCS_SERVICE_ACCOUNT_ID}', 'svc-docs-machine')
 ) AS u(user_id, role_code)
 JOIN authz.role r ON r.code = u.role_code
 WHERE NOT EXISTS (
@@ -247,6 +298,7 @@ then
 fi
 log "Seeder service account holds config.pack.import + authz.role.grant in svc-authz."
 log "S2S auth task: svc-onboarding/svc-payroll/svc-timesheet/svc-scheduler machine principals hold their least-privilege grants in svc-authz (forward-provisioned)."
+log "crypto-auth task: svc-attendance/svc-claims/svc-leave/svc-docs machine principals hold their least-privilege crypto.* grants in svc-authz."
 
 log "Importing svc-config's statutory rule packs..."
 require_healthy svc-config
@@ -270,6 +322,10 @@ if ! compose exec -T \
   -e KEYCLOAK_SVC_PAYROLL_CLIENT_SECRET="$KEYCLOAK_SVC_PAYROLL_CLIENT_SECRET" \
   -e KEYCLOAK_SVC_TIMESHEET_CLIENT_SECRET="$KEYCLOAK_SVC_TIMESHEET_CLIENT_SECRET" \
   -e KEYCLOAK_SVC_SCHEDULER_CLIENT_SECRET="$KEYCLOAK_SVC_SCHEDULER_CLIENT_SECRET" \
+  -e KEYCLOAK_SVC_ATTENDANCE_CLIENT_SECRET="$KEYCLOAK_SVC_ATTENDANCE_CLIENT_SECRET" \
+  -e KEYCLOAK_SVC_CLAIMS_CLIENT_SECRET="$KEYCLOAK_SVC_CLAIMS_CLIENT_SECRET" \
+  -e KEYCLOAK_SVC_LEAVE_CLIENT_SECRET="$KEYCLOAK_SVC_LEAVE_CLIENT_SECRET" \
+  -e KEYCLOAK_SVC_DOCS_CLIENT_SECRET="$KEYCLOAK_SVC_DOCS_CLIENT_SECRET" \
   svc-config node - <<'JS'
 const { readdirSync } = require('node:fs')
 const { join } = require('node:path')
@@ -387,6 +443,13 @@ async function main() {
   await pinClientSecret(adminToken, 'svc-payroll', process.env.KEYCLOAK_SVC_PAYROLL_CLIENT_SECRET)
   await pinClientSecret(adminToken, 'svc-timesheet', process.env.KEYCLOAK_SVC_TIMESHEET_CLIENT_SECRET)
   await pinClientSecret(adminToken, 'svc-scheduler', process.env.KEYCLOAK_SVC_SCHEDULER_CLIENT_SECRET)
+  // crypto-auth task: pin the four svc-crypto-calling machine principals'
+  // secrets too — svc-docs is already a live compose service; the other
+  // three are forward-provisioned, same reasoning as the block above.
+  await pinClientSecret(adminToken, 'svc-attendance', process.env.KEYCLOAK_SVC_ATTENDANCE_CLIENT_SECRET)
+  await pinClientSecret(adminToken, 'svc-claims', process.env.KEYCLOAK_SVC_CLAIMS_CLIENT_SECRET)
+  await pinClientSecret(adminToken, 'svc-leave', process.env.KEYCLOAK_SVC_LEAVE_CLIENT_SECRET)
+  await pinClientSecret(adminToken, 'svc-docs', process.env.KEYCLOAK_SVC_DOCS_CLIENT_SECRET)
   const seederToken = await getSeederToken()
   console.log('Obtained a seeder client-credentials token from Keycloak.')
 

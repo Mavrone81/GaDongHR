@@ -7,11 +7,14 @@ import {
   AuthzClient,
   CryptoClient,
   GadongErrorFilter,
+  MachineTokenClient,
   PermissionGuard,
+  createAuthenticatedFetch,
+  createHttpTokenTransport,
   createOidcMiddlewareHandler,
   createPool,
 } from '@gadong/kernel'
-import type { AuthzTransport, CryptoTransport, OidcMiddlewareHandler, Queryable } from '@gadong/kernel'
+import type { AuthenticatedFetch, AuthzTransport, CryptoTransport, OidcMiddlewareHandler, Queryable } from '@gadong/kernel'
 import { ApprovalsRepository } from './approvals.repository'
 import { ApprovalsService } from './approvals.service'
 import { BalancesRepository } from './balances.repository'
@@ -48,10 +51,18 @@ function createHttpHealthCheck(url: string): HealthCheckPort {
   }
 }
 
-function createHttpCryptoTransport(baseUrl: string): CryptoTransport {
+/**
+ * crypto-auth task: `svc-crypto` now guards `/encrypt` with
+ * `PermissionGuard` — svc-leave only ever WRITES a medical-certificate
+ * pointer (`RequestsService`, `requests.service.ts`), never reads one back,
+ * so it holds `crypto.encrypt` ONLY, never `crypto.decrypt`/`crypto.bidx`
+ * (least privilege). Takes an `AuthenticatedFetch` instead of the bare
+ * global `fetch` it used before.
+ */
+function createHttpCryptoTransport(baseUrl: string, fetchImpl: typeof fetch): CryptoTransport {
   return {
     async post(path, body) {
-      const res = await fetch(`${baseUrl}${path}`, {
+      const res = await fetchImpl(`${baseUrl}${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -60,6 +71,20 @@ function createHttpCryptoTransport(baseUrl: string): CryptoTransport {
       return text.length > 0 ? (JSON.parse(text) as unknown) : {}
     },
   }
+}
+
+/**
+ * crypto-auth task: this service's own machine identity for its one
+ * outbound guarded call (svc-crypto). `S2S_CLIENT_ID`/`S2S_CLIENT_SECRET`
+ * come from the `svc-leave` realm client
+ * (`deploy/keycloak/realm-gadonghr.json`) — same pattern
+ * `svc-onboarding`/`svc-payroll` established for the S2S auth task.
+ */
+function createMachineTokenClient(): MachineTokenClient {
+  return new MachineTokenClient(createHttpTokenTransport(requiredEnv('OIDC_TOKEN_URL')), {
+    clientId: requiredEnv('S2S_CLIENT_ID'),
+    clientSecret: requiredEnv('S2S_CLIENT_SECRET'),
+  })
 }
 
 /** Same fail-closed reasoning as `services/svc-config/src/app.module.ts`'s identical function: `svc-authz` treats an unreachable transport as a denial, which is the correct behaviour, not a placeholder. */
@@ -122,8 +147,16 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
       useFactory: () => createHttpHealthCheck(`${process.env['CONFIG_URL'] ?? 'http://svc-config:3000'}/health`),
     },
     {
+      // crypto-auth task: one machine-token client, one authenticated-fetch
+      // helper, for this service's one outbound guarded call (svc-crypto).
+      provide: 'AUTHENTICATED_FETCH',
+      useFactory: (): AuthenticatedFetch => createAuthenticatedFetch(createMachineTokenClient()),
+    },
+    {
       provide: CryptoClient,
-      useFactory: () => new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000')),
+      useFactory: (authedFetch: AuthenticatedFetch) =>
+        new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000', authedFetch)),
+      inject: ['AUTHENTICATED_FETCH'],
     },
     {
       provide: HttpConfigClient,

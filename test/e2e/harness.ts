@@ -63,6 +63,13 @@ export const MACHINE_PRINCIPALS = {
   payroll: { clientId: 'svc-payroll', secret: 'e2e-svc-payroll-secret', sub: '00000000-0000-4000-8000-0000e2e01002' },
   timesheet: { clientId: 'svc-timesheet', secret: 'e2e-svc-timesheet-secret', sub: '00000000-0000-4000-8000-0000e2e01003' },
   scheduler: { clientId: 'svc-scheduler', secret: 'e2e-svc-scheduler-secret', sub: '00000000-0000-4000-8000-0000e2e01004' },
+  // crypto-auth task: two more machine principals — svc-attendance and
+  // svc-docs, the two remaining `appServices` (below) that call svc-crypto.
+  // svc-claims/svc-leave are the other two callers in the codebase but are
+  // not part of this e2e stack's `appServices` set at all, so they need no
+  // entry here.
+  attendance: { clientId: 'svc-attendance', secret: 'e2e-svc-attendance-secret', sub: '00000000-0000-4000-8000-0000e2e01005' },
+  docs: { clientId: 'svc-docs', secret: 'e2e-svc-docs-secret', sub: '00000000-0000-4000-8000-0000e2e01006' },
 }
 
 async function compose(...args: string[]): Promise<string> {
@@ -111,19 +118,29 @@ async function waitForHealthy(name: string, url: string): Promise<void> {
  * A CI run that raced this gap failed every downstream lifecycle step with
  * `CRY-503`, immediately after `/health` had reported 200 — see
  * `.superpowers/sdd/02-modules/ci-gates-fix.md`.
+ *
+ * crypto-auth task: `/encrypt`/`/decrypt` are now guarded (`PermissionGuard`
+ * + `crypto.encrypt`/`crypto.decrypt`) — this probe authenticates as a real
+ * bearer token for a principal that already holds both, minted via the
+ * oidc-issuer's harness-only JSON back door (`mintToken`, never the path
+ * application code takes). `up()` grants that principal both permissions
+ * BEFORE svc-crypto boots (immediately after svc-authz's role catalog is
+ * confirmed seeded), specifically so this probe can authenticate the moment
+ * svc-crypto is healthy — see this file's `up()` for the ordering.
  */
 async function waitForCryptoReady(): Promise<void> {
   const base = `http://127.0.0.1:${String(PORTS.crypto)}`
   const entityId = 'e2e-harness-crypto-readiness-probe'
   const field = 'probe'
   const plaintext = 'e2e-crypto-round-trip-ok'
+  const token = await mintToken(MACHINE_PRINCIPALS.onboarding.sub)
 
   await waitFor(
     'svc-crypto real encrypt/decrypt round-trip (proves AppRole login + transit, not just /health — see harness.ts comment)',
     async () => {
       const encRes = await fetch(`${base}/encrypt`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
         body: JSON.stringify({ fields: [{ entityId, field, value: plaintext, fieldClass: 'S2' }] }),
       })
       if (!encRes.ok) return false
@@ -133,7 +150,7 @@ async function waitForCryptoReady(): Promise<void> {
 
       const decRes = await fetch(`${base}/decrypt`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
         body: JSON.stringify({ entityId, field, ciphertext, purpose: 'e2e-harness-readiness-probe' }),
       })
       if (!decRes.ok) return false
@@ -242,6 +259,20 @@ export async function up(): Promise<void> {
   for (const name of appServices) {
     await compose('up', '-d', name)
     await waitForHealthy(name, `http://127.0.0.1:${String(PORTS[name.replace('svc-', '') as keyof typeof PORTS])}/health`)
+    // crypto-auth task: svc-crypto's OWN /encrypt+/decrypt are now guarded
+    // (PermissionGuard), and waitForCryptoReady's real round-trip probe
+    // (below) needs a bearer token that already holds crypto.encrypt/
+    // crypto.decrypt — so the role catalog must be confirmed seeded and
+    // that one grant made HERE, immediately after svc-authz itself becomes
+    // healthy, strictly before svc-crypto boots. Moved out of its previous
+    // position (after the whole loop) for exactly this reason.
+    if (name === 'svc-authz') {
+      console.log('[harness] waiting for svc-authz role catalog to self-seed')
+      await waitFor('authz role catalog', () => waitForRoleSeeded('hr-system-admin'), 60_000, 2000)
+      console.log('[harness] crypto-auth task: granting svc-onboarding-machine crypto.encrypt/crypto.decrypt early, so waitForCryptoReady can authenticate the moment svc-crypto boots')
+      await grantPermission(MACHINE_PRINCIPALS.onboarding.sub, 'crypto.encrypt', PERSONAS.seeder)
+      await grantPermission(MACHINE_PRINCIPALS.onboarding.sub, 'crypto.decrypt', PERSONAS.seeder)
+    }
     // svc-crypto's /health passing is necessary but not sufficient (see
     // waitForCryptoReady's doc comment) — every later service in this loop
     // (onboarding, attendance, docs, payroll) calls svc-crypto for real, so
@@ -249,9 +280,6 @@ export async function up(): Promise<void> {
     // test suite starts.
     if (name === 'svc-crypto') await waitForCryptoReady()
   }
-
-  console.log('[harness] waiting for svc-authz role catalog to self-seed')
-  await waitFor('authz role catalog', () => waitForRoleSeeded('hr-system-admin'), 60_000, 2000)
 
   console.log('[harness] granting personas their roles (direct SQL, mirrors deploy/scripts/seed.sh\'s seeder-bootstrap pattern)')
   await grantRole(PERSONAS.seeder, 'hr-system-admin', PERSONAS.seeder)
@@ -270,6 +298,25 @@ export async function up(): Promise<void> {
   await grantPermission(MACHINE_PRINCIPALS.payroll.sub, 'document.generate', PERSONAS.seeder)
   await grantPermission(MACHINE_PRINCIPALS.timesheet.sub, 'config.rule.read', PERSONAS.seeder)
   await grantPermission(MACHINE_PRINCIPALS.scheduler.sub, 'config.rule.read', PERSONAS.seeder)
+
+  console.log('[harness] crypto-auth task: granting every remaining svc-crypto caller its least-privilege crypto.* permissions (mirrors deploy/scripts/seed.sh\'s svc-*-machine roles)')
+  // svc-onboarding: crypto.encrypt/crypto.decrypt were already granted
+  // earlier in the appServices loop above (waitForCryptoReady needs them
+  // before svc-crypto even boots) — crypto.bidx is the one grant left. The
+  // only caller that both writes AND reads identity fields and computes
+  // blind indexes for national_id/email lookups.
+  await grantPermission(MACHINE_PRINCIPALS.onboarding.sub, 'crypto.bidx', PERSONAS.seeder)
+  // svc-payroll: every pay-profile/payslip/ytd field — never crypto.bidx,
+  // it never blind-indexes anything.
+  await grantPermission(MACHINE_PRINCIPALS.payroll.sub, 'crypto.encrypt', PERSONAS.seeder)
+  await grantPermission(MACHINE_PRINCIPALS.payroll.sub, 'crypto.decrypt', PERSONAS.seeder)
+  // svc-attendance: DeviceService writes AND reads the device-secret field.
+  await grantPermission(MACHINE_PRINCIPALS.attendance.sub, 'crypto.encrypt', PERSONAS.seeder)
+  await grantPermission(MACHINE_PRINCIPALS.attendance.sub, 'crypto.decrypt', PERSONAS.seeder)
+  // svc-docs: writes file_ref on generate, decrypts it back to serve a
+  // previously rendered document.
+  await grantPermission(MACHINE_PRINCIPALS.docs.sub, 'crypto.encrypt', PERSONAS.seeder)
+  await grantPermission(MACHINE_PRINCIPALS.docs.sub, 'crypto.decrypt', PERSONAS.seeder)
 
   console.log('[harness] seeding the org unit + position the lifecycle test hires into (onboarding.employee has real FKs into both; nothing in svc-onboarding\'s own HTTP API creates either, so this is test-data setup, not a shortcut)')
   await seedOnboardingOrgAndPosition('00000000-0000-4000-8000-0000000ac001', '00000000-0000-4000-8000-0000000ac002')

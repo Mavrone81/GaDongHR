@@ -47,11 +47,21 @@ function createHttpAuthzTransport(baseUrl: string): AuthzTransport {
   }
 }
 
-/** `svc-crypto` HTTP transport — the real implementation of kernel's `CryptoTransport` port, identical shape to `services/svc-docs/src/app.module.ts`'s. Every S2/S3 write/read in this service goes through this. */
-function createHttpCryptoTransport(baseUrl: string): CryptoTransport {
+/**
+ * `svc-crypto` HTTP transport — the real implementation of kernel's
+ * `CryptoTransport` port. Every S2/S3 write/read in this service goes
+ * through this. crypto-auth task: `svc-crypto` now guards `/encrypt`/
+ * `/decrypt`/`/bidx` with `PermissionGuard` (svc-onboarding holds all
+ * three — it writes AND reads identity fields, and is the only caller in
+ * the system that computes blind indexes for national_id/email lookups),
+ * so this takes an `AuthenticatedFetch` — the SAME `AUTHENTICATED_FETCH`
+ * this service's config/docs calls already share below — instead of the
+ * bare global `fetch` it used before.
+ */
+function createHttpCryptoTransport(baseUrl: string, fetchImpl: typeof fetch): CryptoTransport {
   return {
     async post(path, body) {
-      const res = await fetch(`${baseUrl}${path}`, {
+      const res = await fetchImpl(`${baseUrl}${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -92,16 +102,18 @@ function createOidcMiddleware(): OidcMiddlewareHandler {
 }
 
 /**
- * S2S auth task: `svc-onboarding` calls `svc-config`'s `GET /rules/:key`
- * (`config.rule.read`) and `svc-docs`'s `POST /render` (`document.generate`)
- * — both guarded, deny-by-default routes. This is this service's own
- * machine identity: an OAuth2 client_credentials client, authenticated
- * against the SAME OIDC issuer `createOidcMiddleware` above validates
- * incoming tokens against (`OIDC_TOKEN_URL` is the issuer's TOKEN endpoint;
- * `OIDC_ISSUER`/`OIDC_JWKS_URI` above are for verifying tokens, this is for
- * OBTAINING one). `S2S_CLIENT_ID`/`S2S_CLIENT_SECRET` come from the
- * `svc-onboarding` realm client (`deploy/keycloak/realm-gadonghr.json`) —
- * never hard-coded, matching every other credential in this file.
+ * S2S auth task (+ crypto-auth task): `svc-onboarding` calls `svc-config`'s
+ * `GET /rules/:key` (`config.rule.read`), `svc-docs`'s `POST /render`
+ * (`document.generate`), and `svc-crypto`'s `/encrypt`/`/decrypt`/`/bidx`
+ * (`crypto.encrypt`/`crypto.decrypt`/`crypto.bidx`) — all guarded,
+ * deny-by-default routes. This is this service's own machine identity: an
+ * OAuth2 client_credentials client, authenticated against the SAME OIDC
+ * issuer `createOidcMiddleware` above validates incoming tokens against
+ * (`OIDC_TOKEN_URL` is the issuer's TOKEN endpoint; `OIDC_ISSUER`/
+ * `OIDC_JWKS_URI` above are for verifying tokens, this is for OBTAINING
+ * one). `S2S_CLIENT_ID`/`S2S_CLIENT_SECRET` come from the `svc-onboarding`
+ * realm client (`deploy/keycloak/realm-gadonghr.json`) — never hard-coded,
+ * matching every other credential in this file.
  */
 function createMachineTokenClient(): MachineTokenClient {
   return new MachineTokenClient(createHttpTokenTransport(requiredEnv('OIDC_TOKEN_URL')), {
@@ -129,8 +141,19 @@ function createMachineTokenClient(): MachineTokenClient {
       useFactory: () => new AuthzClient(createHttpAuthzTransport(process.env['AUTHZ_URL'] ?? 'http://svc-authz:3000')),
     },
     {
+      // S2S auth task: one machine-token client, one authenticated-fetch
+      // helper, shared by every outbound guarded call this service makes
+      // (config reads, docs render, and now crypto-auth task's svc-crypto
+      // calls) — matching `AuthzClient`/`CryptoClient`'s own
+      // one-instance-per-service lifetime.
+      provide: 'AUTHENTICATED_FETCH',
+      useFactory: (): AuthenticatedFetch => createAuthenticatedFetch(createMachineTokenClient()),
+    },
+    {
       provide: CryptoClient,
-      useFactory: () => new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000')),
+      useFactory: (authedFetch: AuthenticatedFetch) =>
+        new CryptoClient(createHttpCryptoTransport(process.env['CRYPTO_URL'] ?? 'http://svc-crypto:3000', authedFetch)),
+      inject: ['AUTHENTICATED_FETCH'],
     },
     {
       provide: CRYPTO_PROBE,
@@ -150,14 +173,6 @@ function createMachineTokenClient(): MachineTokenClient {
     { provide: ConsentRepository, useFactory: (pool: Queryable) => new ConsentRepository(pool), inject: [DB_POOL] },
     { provide: ProbationRepository, useFactory: (pool: Queryable) => new ProbationRepository(pool), inject: [DB_POOL] },
     { provide: AuditEmitter, useFactory: () => new AuditEmitter() },
-    {
-      // S2S auth task: one machine-token client, one authenticated-fetch
-      // helper, shared by every outbound guarded call this service makes
-      // (config reads AND docs render) — matching `AuthzClient`/
-      // `CryptoClient`'s own one-instance-per-service lifetime.
-      provide: 'AUTHENTICATED_FETCH',
-      useFactory: (): AuthenticatedFetch => createAuthenticatedFetch(createMachineTokenClient()),
-    },
     {
       provide: ChecklistService,
       useFactory: (taskRepo: OnboardingTaskRepository, authedFetch: AuthenticatedFetch) =>

@@ -87,6 +87,18 @@ x-oidc-env: &oidc-env
   OIDC_AUDIENCE: gadonghr-services
   OIDC_JWKS_URI: http://keycloak:8080/auth/realms/gadonghr/protocol/openid-connect/certs
 
+# crypto-auth task: the token endpoint every calling service's
+# `MachineTokenClient` (`packages/kernel/src/authz/machine-token.client.ts`)
+# authenticates against to obtain a bearer token for svc-crypto — separate
+# from `OIDC_JWKS_URI` above (that is for VERIFYING an incoming token; this
+# is for OBTAINING one). Internal address, same reasoning as `OIDC_JWKS_URI`/
+# `AUTHZ_URL`/`CRYPTO_URL` elsewhere in this file. Every service below that
+# calls svc-crypto merges this in alongside its own `S2S_CLIENT_ID`/
+# `S2S_CLIENT_SECRET` (the realm client `deploy/keycloak/realm-gadonghr.json`
+# provisions for it, pinned by `deploy/scripts/seed.sh`).
+x-oidc-token-env: &oidc-token-env
+  OIDC_TOKEN_URL: http://keycloak:8080/auth/realms/gadonghr/protocol/openid-connect/token
+
 # event-bus task: every service that owns an `outbox` table (a producer) or
 # subscribes to `gadong.events` (a consumer) needs this. `RABBITMQ_USER`/
 # `RABBITMQ_PASSWORD` already existed below (the `rabbitmq` service's own
@@ -413,8 +425,13 @@ services:
     <<: *node-defaults
     mem_limit: 96m
     environment:
+      <<: *oidc-env
       NODE_ENV: ${NODE_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # crypto-auth task: PermissionGuard's own AuthzClient — svc-crypto now
+      # guards /encrypt, /decrypt and /bidx (see services/svc-crypto/src/
+      # app.module.ts's own doc for the defense-in-depth story).
+      AUTHZ_URL: http://svc-authz:3000
       VAULT_ADDR: http://vault:8200
       VAULT_APPROLE_ID: ${VAULT_APPROLE_ID}
       VAULT_APPROLE_SECRET_FILE: /run/secrets/vault_approle_secret
@@ -445,6 +462,12 @@ services:
     secrets: [vault_approle_secret]
     depends_on:
       vault: { condition: service_healthy }
+      # crypto-auth task: PermissionGuard's AuthzClient calls svc-authz;
+      # OidcMiddleware fetches its JWKS from keycloak. `/health` stays
+      # reachable regardless (it is `@Public()`, bypassing both), but a
+      # real `/encrypt`/`/decrypt`/`/bidx` call needs both up.
+      svc-authz: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
     healthcheck: *http-health
 
   svc-config:
@@ -569,12 +592,17 @@ services:
     # deploy/README.md's memory budget table for the arithmetic.
     mem_limit: 512m
     environment:
-      <<: [*oidc-env, *rabbitmq-env]
+      <<: [*oidc-env, *oidc-token-env, *rabbitmq-env]
       NODE_ENV: ${NODE_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgresql://docs:${DB_PASSWORD_DOCS}@postgres:5432/${POSTGRES_DB}
       AUTHZ_URL: http://svc-authz:3000
       CRYPTO_URL: http://svc-crypto:3000
+      # crypto-auth task: this service's own machine identity for its one
+      # outbound guarded call (svc-crypto's /encrypt and /decrypt — see
+      # services/svc-docs/src/app.module.ts's createMachineTokenClient).
+      S2S_CLIENT_ID: svc-docs
+      S2S_CLIENT_SECRET: ${KEYCLOAK_SVC_DOCS_CLIENT_SECRET}
       MINIO_ENDPOINT: minio
       MINIO_PORT: "9000"
       MINIO_USE_SSL: "false"

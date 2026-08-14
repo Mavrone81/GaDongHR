@@ -101,9 +101,13 @@ describe('deploy/keycloak/realm-gadonghr.json', () => {
     expect(realm.enabled).toBe(true)
   })
 
-  test('declares exactly six clients: web, seeder, and the four S2S auth task machine principals', () => {
+  test('declares exactly ten clients: web, seeder, the four S2S auth task machine principals, and the four crypto-auth task machine principals', () => {
     expect(realm.clients.map((c) => c.clientId).sort()).toEqual([
       'seeder',
+      'svc-attendance',
+      'svc-claims',
+      'svc-docs',
+      'svc-leave',
       'svc-onboarding',
       'svc-payroll',
       'svc-scheduler',
@@ -197,6 +201,31 @@ describe('deploy/keycloak/realm-gadonghr.json', () => {
     })
   })
 
+  describe('the four crypto-auth task machine principals (svc-attendance, svc-claims, svc-leave, svc-docs)', () => {
+    const cryptoMachineClientIds = ['svc-attendance', 'svc-claims', 'svc-leave', 'svc-docs'] as const
+
+    test.each(cryptoMachineClientIds)('%s is confidential, service accounts on, standard flow off, no secret literal committed', (clientId) => {
+      const client = findClient(realm, clientId)
+      expect(client.publicClient).toBe(false)
+      expect(client.serviceAccountsEnabled).toBe(true)
+      expect(client.standardFlowEnabled).toBe(false)
+      expect(client.secret).toBeUndefined()
+    })
+
+    test.each(cryptoMachineClientIds)("%s's service-account user id is pinned in `users`, distinct from every other principal", (clientId) => {
+      const svcUser = realm.users?.find((u) => u.serviceAccountClientId === clientId)
+      expect(svcUser).toBeDefined()
+      const seedSh = readFileSync(join(DEPLOY_DIR, 'scripts', 'seed.sh'), 'utf8')
+      expect(seedSh).toContain(svcUser?.id ?? '<missing>')
+    })
+
+    test('every crypto-auth machine principal has a distinct service-account user id, distinct from the S2S auth task ones too', () => {
+      const allClientIds = ['svc-onboarding', 'svc-payroll', 'svc-timesheet', 'svc-scheduler', ...cryptoMachineClientIds]
+      const ids = allClientIds.map((clientId) => realm.users?.find((u) => u.serviceAccountClientId === clientId)?.id)
+      expect(new Set(ids).size).toBe(allClientIds.length)
+    })
+  })
+
   test('token lifetimes match Security doc §6 (access token <= 15 min, SSO session <= 12h)', () => {
     expect(realm.accessTokenLifespan).toBeGreaterThan(0)
     expect(realm.accessTokenLifespan).toBeLessThanOrEqual(MAX_ACCESS_TOKEN_LIFESPAN_SEC)
@@ -219,7 +248,18 @@ describe('deploy/keycloak/realm-gadonghr.json', () => {
       audience = readConfiguredAudience()
     })
 
-    test.each(['web', 'seeder', 'svc-onboarding', 'svc-payroll', 'svc-timesheet', 'svc-scheduler'] as const)('%s stamps an aud the middleware accepts', (clientId) => {
+    test.each([
+      'web',
+      'seeder',
+      'svc-onboarding',
+      'svc-payroll',
+      'svc-timesheet',
+      'svc-scheduler',
+      'svc-attendance',
+      'svc-claims',
+      'svc-leave',
+      'svc-docs',
+    ] as const)('%s stamps an aud the middleware accepts', (clientId) => {
       const client = findClient(realm, clientId)
       const mapper = client.protocolMappers?.find((m) => m.protocolMapper === 'oidc-audience-mapper')
       expect(mapper).toBeDefined()

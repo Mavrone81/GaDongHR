@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { HttpException } from '@nestjs/common'
 import { APP_GUARD } from '@nestjs/core'
-import { GadongError, PERMISSION_METADATA_KEY } from '@gadong/kernel'
+import { GadongError, PERMISSION_METADATA_KEY, PUBLIC_METADATA_KEY } from '@gadong/kernel'
 import type { EncryptRequest } from '@gadong/kernel'
 import { CryptoController } from './crypto.controller'
 import { AppModule } from './app.module'
@@ -120,28 +120,51 @@ describe('CryptoController wiring', () => {
 })
 
 /**
- * "svc-crypto has no `@RequirePermission` routes — it is called
- * service-to-service, not by users." (Task 6 brief §3). This is the one
- * service where an unannotated route is correct; these tests are the
- * guardrail against a future reader "fixing" that.
+ * crypto-auth task: `svc-crypto` used to have no `@RequirePermission`
+ * routes at all and no guard mounted — reachable, unauthenticated, by any
+ * container on the shared `gadong-internal` bridge network (the defense-
+ * in-depth hole this task closes). Each S2S route now declares the
+ * least-privilege permission its callers must hold — three DISTINCT codes,
+ * not one coarse grant, so a service that only ever encrypts cannot also
+ * decrypt merely by being a valid crypto caller. These tests are the
+ * guardrail against a future reader silently widening or dropping one.
  */
-describe('CryptoController deliberately declares no permissions', () => {
-  it('has no @RequirePermission metadata on the controller class', () => {
+describe('CryptoController declares least-privilege permissions per route', () => {
+  it('has no @RequirePermission metadata on the controller class (each route declares its own, deliberately different, permission)', () => {
     expect(Reflect.getMetadata(PERMISSION_METADATA_KEY, CryptoController)).toBeUndefined()
   })
 
-  it.each(['encrypt', 'decrypt', 'bidx', 'health'])('has no @RequirePermission metadata on %s()', (method) => {
+  function handlerFor(method: string): () => unknown {
     const proto = CryptoController.prototype as unknown as Record<string, () => unknown>
     const handler = proto[method]
     if (!handler) throw new Error(`no such handler: ${method}`)
-    expect(Reflect.getMetadata(PERMISSION_METADATA_KEY, handler)).toBeUndefined()
+    return handler
+  }
+
+  it.each([
+    ['encrypt', 'crypto.encrypt'],
+    ['decrypt', 'crypto.decrypt'],
+    ['bidx', 'crypto.bidx'],
+  ])('%s() requires %s', (method, permission) => {
+    expect(Reflect.getMetadata(PERMISSION_METADATA_KEY, handlerFor(method))).toBe(permission)
+  })
+
+  it('health() is @Public() — no permission, reachable with no bearer token', () => {
+    expect(Reflect.getMetadata(PERMISSION_METADATA_KEY, handlerFor('health'))).toBeUndefined()
+    expect(Reflect.getMetadata(PUBLIC_METADATA_KEY, handlerFor('health'))).toBe(true)
+  })
+
+  it('encrypt/decrypt/bidx are not @Public()', () => {
+    for (const method of ['encrypt', 'decrypt', 'bidx']) {
+      expect(Reflect.getMetadata(PUBLIC_METADATA_KEY, handlerFor(method))).toBeUndefined()
+    }
   })
 })
 
-describe('AppModule does not mount the kernel PermissionGuard', () => {
-  it('registers no APP_GUARD provider', () => {
+describe('AppModule mounts the kernel PermissionGuard (crypto-auth task)', () => {
+  it('registers an APP_GUARD provider bound to PermissionGuard', () => {
     const providers = (Reflect.getMetadata('providers', AppModule) as unknown[] | undefined) ?? []
-    const hasAppGuard = providers.some((p) => isRecord(p) && p['provide'] === APP_GUARD)
-    expect(hasAppGuard).toBe(false)
+    const appGuard = providers.find((p) => isRecord(p) && p['provide'] === APP_GUARD)
+    expect(appGuard).toBeDefined()
   })
 })

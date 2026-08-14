@@ -253,9 +253,12 @@ audit.read  dpo.console  dsr.manage  retention.approve
 biometric.template.read
 authz.role.read  authz.role.grant  document.read
 notify.notification.read  notify.notification.update
+crypto.encrypt  crypto.decrypt  crypto.bidx
 ```
 
 **`biometric.template.read` is granted to no human role, ever** — it exists only as a machine grant to `svc-attendance`. Security doc §4.2, asserted globally by XC-RBAC.
+
+**Added 2026-08-14 (crypto-auth task) — `crypto.encrypt`/`crypto.decrypt`/`crypto.bidx`, machine-only, same absolute rule as `biometric.template.read` above.** `svc-crypto` used to accept `/encrypt`/`/decrypt`/`/bidx` with zero authentication — any container on the shared `gadong-internal` bridge network could reach it. These three now guard those routes (`services/svc-crypto/src/crypto.controller.ts`), granted per-service to exactly the subset each caller's own code path needs (never a coarse `crypto.access`) — see `deploy/scripts/seed.sh`'s grants table for the full per-service justification.
 
 **Revised 2026-08-04 (integration reconciliation) — M4's attendance permissions replace four coarse
 codes.** The catalog used to carry `punch.submit`, `enrolment.manage`, `device.register` and

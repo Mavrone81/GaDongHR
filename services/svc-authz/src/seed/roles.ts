@@ -22,6 +22,25 @@ export const BIOMETRIC_TEMPLATE_READ = 'biometric.template.read'
  */
 export const PAYROLL_TIMESHEET_TOTALS_READ = 'timesheet.totals.read'
 
+/**
+ * crypto-auth task: three machine-only grants, same shape and same absolute
+ * rule as `BIOMETRIC_TEMPLATE_READ`/`PAYROLL_TIMESHEET_TOTALS_READ` above —
+ * granted to NO human role template, ever. `svc-crypto` decrypts/encrypts
+ * every S2/S3 field in the system; a human session token was never a valid
+ * caller of `/encrypt`/`/decrypt`/`/bidx` (those routes are reached only by
+ * another service's own `CryptoClient`, via its machine identity), so there
+ * is no human role these three could ever legitimately belong to. Split
+ * into three DISTINCT codes — not one coarse `crypto.access` — specifically
+ * so a calling service can hold exactly the subset its own code path needs:
+ * a service that only ever writes a sensitive field (`svc-claims`,
+ * `svc-leave`) is granted `crypto.encrypt` alone, never `crypto.decrypt`.
+ * See `deploy/scripts/seed.sh`'s per-service grants table for the full
+ * justification of who holds what.
+ */
+export const CRYPTO_ENCRYPT = 'crypto.encrypt'
+export const CRYPTO_DECRYPT = 'crypto.decrypt'
+export const CRYPTO_BIDX = 'crypto.bidx'
+
 export interface PermissionCatalogEntry {
   code: string
   description: string
@@ -147,6 +166,10 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
   { code: 'document.read', description: 'Read/download a previously rendered document (contract, letter, payslip)' },
   { code: 'notify.notification.read', description: "Read one's own in-app notifications" },
   { code: 'notify.notification.update', description: "Mark one's own in-app notification read" },
+  // crypto-auth task: three more machine-only grants, see CRYPTO_ENCRYPT's doc above.
+  { code: CRYPTO_ENCRYPT, description: 'Envelope-encrypt a batch of S2/S3 fields via svc-crypto — machine grant only, never a human role' },
+  { code: CRYPTO_DECRYPT, description: 'Decrypt an S2/S3 field via svc-crypto (purpose-logged) — machine grant only, never a human role' },
+  { code: CRYPTO_BIDX, description: 'Compute a blind index (HMAC) for an S2/S3 field via svc-crypto — machine grant only, never a human role' },
 ]
 
 /**
