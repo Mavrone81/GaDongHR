@@ -63,6 +63,60 @@ async function waitForHealthy(name: string, url: string): Promise<void> {
   await waitFor(name, () => httpGetOk(url), 600_000, 2000)
 }
 
+/**
+ * `svc-crypto`'s own `/health` (`buildHealth`, `packages/kernel/src/health.ts`)
+ * deliberately answers HTTP 200 with `status: "degraded"` rather than a
+ * non-2xx status when Vault is unreachable/sealed — the doc comment there
+ * explains why (a sealed Vault after a host reboot must not look like a
+ * crashed container). That is the right contract for a Docker healthcheck
+ * or a load balancer, but it means `waitForHealthy`'s `httpGetOk` (which
+ * only checks `res.ok`, i.e. 200-299) treats "process is up, Vault
+ * unreachable" as ready.
+ *
+ * Worse, `vault.client.ts`'s own `health()` calls only Vault's unauthenticated
+ * `sys/health` (sealed check) — it never exercises the AppRole login or a
+ * transit call, so even a `dependencies: { vault: "up" }` body does not
+ * prove `POST /encrypt` will succeed. The only way to know svc-crypto can
+ * actually do its one job — reach Vault, log in via AppRole, and drive the
+ * transit engine — is to make it do that job for real: a genuine
+ * encrypt-then-decrypt round trip through its real HTTP API, byte for byte.
+ * A CI run that raced this gap failed every downstream lifecycle step with
+ * `CRY-503`, immediately after `/health` had reported 200 — see
+ * `.superpowers/sdd/02-modules/ci-gates-fix.md`.
+ */
+async function waitForCryptoReady(): Promise<void> {
+  const base = `http://127.0.0.1:${String(PORTS.crypto)}`
+  const entityId = 'e2e-harness-crypto-readiness-probe'
+  const field = 'probe'
+  const plaintext = 'e2e-crypto-round-trip-ok'
+
+  await waitFor(
+    'svc-crypto real encrypt/decrypt round-trip (proves AppRole login + transit, not just /health — see harness.ts comment)',
+    async () => {
+      const encRes = await fetch(`${base}/encrypt`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ fields: [{ entityId, field, value: plaintext, fieldClass: 'S2' }] }),
+      })
+      if (!encRes.ok) return false
+      const encBody = (await encRes.json()) as { fields?: Record<string, string> }
+      const ciphertext = encBody.fields?.[field]
+      if (typeof ciphertext !== 'string') return false
+
+      const decRes = await fetch(`${base}/decrypt`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ entityId, field, ciphertext, purpose: 'e2e-harness-readiness-probe' }),
+      })
+      if (!decRes.ok) return false
+      const decBody = (await decRes.json()) as { value?: string }
+      return decBody.value === plaintext
+    },
+    120_000,
+    2000,
+  )
+}
+
 export async function up(): Promise<void> {
   mkdirSync(RUNTIME_DIR, { recursive: true })
 
@@ -126,9 +180,46 @@ export async function up(): Promise<void> {
   // not silently patched around in application code.
   console.log('[harness] phase 2: application services, ONE AT A TIME (node-pg-migrate advisory-lock race — see harness.ts comment)')
   const appServices = ['svc-authz', 'svc-config', 'svc-crypto', 'svc-onboarding', 'svc-scheduler', 'svc-attendance', 'svc-timesheet', 'svc-docs', 'svc-payroll']
+
+  // Build every image ONCE, up front, separately from `up` — a second real
+  // seam defect found this session, distinct from the migration race above.
+  // `docker compose up -d --build <one-service>` still resolves and BUILDS
+  // every service in that one service's `depends_on` closure, not just the
+  // named one (BuildKit's bake driver builds the whole plan the compose
+  // file's dependency graph implies). With buildx provenance attestation on
+  // by default, even a 100%-cache-hit rebuild produces a NEW image digest
+  // for every one of those dependencies — so each later iteration of this
+  // loop silently rebuilt (and Compose then RECREATED) every earlier
+  // service still listed in the new target's `depends_on`. Concretely: the
+  // last iteration (`svc-payroll`, whose `depends_on` includes svc-authz
+  // and svc-crypto) rebuilt+recreated the ALREADY-HEALTHY svc-authz and
+  // svc-crypto containers right as this loop finished — losing their
+  // in-memory Vault AppRole token cache and racing the lifecycle suite's
+  // very first HTTP call against a container that had just restarted and
+  // not yet finished booting. That is a genuine, confirmed defect this
+  // session found (reproduced with `docker ps` uptimes resetting mid-loop
+  // and Compose's own "Recreate"/"Recreated" log lines) — NOT, it turned
+  // out, the reason the lifecycle suite's first HTTP call still fails
+  // after this fix: that remaining `CRY-503` is a separate, real product
+  // defect (a wrong ciphertext-length constant in
+  // `packages/kernel/src/crypto/client.ts`), reported in full in
+  // `.superpowers/sdd/02-modules/ci-gates-fix.md` rather than patched here
+  // — see that doc before assuming this fix alone turns `e2e` green.
+  // Building every image before ANY `up` call removes the repeated-rebuild
+  // trigger entirely: once built, plain `up -d` (no `--build`) starts a
+  // container from the image that already exists and never recreates a
+  // container whose image hasn't changed.
+  await compose('build', ...appServices)
+
   for (const name of appServices) {
-    await compose('up', '-d', '--build', name)
+    await compose('up', '-d', name)
     await waitForHealthy(name, `http://127.0.0.1:${String(PORTS[name.replace('svc-', '') as keyof typeof PORTS])}/health`)
+    // svc-crypto's /health passing is necessary but not sufficient (see
+    // waitForCryptoReady's doc comment) — every later service in this loop
+    // (onboarding, attendance, docs, payroll) calls svc-crypto for real, so
+    // this must be proven before any of them boot, not just before the
+    // test suite starts.
+    if (name === 'svc-crypto') await waitForCryptoReady()
   }
 
   console.log('[harness] waiting for svc-authz role catalog to self-seed')

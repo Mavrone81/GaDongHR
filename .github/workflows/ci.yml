@@ -53,7 +53,48 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      # E2E_KEEP_STACK=1 so a failure leaves the stack up for the
+      # diagnostics step below — `test/e2e/run.ts`'s own `finally` tears
+      # the stack down unconditionally otherwise, which would make an
+      # `if: failure()` diagnostics step run against nothing. Teardown is
+      # therefore now this job's own responsibility (the explicit,
+      # `if: always()` step at the bottom), same pattern `realbroker`
+      # already uses for its compose stack.
       - run: pnpm test:e2e
+        env:
+          E2E_KEEP_STACK: '1'
+      # Permanent, not a one-off: the next person debugging this job should
+      # get container state and logs for free on a red run, not have to
+      # re-instrument the workflow first. `if: failure()` only, so it costs
+      # nothing on the green path and never masks a real failure as a
+      # diagnostics failure (`|| true` throughout).
+      - name: Dump container state + logs (on failure only)
+        if: failure()
+        working-directory: test/e2e
+        run: |
+          echo '::group::docker ps -a'
+          docker compose -f docker-compose.yml ps -a || true
+          echo '::endgroup::'
+          for c in $(docker compose -f docker-compose.yml ps -aq); do
+            name=$(docker inspect --format '{{.Name}}' "$c" | sed 's#^/##')
+            echo "::group::docker inspect state — ${name}"
+            docker inspect --format 'OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}} Status={{.State.Status}} StartedAt={{.State.StartedAt}} FinishedAt={{.State.FinishedAt}}' "$c" || true
+            echo '::endgroup::'
+            echo "::group::docker logs — ${name}"
+            docker logs --timestamps "$c" 2>&1 | tail -n 500 || true
+            echo '::endgroup::'
+          done
+          echo '::group::host memory (free -h)'
+          free -h || true
+          echo '::endgroup::'
+      # Always, not just on failure: E2E_KEEP_STACK=1 above means
+      # `run.ts` never tears its own stack down, on either outcome — this
+      # is the only teardown this job now gets, so it must run
+      # unconditionally, not only after a failure.
+      - name: Tear down e2e stack
+        if: always()
+        working-directory: test/e2e
+        run: docker compose -f docker-compose.yml down -v --remove-orphans || true
 
   # Real-broker transport proofs (`*.realbroker.test.ts`): outbox relay →
   # AMQP → idempotent consumers, including redelivery, duplicate
