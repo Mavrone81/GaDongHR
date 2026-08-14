@@ -1,0 +1,13 @@
+[Unit]
+Description=Run gadonghr-monitor.service every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+# Small jitter so this never lands on exactly the same second as the
+# backup timer or any future timer added alongside it.
+RandomizedDelaySec=15
+
+[Install]
+WantedBy=timers.target

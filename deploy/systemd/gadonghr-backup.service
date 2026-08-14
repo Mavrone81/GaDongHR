@@ -1,0 +1,18 @@
+[Unit]
+Description=GaDongHR nightly backup (Postgres + Vault raft snapshot + MinIO, encrypted)
+# ops-hardening: gap #4a — "backups are unscheduled". backup.sh already
+# fails loudly on its own (see that script's header) — this wires that
+# failure into the same alert path as gadonghr-monitor.sh, so a failed
+# night's backup pages instead of sitting silently in a log file no one
+# reads until the quarterly restore drill discovers there's nothing
+# recent to restore.
+After=docker.service
+Requires=docker.service
+OnFailure=gadonghr-backup-alert.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__GADONG_DEPLOY_DIR__
+EnvironmentFile=__GADONG_DEPLOY_DIR__/.env
+Environment=GADONG_DEPLOY_DIR=__GADONG_DEPLOY_DIR__
+ExecStart=__GADONG_DEPLOY_DIR__/scripts/backup.sh

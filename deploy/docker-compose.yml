@@ -27,6 +27,21 @@ x-node-defaults: &node-defaults
   restart: unless-stopped
   networks: [internal]
   security_opt: ["no-new-privileges:true"]
+  # ops-hardening: no compose service had a `logging:` block at all, so
+  # every one of the 15 containers used docker's json-file driver
+  # unbounded — on an 80 GB disk with no rotation, a noisy service (or one
+  # stuck crash-looping) could fill the disk with its own logs alone.
+  # Bounded here ONCE, via this shared anchor every service already merges
+  # via `<<: *node-defaults`, rather than copy-pasted into all 15 service
+  # blocks (and forgotten on the 16th, the next time one is added). 10m x
+  # 3 files = 30 MB/container ceiling x 15 containers = 450 MB worst case,
+  # a rounding error against the 80 GB disk and not a RAM concern (this is
+  # disk, not the 4 GB memory budget deploy/README.md tracks separately).
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
 
 # Every one of the seven services exposes `GET /health` on
 # `127.0.0.1:3000` (every `main.ts`'s own comment: "Port 3000 on 0.0.0.0
@@ -240,13 +255,42 @@ services:
       - vault_data:/vault/data
       - ./vault/vault.hcl:/vault/config/vault.hcl:ro
     healthcheck:
-      # `vault status` exits 0 unsealed, 2 sealed — CMD-SHELL's `|| true`
-      # makes a SEALED vault (expected after every reboot, vault.hcl's own
-      # header comment) still `healthy` at the Docker level, matching
-      # every service's own `degraded`-not-crashed contract above; a
-      # human unseal ceremony, not a container restart, is what fixes
-      # `sealed`.
-      test: ["CMD-SHELL", "vault status -address=http://127.0.0.1:8200 || true"]
+      # ops-hardening: `vault status` exits 0 unsealed, 2 sealed, and
+      # anything else (connection refused, corrupt config, process
+      # actually gone) on a real failure. The OLD `|| true` swallowed all
+      # three into a blanket "healthy" — so a genuinely crashed Vault
+      # reported the exact same Docker health status as a merely-sealed
+      # one, and NOTHING (not Docker, not a human glancing at `docker ps`)
+      # could tell the difference. A SEALED vault is legitimately not a
+      # crash (expected after every reboot, vault.hcl's own header
+      # comment; every S2/S3 field op 503s until a human unseal ceremony —
+      # not a container restart — fixes it), and `depends_on: vault:
+      # condition: service_healthy` (svc-crypto) must never block forever
+      # waiting for a sealed-after-reboot vault to become "healthy" — so
+      # sealed (exit 2) still counts as Docker-healthy, same as before.
+      # What changes: any OTHER exit code now fails the healthcheck for
+      # real, so an actual crash is no longer hidden identically. Sealed
+      # is also made VISIBLE rather than silently indistinguishable from
+      # unsealed: this test's own stdout ("VAULT_SEALED...") lands in
+      # `docker inspect`'s `State.Health.Log[].Output` on every run even
+      # while exit 0 keeps the container marked healthy — and
+      # `scripts/gadonghr-monitor.sh` actively execs `vault status`
+      # itself and pages on Sealed=true independent of the Docker-level
+      # health status, precisely because that status alone pages no one.
+      # No named shell variable here on purpose (`$?` only) —
+      # `compose-validation.test.ts`'s "every service whose healthcheck
+      # references a shell variable declares it in `environment`" test
+      # would otherwise demand a fake `environment:` entry for a purely
+      # local case-statement variable.
+      test:
+        - CMD-SHELL
+        - >-
+          vault status -address=http://127.0.0.1:8200 >/tmp/vault-health.out 2>&1;
+          case $$? in
+            0) echo VAULT_UNSEALED; cat /tmp/vault-health.out; exit 0 ;;
+            2) echo "VAULT_SEALED (expected after reboot -- needs a human unseal ceremony, not a restart)"; cat /tmp/vault-health.out; exit 0 ;;
+            *) echo VAULT_UNHEALTHY; cat /tmp/vault-health.out; exit 1 ;;
+          esac
       interval: 15s
       timeout: 5s
       retries: 20

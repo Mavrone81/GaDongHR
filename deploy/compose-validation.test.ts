@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
@@ -785,11 +785,187 @@ describe('deploy/docker-compose.yml alone (local/dev/CI-build shape)', () => {
 })
 
 describe('deploy scripts are syntactically valid shell', () => {
-  const scripts = ['auto-deploy-gadonghr.sh', 'prune-gadonghr-images.sh', 'seed.sh', 'backup.sh']
+  const scripts = [
+    'auto-deploy-gadonghr.sh',
+    'prune-gadonghr-images.sh',
+    'seed.sh',
+    'backup.sh',
+    'gadonghr-alert.sh',
+    'gadonghr-monitor.sh',
+    'restore-verify.sh',
+    'install-ops-hardening.sh',
+  ]
 
   test.each(scripts)('%s passes `bash -n`', (script) => {
     const path = join(DEPLOY_DIR, 'scripts', script)
     expect(() => execFileSync('bash', ['-n', path], { encoding: 'utf8' })).not.toThrow()
+  })
+})
+
+/**
+ * ops-hardening gap #2: "no alerting exists at all". These tests pin the
+ * SHAPE of the two scripts that close it, against the source directly —
+ * not just "parses as bash" (already covered above).
+ */
+describe('deploy/scripts/gadonghr-alert.sh — the one shared notification path', () => {
+  const contents = readFileSync(join(DEPLOY_DIR, 'scripts', 'gadonghr-alert.sh'), 'utf8')
+
+  test('the notification channel is exactly one env var', () => {
+    const channelVars = [...contents.matchAll(/\$\{?(GADONG_ALERT_[A-Z_]*URL[A-Z_]*)\b/g)].map((m) => m[1])
+    expect(new Set(channelVars)).toEqual(new Set(['GADONG_ALERT_WEBHOOK_URL']))
+  })
+
+  test('every alert is appended to a local log before any channel delivery is attempted', () => {
+    const logIdx = contents.indexOf('>>"$ALERT_LOG"')
+    // The actual runtime gate on channel delivery, not the word
+    // "GADONG_ALERT_WEBHOOK_URL" merely appearing in the header prose
+    // above (which necessarily comes first in the file either way).
+    const webhookGateIdx = contents.indexOf('${GADONG_ALERT_WEBHOOK_URL:-}')
+    expect(logIdx).toBeGreaterThan(-1)
+    expect(webhookGateIdx).toBeGreaterThan(-1)
+    expect(logIdx).toBeLessThan(webhookGateIdx)
+  })
+
+  test('an unset channel is not treated as an error (exits 0, logs locally only)', () => {
+    expect(contents).toMatch(/no GADONG_ALERT_WEBHOOK_URL configured/)
+  })
+})
+
+describe('deploy/scripts/gadonghr-monitor.sh — the four audited checks', () => {
+  const contents = readFileSync(join(DEPLOY_DIR, 'scripts', 'gadonghr-monitor.sh'), 'utf8')
+
+  test('checks container health, Vault seal status, disk usage, and backup age — the exact four gaps named in the audit', () => {
+    expect(contents).toMatch(/report containers/)
+    expect(contents).toMatch(/report vault-sealed/)
+    expect(contents).toMatch(/report disk/)
+    expect(contents).toMatch(/report backup-age/)
+  })
+
+  test('dispatches through gadonghr-alert.sh, not a bespoke notification path', () => {
+    expect(contents).toContain('gadonghr-alert.sh')
+  })
+
+  test('debounces repeat alerts for an ongoing failure instead of re-alerting every run', () => {
+    expect(contents).toMatch(/REALERT_MINUTES/)
+    expect(contents).toMatch(/suppressing repeat alert/)
+  })
+})
+
+/**
+ * ops-hardening gap #4b: "restore has never been exercised" — and the
+ * brief's hard structural requirement: "It must be impossible for this
+ * script to touch the production volumes ... defend structurally ...
+ * not just by care." These tests assert the structural guard exists in
+ * the source, not merely that a human reading it would probably be
+ * careful.
+ */
+describe('deploy/scripts/restore-verify.sh — structurally isolated from production', () => {
+  const contents = readFileSync(join(DEPLOY_DIR, 'scripts', 'restore-verify.sh'), 'utf8')
+
+  test('never invokes `docker compose -p gadonghr` (the real production project) at all', () => {
+    // Only checked against actual (non-comment) code lines — the header
+    // prose above legitimately explains, in words, that this script
+    // never does this.
+    const codeLines = contents.split('\n').filter((l) => !l.trim().startsWith('#'))
+    const code = codeLines.join('\n')
+    expect(code).not.toMatch(/docker compose\s+-p\s+gadonghr\b/)
+    expect(code).not.toMatch(/-p\s+"gadonghr"/)
+    expect(code).not.toMatch(/-p\s+'gadonghr'/)
+  })
+
+  test('every created docker resource name is routed through the isolation-prefix assertion before use', () => {
+    expect(contents).toContain('assert_isolated_name')
+    // The three primitives that create docker resources must each call
+    // the guard — a future helper added without doing so would defeat
+    // the structural guarantee.
+    const helperBodies = ['dcreate_network', 'dcreate_volume', 'drun'].map((fn) => {
+      const start = contents.indexOf(`${fn}() {`)
+      expect(start).toBeGreaterThan(-1)
+      const end = contents.indexOf('\n}', start)
+      return contents.slice(start, end)
+    })
+    for (const body of helperBodies) {
+      expect(body).toContain('assert_isolated_name')
+    }
+  })
+
+  test('never mounts a volume or names a container with the literal production names (pg_data / vault_data / minio_data / gadonghr-<n>)', () => {
+    // Only checked against the parts of this script that actually name a
+    // docker resource (mount/name flags) — the literal words appear
+    // elsewhere in prose comments, which is fine and expected.
+    const resourceNamingLines = contents
+      .split('\n')
+      .filter((l) => /(-v\s|--name\s|docker (volume|network) create)/.test(l))
+    for (const line of resourceNamingLines) {
+      expect(line).not.toMatch(/[:\s](pg_data|vault_data|minio_data)(:|\s|$)/)
+      expect(line).not.toMatch(/gadonghr-(traefik|keycloak|vault|postgres|rabbitmq|redis|minio|web|svc-\w+)-1\b/)
+    }
+  })
+
+  test('every created resource is torn down in a trap on EXIT', () => {
+    expect(contents).toMatch(/trap cleanup EXIT/)
+  })
+
+  test('the age private key is only ever accepted via a file path, never as a bare CLI value', () => {
+    expect(contents).toContain('--age-key-file')
+    // A hypothetical `--age-key <raw-value>` flag (the key itself as an
+    // argument) would fail this — `--age-key-file` itself must not match.
+    expect(contents).not.toMatch(/--age-key(?!-file)\b/)
+  })
+
+  test('requires --age-key-file and an archive path, refuses to run with neither', () => {
+    const result = spawnSync('bash', [join(DEPLOY_DIR, 'scripts', 'restore-verify.sh')], {
+      encoding: 'utf8',
+      timeout: 10_000,
+    })
+    expect(result.status).not.toBe(0)
+    expect(result.stderr + result.stdout).toMatch(/Usage:/)
+  })
+})
+
+/**
+ * ops-hardening gap #3 + #4a: everything installed on the server must
+ * also exist in the repo (brief, verbatim) — these systemd units and the
+ * install script are that "exists in the repo" half.
+ */
+describe('deploy/systemd/*.{service,timer} + deploy/scripts/install-ops-hardening.sh', () => {
+  const systemdDir = join(DEPLOY_DIR, 'systemd')
+  const monitorService = readFileSync(join(systemdDir, 'gadonghr-monitor.service'), 'utf8')
+  const monitorTimer = readFileSync(join(systemdDir, 'gadonghr-monitor.timer'), 'utf8')
+  const backupService = readFileSync(join(systemdDir, 'gadonghr-backup.service'), 'utf8')
+  const backupAlertService = readFileSync(join(systemdDir, 'gadonghr-backup-alert.service'), 'utf8')
+  const backupTimer = readFileSync(join(systemdDir, 'gadonghr-backup.timer'), 'utf8')
+  const installScript = readFileSync(join(DEPLOY_DIR, 'scripts', 'install-ops-hardening.sh'), 'utf8')
+
+  test('the monitor and backup services point at the real scripts in this repo', () => {
+    expect(monitorService).toMatch(/scripts\/gadonghr-monitor\.sh/)
+    expect(backupService).toMatch(/scripts\/backup\.sh/)
+  })
+
+  test('backup.service wires its failure into the alert path via OnFailure=, not a hope that someone reads the log', () => {
+    expect(backupService).toMatch(/OnFailure=gadonghr-backup-alert\.service/)
+    expect(backupAlertService).toContain('gadonghr-alert.sh')
+  })
+
+  test('the monitor timer runs frequently enough to matter (at most every 15 minutes) and the backup timer runs daily', () => {
+    expect(monitorTimer).toMatch(/OnUnitActiveSec=\s*[1-9][0-5]?min\b/)
+    expect(backupTimer).toMatch(/OnCalendar=/)
+  })
+
+  test('both timers survive a reboot (Persistent=true) so a missed run during downtime still catches up', () => {
+    expect(monitorTimer).toContain('Persistent=true')
+    expect(backupTimer).toContain('Persistent=true')
+  })
+
+  test('install-ops-hardening.sh installs `age` (backup.sh hard-requires it) and enables both timers', () => {
+    expect(installScript).toMatch(/apt-get install.*age|install.*\bage\b/)
+    expect(installScript).toMatch(/enable --now gadonghr-monitor\.timer/)
+    expect(installScript).toMatch(/enable --now gadonghr-backup\.timer/)
+  })
+
+  test('install-ops-hardening.sh renders the __GADONG_DEPLOY_DIR__ placeholder before installing units (never installs the raw template)', () => {
+    expect(installScript).toContain('__GADONG_DEPLOY_DIR__')
+    expect(installScript).toMatch(/sed\s+["']s#__GADONG_DEPLOY_DIR__#/)
   })
 })
 

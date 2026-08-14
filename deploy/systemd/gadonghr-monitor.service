@@ -1,0 +1,21 @@
+[Unit]
+Description=GaDongHR ops monitor (container health, Vault seal, disk, backup age)
+# ops-hardening: this is check #2 from the readiness audit — "nothing
+# pages or notifies on anything today". Deliberately NO OnFailure= here:
+# gadonghr-monitor.sh dispatches its own alerts (with debounce) for every
+# individual check it finds failing, via gadonghr-alert.sh. This unit
+# exits non-zero whenever ANY check fails, by design (so `systemctl
+# status`/`journalctl -u gadonghr-monitor` shows the real state) — adding
+# OnFailure= on top would fire a second, undebounced alert for the exact
+# same condition the script just alerted on itself.
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__GADONG_DEPLOY_DIR__
+# `-` prefix: don't fail the unit if .env is briefly missing/unreadable —
+# the monitor should keep trying rather than going silent.
+EnvironmentFile=-__GADONG_DEPLOY_DIR__/.env
+Environment=GADONG_DEPLOY_DIR=__GADONG_DEPLOY_DIR__
+ExecStart=__GADONG_DEPLOY_DIR__/scripts/gadonghr-monitor.sh

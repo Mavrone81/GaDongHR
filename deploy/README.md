@@ -28,9 +28,14 @@ cutover *from* the old droplet's IP, not a stale workaround.)
 | `scripts/prune-gadonghr-images.sh` | Cron-driven image cleanup (keep 4 newest SHA tags per repo). |
 | `scripts/seed.sh` | Statutory rule packs + role catalog + (Task 15b) pins the `seeder` client secret and grants it its svc-authz permissions. Run once after first `up -d`. |
 | `scripts/bootstrap-admin.sh` | Task 15b: creates the first HR/System Admin (forced password change + OTP enrolment) and grants them `hr-system-admin` in svc-authz. Idempotent — run once, after `seed.sh`. |
-| `scripts/backup.sh` | Nightly Postgres + Vault + MinIO backup, encrypted, 30 daily / 12 monthly. |
+| `scripts/backup.sh` | Nightly Postgres (+ row-count manifest) + Vault + MinIO backup, encrypted, 30 daily / 12 monthly. |
+| `scripts/restore-verify.sh` | ops-hardening: the quarterly restore drill — restores a real backup archive into a throwaway, isolated environment and proves it. See "Backups, alerting, and log rotation (ops-hardening)" below. |
+| `scripts/gadonghr-monitor.sh` | ops-hardening: periodic check (container health, Vault seal, disk, backup age) — the alerting this stack didn't have. |
+| `scripts/gadonghr-alert.sh` | ops-hardening: the one shared notification path every alert goes through (local log always; one webhook env var, optional). |
+| `scripts/install-ops-hardening.sh` | ops-hardening: idempotent one-shot installer — `age`, the systemd units below, log/state directories. Run once per host. |
+| `systemd/gadonghr-{monitor,backup,backup-alert}.{service,timer}` | ops-hardening: the timers `install-ops-hardening.sh` installs. Template `__GADONG_DEPLOY_DIR__` is rendered to this checkout's real path at install time. |
 | `.env.example` | Copy to `.env`, fill every `CHANGE_ME`. Never commit `.env`. |
-| `compose-validation.test.ts` | The test suite for the two compose files (`pnpm test` runs it — see below). |
+| `compose-validation.test.ts` | The test suite for the two compose files AND the ops-hardening scripts/systemd units (`pnpm test` runs it — see below). |
 
 ## Install order (first deploy)
 
@@ -380,10 +385,125 @@ same built image works behind any hostname — is a deliberate future option
 for whenever that flexibility is actually needed, not something this task
 skipped by mistake.
 
+## Backups, alerting, and log rotation (ops-hardening)
+
+A readiness audit found four operational gaps: Vault's healthcheck lied
+about seal status, there was no alerting on anything, container logs were
+unbounded, and backups were unscheduled with a restore path that had never
+been exercised. Closed as follows — none of this needed a product-code
+change, all of it is `deploy/` + the server.
+
+### Vault healthcheck: sealed is now visible, crashed is now caught
+
+The old healthcheck was `vault status ... || true` — ALWAYS exit 0, so a
+SEALED vault (every S2/S3 op 503ing, expected after every reboot) and a
+genuinely CRASHED vault reported the exact same Docker health status.
+Fixed in `docker-compose.yml`: exit 2 (sealed) still counts as
+Docker-healthy (so `depends_on: condition: service_healthy` never blocks
+forever waiting for a sealed-after-reboot vault — that would have been a
+regression), but any OTHER exit code now fails the healthcheck for real.
+Sealed is made VISIBLE via the healthcheck's own stdout (`docker
+inspect --format '{{json .State.Health}}'` shows it in `Log[].Output`
+even while the container stays "healthy"), and `gadonghr-monitor.sh`
+(below) actively execs `vault status` itself every run and pages on
+`sealed=true` independent of Docker's health status — the mechanism that
+actually notifies a human, since Docker's own health state alone doesn't.
+
+### Alerting: `gadonghr-monitor.sh` + `gadonghr-alert.sh`
+
+`gadonghr-monitor.sh` runs on a 5-minute systemd timer and checks exactly
+the four things the audit named: container health (unhealthy/crash-
+looping), Vault seal status, disk usage, and the age of the newest local
+backup archive. Every failure is dispatched through `gadonghr-alert.sh`,
+which:
+- **Always** appends a timestamped line to a local log
+  (`GADONG_ALERT_LOG`, default `/var/log/gadonghr-alerts.log`) — the
+  alert history exists even with no channel configured.
+- Optionally POSTs the same message to **one env var**,
+  `GADONG_ALERT_WEBHOOK_URL` — works as-is with an ntfy.sh topic URL, or
+  any webhook that accepts a POST body (set `GADONG_ALERT_WEBHOOK_JSON=true`
+  for a Slack-style `{"text": ...}` body). Unset is not an error.
+
+Repeat alerts for an ongoing failure are debounced (state under
+`GADONG_MONITOR_STATE_DIR`, default `/var/lib/gadonghr-monitor`) — a
+transition to failing always alerts immediately; a persistent failure
+re-alerts every `GADONG_MONITOR_REALERT_MINUTES` (default 60), not every
+5-minute run. Recovery always logs locally and clears the state.
+
+### Log rotation: one anchor, not sixteen copy-pastes
+
+No service had a `logging:` block — docker's json-file driver is
+unbounded, and the disk is a fixed 80 GB. Fixed with a `logging:` entry
+added to the single `x-node-defaults` anchor every service already merges
+via `<<: *node-defaults` (`docker-compose.yml`) — `max-size: 10m`,
+`max-file: 3` per container, applied everywhere in one place.
+**Changing a container's logging config requires recreating it** — on the
+server, every container except `vault` was recreated (`docker compose up
+-d --force-recreate <service>`, one at a time); `vault` was deliberately
+left running its old container rather than force-recreated, because that
+would reseal it and require a live 3-of-5 key-officer unseal ceremony —
+out of scope for an unattended hardening pass. `vault` picks up the new
+logging config the next time it restarts for any other reason (reboot,
+image update); until then it still uses docker's unbounded default. Track
+this — it isn't automatically resolved by anything in this repo.
+
+### Backups: scheduled, and restore is now actually exercised
+
+`scripts/backup.sh` (Postgres `pg_dump -Fc` + a new row-count
+`manifest.json` + Vault raft snapshot + MinIO mirror, `age`-encrypted,
+30 daily / 12 monthly) is now on a systemd timer
+(`systemd/gadonghr-backup.timer`, nightly 02:30 UTC ±5min jitter,
+`Persistent=true` so a missed run during downtime still catches up).
+`systemd/gadonghr-backup.service` sets `OnFailure=gadonghr-backup-alert.service`,
+which calls `gadonghr-alert.sh` — a failed backup pages through the same
+path as everything else, not a log file nobody reads.
+
+`scripts/restore-verify.sh` is the quarterly restore drill Runbook §3
+required and this repo never had:
+
+```bash
+scripts/restore-verify.sh /opt/gadonghr/backups/daily/gadonghr-backup-<stamp>.tar.age \
+  --age-key-file /path/to/offline-backup-key.txt \
+  [--vault-unseal-key <share>]...   # only if the archive has a real vault.snap
+```
+
+It decrypts the archive, then, entirely in **throwaway, uniquely-prefixed
+docker resources it creates and tears down itself** (never the `gadonghr`
+compose project, never the real volume names):
+- Restores `postgres.dump` into a throwaway Postgres container and diffs
+  every table's row count against `manifest.json`.
+- Runs a self-contained synthetic Vault stage → snapshot → restore →
+  unseal drill (its own freshly-generated "staging key") to prove the
+  restore+unseal MECHANISM end to end — and, if the archive's own real
+  `vault.snap` is present and `--vault-unseal-key` share(s) were supplied,
+  also attempts a real restore of that.
+- Lists the archive's mirrored MinIO objects.
+
+Every docker resource name it creates is asserted (`assert_isolated_name`)
+to carry that run's unique prefix before any docker command touches it —
+this is a structural guard, not just care: a name that isn't this run's
+own is refused outright, and the script never invokes `docker compose -p
+gadonghr` at all.
+
+**Install once per host** (idempotent, safe to re-run after `git pull`):
+
+```bash
+./scripts/install-ops-hardening.sh   # as root: installs `age`, renders + enables both systemd timers
+```
+
+**Known, real gap surfaced by this work, not yet closed**: on
+gadonghr-prod, `VAULT_TOKEN` was never provisioned (that's part of the
+`vault-init.sh` ceremony, out of scope here — same boundary
+`backup.sh`'s own header already documented). Every backup taken so far
+has therefore SKIPPED the Vault snapshot and `backup.sh` correctly exits
+non-zero over it — which is exactly the kind of failure the new alerting
+now surfaces instead of hiding. Provisioning that token is follow-up work
+for whoever owns the next Vault ceremony.
+
 ## Validation
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml config   # must parse cleanly
-pnpm test -- deploy                                                       # compose-validation.test.ts
+pnpm test -- deploy                                                       # compose-validation.test.ts + scripts-validation.test.ts
 for f in scripts/*.sh; do bash -n "$f"; done
 ```

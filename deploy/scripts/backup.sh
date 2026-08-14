@@ -8,7 +8,9 @@
 #   1. `pg_dump -Fc` the whole database (every schema in one dump — `-Fc`
 #      with no `--schema` filter, so all twelve business schemas plus
 #      `audit`/`keycloak`, dumped in Postgres's custom format for
-#      `pg_restore`).
+#      `pg_restore`), plus (ops-hardening) a `manifest.json` of exact
+#      per-table row counts alongside it — what `restore-verify.sh`
+#      diffs a restored table's row count against.
 #   2. `vault operator raft snapshot save` — the ONLY way to recover
 #      Vault's Raft state (and therefore every KEK, and therefore every
 #      encrypted field in the system — see deploy/vault/vault.hcl's
@@ -21,14 +23,14 @@
 #      archives (the first successful run of each calendar month is
 #      copied into the monthly retention set).
 #
-# ⚠️  AN UNTESTED BACKUP IS NOT A BACKUP (Runbook §3, verbatim). This
-# script proves the five steps above completed without error — it does
-# NOT prove the result is restorable. Runbook §3 requires a quarterly
-# restore drill (fresh host, restore this archive, unseal with 3 key
-# officers, `pg_restore`, MinIO restore, `scripts/verify-restore.sh`) —
-# that script is a separate deliverable, not part of Task 13, and until
-# it exists and has been run at least once against a real archive this
-# script produced, treat every archive here as UNVERIFIED.
+# ⚠️  AN UNTESTED BACKUP IS NOT A BACKUP (Runbook §3, verbatim). Beyond
+# "the steps above completed without error", ops-hardening added
+# `deploy/scripts/restore-verify.sh` — Runbook §3's quarterly restore
+# drill tool, restoring a real archive into a throwaway, isolated
+# environment and checking Postgres row counts against the manifest
+# above, a Vault snapshot restore+unseal, and MinIO object presence. See
+# that script's own header for exactly what it proves and how it stays
+# structurally unable to touch this host's real volumes.
 #
 # Known prerequisite gaps, surfaced loudly rather than silently skipped:
 #   - Vault snapshotting needs an authenticated `VAULT_TOKEN` with
@@ -81,6 +83,46 @@ if compose exec -T postgres pg_dump -Fc -U "$POSTGRES_SUPERUSER" -d "$POSTGRES_D
   log "Postgres dump OK ($(du -h "$WORKDIR/postgres.dump" | cut -f1))"
 else
   log "ERROR: pg_dump failed."
+  ok=false
+fi
+
+# ---------- 1b. Row-count manifest (ops-hardening: restore-verify.sh needs this) ----------
+# "An untested backup is not a backup" (this file's own header, above) —
+# `restore-verify.sh` proves a restore by comparing restored row counts
+# against SOMETHING recorded at backup time; without this, all it could
+# check was "pg_restore exited 0", which does not catch a restore that
+# silently drops rows. Exact `count(*)` per base table, not
+# `pg_stat_user_tables`'s `n_live_tup` estimate — this system's data
+# volume is small enough that exact counts cost nothing, and an estimate
+# would let a real row-loss slip through as "close enough".
+log "Generating Postgres row-count manifest..."
+MANIFEST="$WORKDIR/manifest.json"
+if tables=$(compose exec -T postgres psql -U "$POSTGRES_SUPERUSER" -d "$POSTGRES_DB" -Atc "
+    SELECT table_schema || '.' || table_name
+    FROM information_schema.tables
+    WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema')
+    ORDER BY 1
+  "); then
+  {
+    printf '{"generated_at":"%s","tables":[' "$STAMP"
+    first=true
+    while IFS= read -r qualified; do
+      [ -z "$qualified" ] && continue
+      schema="${qualified%%.*}"
+      tbl="${qualified#*.}"
+      count=$(compose exec -T postgres psql -U "$POSTGRES_SUPERUSER" -d "$POSTGRES_DB" -Atc \
+        "SELECT count(*) FROM \"${schema}\".\"${tbl}\"" 2>/dev/null || echo -1)
+      [ "$first" = true ] || printf ','
+      first=false
+      printf '{"schema":"%s","table":"%s","row_count":%s}' "$schema" "$tbl" "$count"
+    done <<<"$tables"
+    printf ']}'
+  } >"$MANIFEST"
+  table_count=$(grep -o '"table"' "$MANIFEST" | wc -l | tr -d ' ')
+  log "Manifest OK (${table_count} tables)"
+else
+  log "WARNING: could not enumerate tables for the row-count manifest — restore-verify.sh will have nothing to compare row counts against for this archive."
+  printf '{"generated_at":"%s","tables":[],"error":"table enumeration failed"}' "$STAMP" >"$MANIFEST"
   ok=false
 fi
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=Notify the configured alert channel that gadonghr-backup.service failed
+# Triggered exclusively by gadonghr-backup.service's OnFailure= — never
+# enabled/started directly, and never run on a timer of its own.
+
+[Service]
+Type=oneshot
+EnvironmentFile=-__GADONG_DEPLOY_DIR__/.env
+ExecStart=__GADONG_DEPLOY_DIR__/scripts/gadonghr-alert.sh CRIT backup-failed "gadonghr-backup.service failed - see 'journalctl -u gadonghr-backup.service -n 100' on gadonghr-prod for the transcript. An untested/incomplete backup is not a backup (Runbook Sec.3)."

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run gadonghr-backup.service nightly (Runbook Sec.3: RPO <= 24h)
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
