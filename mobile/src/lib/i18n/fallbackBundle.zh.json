@@ -1,0 +1,278 @@
+{
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "submit": "提交",
+    "back": "返回",
+    "next": "下一步",
+    "search": "搜索",
+    "loading": "加载中…",
+    "error": "出现错误",
+    "success": "成功",
+    "yes": "是",
+    "no": "否",
+    "confirm": "确认",
+    "delete": "删除",
+    "edit": "编辑",
+    "view": "查看",
+    "close": "关闭",
+    "required_field": "此项为必填项"
+  },
+  "auth": {
+    "login": {
+      "title": "登录",
+      "username": "用户名",
+      "password": "密码",
+      "submit": "登录",
+      "statement": "打卡、请假、查看工资条——都在这一个系统里完成。",
+      "footer": "这是 {host} 的登录页面。",
+      "error": {
+        "invalid_credentials": "用户名或密码错误"
+      }
+    },
+    "logout": "退出登录",
+    "session": {
+      "expired": "您的登录已过期，请重新登录。"
+    },
+    "forgot_password": "忘记密码？"
+  },
+  "leave": {
+    "request": {
+      "title": "请假申请",
+      "submit": "提交请假申请",
+      "reason": "事由",
+      "start_date": "开始日期",
+      "end_date": "结束日期"
+    },
+    "balance": {
+      "title": "假期余额"
+    },
+    "type": {
+      "annual": "年假",
+      "sick": "病假",
+      "personal": "事假",
+      "maternity": "产假",
+      "paternity": "陪产假",
+      "infant_care": "育儿假"
+    },
+    "approval": {
+      "approve": "批准",
+      "reject": "驳回"
+    },
+    "status": {
+      "pending": "待处理",
+      "approved": "已批准",
+      "rejected": "已驳回"
+    }
+  },
+  "claims": {
+    "request": {
+      "title": "费用报销",
+      "submit": "提交报销申请"
+    },
+    "type": {
+      "expense": "费用报销",
+      "per_diem": "出差补贴"
+    },
+    "status": {
+      "pending": "待处理",
+      "approved": "已批准",
+      "rejected": "已驳回"
+    },
+    "amount": {
+      "label": "金额"
+    },
+    "receipt": {
+      "upload": "上传收据"
+    }
+  },
+  "payroll": {
+    "payslip": {
+      "title": "工资条",
+      "net": "实发工资",
+      "gross": "应发工资",
+      "deductions": "扣款项",
+      "salary": "工资",
+      "overtime": "加班费",
+      "withholding_tax": "预扣税",
+      "social_security": "社会保险缴费"
+    },
+    "run": {
+      "title": "薪资核算周期",
+      "status": {
+        "draft": "草稿",
+        "approved": "已批准",
+        "paid": "已发放"
+      }
+    }
+  },
+  "attendance": {
+    "clock_in": "上班打卡",
+    "clock_out": "下班打卡",
+    "timesheet": {
+      "title": "考勤表"
+    },
+    "shift": {
+      "title": "班次"
+    },
+    "roster": {
+      "title": "排班表"
+    },
+    "overtime": {
+      "label": "加班"
+    },
+    "status": {
+      "present": "出勤",
+      "absent": "缺勤",
+      "late": "迟到"
+    }
+  },
+  "onboarding": {
+    "title": "入职",
+    "welcome": "欢迎加入团队",
+    "checklist": {
+      "title": "入职清单"
+    },
+    "document": {
+      "upload": "上传文件"
+    },
+    "probation": {
+      "label": "试用期"
+    },
+    "start_date": "入职日期"
+  },
+  "glossary": {
+    "employee": "员工",
+    "employer": "雇主",
+    "probation": "试用期",
+    "onboarding": "入职",
+    "shift": "班次",
+    "roster": "排班表",
+    "attendance": "考勤 / 打卡",
+    "timesheet": "考勤表",
+    "overtime": "加班 / 加班费",
+    "public_holiday": "法定假日",
+    "weekly_rest_day": "每周休息日",
+    "annual_leave": "年假",
+    "sick_leave": "病假",
+    "personal_leave": "事假",
+    "maternity_leave": "产假",
+    "paternity_leave": "陪产假",
+    "infant_care_leave": "育儿假",
+    "leave_balance": "假期余额",
+    "expense_claim": "费用报销",
+    "per_diem": "出差补贴",
+    "payroll": "薪资核算",
+    "salary": "工资",
+    "payslip": "工资条",
+    "deduction": "扣款项",
+    "withholding_tax": "预扣税",
+    "social_security_fund": "社会保险基金",
+    "employee_welfare_fund": "雇员福利基金",
+    "provident_fund": "公积金",
+    "severance_pay": "遣散费/解雇补偿",
+    "pay_in_lieu_of_notice": "代通知金",
+    "consent": "同意书",
+    "personal_data": "个人数据",
+    "facial_recognition": "人脸识别"
+  },
+  "statutory": {
+    "form": {
+      "sps_1_10": "สปส.1-10",
+      "por_ngor_dor_1": "ภ.ง.ด.1",
+      "fifty_tavi": "50 ทวิ",
+      "kor_11": "กร.11"
+    }
+  },
+  "shell": {
+    "brand": "GaDongHR",
+    "brandMark": {
+      "alt": "GaDongHR 甲壳徽标",
+      "wordmarkGadong": "GaDong",
+      "wordmarkHr": "HR"
+    },
+    "nav": {
+      "statutoryRules": "法定规则",
+      "audit": "审计",
+      "documents": "文档",
+      "roles": "角色",
+      "notifications": "通知"
+    },
+    "locale": {
+      "th": "ไทย",
+      "en": "English",
+      "zh": "中文",
+      "chooseLanguage": "选择您的语言"
+    },
+    "comingSoon": {
+      "title": "即将推出",
+      "body": "此功能尚未开放。"
+    }
+  },
+  "admin": {
+    "statutoryRules": {
+      "title": "法定规则",
+      "asOfLabel": "截至日期",
+      "emptyState": "暂无法定规则。",
+      "propose": {
+        "cta": "提议新规则",
+        "title": "提议法定规则",
+        "success": "规则提议成功。",
+        "ruleKey": "规则键",
+        "value": "数值",
+        "unit": "单位",
+        "citation": "法律依据",
+        "governanceClass": "治理类别",
+        "statutoryFloor": "法定下限",
+        "effectiveFrom": "生效日期",
+        "reason": "原因",
+        "submit": "提交提议"
+      },
+      "governanceClass": {
+        "STATUTORY_FLOOR": "法定下限",
+        "STATUTORY_FIXED": "法定固定值",
+        "COMPANY_POLICY": "公司政策"
+      },
+      "status": {
+        "draft": "草稿",
+        "pending_approval": "待审批",
+        "active": "生效中",
+        "superseded": "已被取代"
+      },
+      "approve": {
+        "cta": "批准",
+        "selfProposed": "您是此规则的提议人，不能批准该规则。"
+      },
+      "floorViolation": {
+        "title": "低于法定下限",
+        "body": "{value} 低于法定下限 {floor}。"
+      },
+      "ceilingViolation": {
+        "title": "超过法定上限",
+        "body": "{value} 超过法定上限 {ceiling}。"
+      },
+      "citationSeal": {
+        "withFloor": "§ {citation} · 下限 {floor}",
+        "withCeiling": "§ {citation} · 上限 {ceiling}",
+        "plain": "§ {citation}"
+      }
+    }
+  },
+  "config": {
+    "error": {
+      "below_statutory_floor": "提议的数值低于法定下限。",
+      "above_statutory_ceiling": "提议的数值超过法定上限。",
+      "pack_signature_invalid": "配置包的签名无效。",
+      "rule_not_found": "未找到该规则。",
+      "rule_version_not_found": "未找到该规则版本。",
+      "not_a_draft": "该规则不是草稿状态。",
+      "statutory_fixed_not_editable": "法定固定值规则不可编辑。"
+    }
+  },
+  "authz": {
+    "error": {
+      "denied": "您没有执行此操作的权限。",
+      "sod_violation": "根据职责分离原则，此操作需要由其他审批人处理。"
+    }
+  }
+}

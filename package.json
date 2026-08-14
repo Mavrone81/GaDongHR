@@ -6,9 +6,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -b && pnpm --filter @gadong/mobile typecheck",
     "lint": "eslint .",
     "test": "jest && pnpm --filter @gadong/web test:run",
+    "test:mobile": "pnpm --filter @gadong/mobile test",
     "test:e2e": "ts-node test/e2e/run.ts",
     "test:realbroker": "jest --config jest.realbroker.config.js",
     "build": "pnpm -r build"
@@ -28,5 +29,17 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.8.1"
+  },
+  "pnpm": {
+    "packageExtensions": {
+      "react-router-dom": {
+        "peerDependencies": { "@types/react": "*" },
+        "peerDependenciesMeta": { "@types/react": { "optional": true } }
+      },
+      "react-router": {
+        "peerDependencies": { "@types/react": "*" },
+        "peerDependenciesMeta": { "@types/react": { "optional": true } }
+      }
+    }
   }
 }

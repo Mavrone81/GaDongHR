@@ -13,5 +13,31 @@
     "forceConsistentCasingInFileNames": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true
-  }
+  },
+  // Every extending tsconfig (packages/*, services/*) already declares its
+  // own "include"/"exclude" (TS `extends` REPLACES array-valued options
+  // rather than merging them, so neither field below has any effect
+  // there). This "include"/"exclude" pair exists for the one consumer
+  // that uses tsconfig.base.json DIRECTLY, with no config of its own:
+  // `jest.config.js`'s ts-jest transform (mirrors that file's own
+  // `roots` array).
+  //
+  // Both fields are required together — verified empirically, not just
+  // per the TSConfig docs: adding `mobile/` (a new pnpm workspace member,
+  // depending on `expo-modules-core`, whose ambient `global.d.ts`
+  // augments the GLOBAL `NodeJS.ProcessEnv` with a required `NODE_ENV`
+  // field) broke `packages/kernel/src/{version,health}.test.ts`'s
+  // unrelated `as NodeJS.ProcessEnv` casts, with zero code change in
+  // kernel itself, the moment `mobile/node_modules` existed on disk.
+  // Adding `"exclude": ["**/node_modules/**"]` ALONE (no "include") did
+  // NOT fix it — confirmed via `tsc --listFilesOnly`, which still listed
+  // `mobile/node_modules/.../expo-modules-core/.../global.d.ts` as part
+  // of the compile regardless. Only pairing an explicit "include" (so the
+  // default `["**/*"]` — the thing "exclude" filters — is never relied on
+  // at all) WITH "exclude" (so nothing under any node_modules, however
+  // deeply nested inside this monorepo's shared pnpm store, is a
+  // candidate root file) reliably keeps ts-jest's shared TypeScript
+  // program free of a sibling workspace's unrelated ambient globals.
+  "include": ["packages/**/*.ts", "services/**/*.ts", "web/**/*.ts", "deploy/**/*.ts"],
+  "exclude": ["**/node_modules/**"]
 }

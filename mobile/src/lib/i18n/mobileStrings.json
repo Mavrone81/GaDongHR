@@ -1,0 +1,269 @@
+{
+  "th": {
+    "mobile": {
+      "nav": {
+        "home": "หน้าหลัก",
+        "timesheet": "ใบลงเวลา",
+        "leave": "การลา",
+        "payslip": "สลิปเงินเดือน",
+        "settings": "ตั้งค่า"
+      },
+      "home": {
+        "title": "วันนี้",
+        "todayStatus": "สถานะวันนี้",
+        "weekHours": "ชั่วโมงทำงานสัปดาห์นี้",
+        "punchSite": "รหัสสถานที่",
+        "punchPin": "รหัส PIN",
+        "punchInCta": "ลงเวลาเข้างาน",
+        "punchOutCta": "ลงเวลาออกงาน",
+        "punchSuccess": "บันทึกเวลาเรียบร้อยแล้ว",
+        "punchError": "ลงเวลาไม่สำเร็จ — กรุณาตรวจสอบรหัส PIN",
+        "noDataToday": "ยังไม่มีการลงเวลาวันนี้"
+      },
+      "timesheet": {
+        "title": "ใบลงเวลาทำงาน",
+        "periodStatus": "สถานะรอบเวลา",
+        "periodOpen": "เปิดอยู่",
+        "periodLocked": "ปิดรอบแล้ว",
+        "periodUnavailable": "ไม่สามารถแสดงสถานะรอบเวลาได้",
+        "otBreakdown": "รายละเอียดค่าล่วงเวลา",
+        "ot15x": "โอที 1.5 เท่า",
+        "ot2x": "โอที 2 เท่า",
+        "ot3x": "โอที 3 เท่า",
+        "ot15xHours": "โอที 1.5 เท่า {hours} ชม.",
+        "ot2xHours": "โอที 2 เท่า {hours} ชม.",
+        "ot3xHours": "โอที 3 เท่า {hours} ชม.",
+        "workedHours": "ชั่วโมงทำงาน",
+        "empty": "ไม่พบข้อมูลลงเวลาในช่วงนี้"
+      },
+      "leave": {
+        "title": "การลา",
+        "balances": "วันลาคงเหลือ",
+        "entitled": "สิทธิ์ทั้งหมด",
+        "used": "ใช้ไปแล้ว",
+        "remaining": "คงเหลือ",
+        "history": "ประวัติคำขอลา",
+        "newRequest": "ยื่นคำขอลาใหม่",
+        "halfDay": "ลาครึ่งวัน",
+        "halfDayAm": "ครึ่งวันเช้า",
+        "halfDayPm": "ครึ่งวันบ่าย",
+        "selectType": "เลือกประเภทการลา",
+        "submitSuccess": "ส่งคำขอลาเรียบร้อยแล้ว",
+        "submitError": "ส่งคำขอลาไม่สำเร็จ",
+        "empty": "ยังไม่มีคำขอลา",
+        "unavailable": "ระบบการลายังไม่เปิดให้บริการในสภาพแวดล้อมนี้"
+      },
+      "payslip": {
+        "title": "สลิปเงินเดือน",
+        "list": "รายการสลิปเงินเดือน",
+        "period": "รอบเงินเดือน",
+        "payDate": "วันที่จ่าย",
+        "viewDetail": "ดูรายละเอียด",
+        "pdfNote": "ไฟล์ PDF ฉบับเต็มจะพร้อมใช้งานเมื่อเชื่อมต่อกับ svc-docs",
+        "empty": "ยังไม่มีสลิปเงินเดือน"
+      },
+      "settings": {
+        "title": "ตั้งค่า",
+        "language": "ภาษา",
+        "profile": "โปรไฟล์",
+        "signOut": "ออกจากระบบ",
+        "kioskMode": "โหมดตู้ลงเวลา",
+        "kioskModeHint": "เปลี่ยนอุปกรณ์นี้เป็นตู้ลงเวลาประจำจุดเข้างาน"
+      },
+      "kiosk": {
+        "title": "ตู้ลงเวลา GaDongHR",
+        "employeeCode": "รหัสพนักงาน",
+        "pin": "รหัส PIN",
+        "punchIn": "เข้างาน",
+        "punchOut": "ออกงาน",
+        "exit": "ออกจากโหมดตู้ลงเวลา",
+        "exitAdminCode": "รหัสผู้ดูแลระบบ",
+        "exitConfirm": "ยืนยันออกจากโหมด",
+        "exitCancel": "ยกเลิก",
+        "enterHint": "แตะเพื่อลงเวลา"
+      },
+      "common": {
+        "retry": "ลองอีกครั้ง",
+        "offline": "ไม่สามารถเชื่อมต่อได้"
+      }
+    }
+  },
+  "en": {
+    "mobile": {
+      "nav": {
+        "home": "Home",
+        "timesheet": "Timesheet",
+        "leave": "Leave",
+        "payslip": "Payslip",
+        "settings": "Settings"
+      },
+      "home": {
+        "title": "Today",
+        "todayStatus": "Today's status",
+        "weekHours": "This week's hours",
+        "punchSite": "Site code",
+        "punchPin": "PIN code",
+        "punchInCta": "Punch in",
+        "punchOutCta": "Punch out",
+        "punchSuccess": "Punch recorded.",
+        "punchError": "Punch failed — check your PIN.",
+        "noDataToday": "No punches recorded yet today."
+      },
+      "timesheet": {
+        "title": "Timesheet",
+        "periodStatus": "Period status",
+        "periodOpen": "Open",
+        "periodLocked": "Locked",
+        "periodUnavailable": "Period status is not available",
+        "otBreakdown": "Overtime breakdown",
+        "ot15x": "OT 1.5x",
+        "ot2x": "OT 2x",
+        "ot3x": "OT 3x",
+        "workedHours": "Hours worked",
+        "empty": "No timesheet records for this range.",
+        "ot15xHours": "OT 1.5x {hours}h",
+        "ot2xHours": "OT 2x {hours}h",
+        "ot3xHours": "OT 3x {hours}h"
+      },
+      "leave": {
+        "title": "Leave",
+        "balances": "Leave balances",
+        "entitled": "Entitled",
+        "used": "Used",
+        "remaining": "Remaining",
+        "history": "Request history",
+        "newRequest": "New leave request",
+        "halfDay": "Half day",
+        "halfDayAm": "Morning half",
+        "halfDayPm": "Afternoon half",
+        "selectType": "Select leave type",
+        "submitSuccess": "Leave request submitted.",
+        "submitError": "Could not submit the leave request.",
+        "empty": "No leave requests yet.",
+        "unavailable": "Leave is not enabled in this environment yet."
+      },
+      "payslip": {
+        "title": "Payslip",
+        "list": "Payslips",
+        "period": "Period",
+        "payDate": "Pay date",
+        "viewDetail": "View detail",
+        "pdfNote": "The full PDF is available once svc-docs is connected.",
+        "empty": "No payslips yet."
+      },
+      "settings": {
+        "title": "Settings",
+        "language": "Language",
+        "profile": "Profile",
+        "signOut": "Sign out",
+        "kioskMode": "Kiosk mode",
+        "kioskModeHint": "Turn this device into an entrance attendance kiosk."
+      },
+      "kiosk": {
+        "title": "GaDongHR Kiosk",
+        "employeeCode": "Employee code",
+        "pin": "PIN",
+        "punchIn": "Clock in",
+        "punchOut": "Clock out",
+        "exit": "Exit kiosk mode",
+        "exitAdminCode": "Admin code",
+        "exitConfirm": "Confirm exit",
+        "exitCancel": "Cancel",
+        "enterHint": "Tap to punch"
+      },
+      "common": {
+        "retry": "Retry",
+        "offline": "Could not connect"
+      }
+    }
+  },
+  "zh": {
+    "mobile": {
+      "nav": {
+        "home": "首页",
+        "timesheet": "工时单",
+        "leave": "请假",
+        "payslip": "工资条",
+        "settings": "设置"
+      },
+      "home": {
+        "title": "今天",
+        "todayStatus": "今日状态",
+        "weekHours": "本周工时",
+        "punchSite": "地点代码",
+        "punchPin": "PIN 码",
+        "punchInCta": "上班打卡",
+        "punchOutCta": "下班打卡",
+        "punchSuccess": "打卡成功。",
+        "punchError": "打卡失败 — 请检查 PIN 码。",
+        "noDataToday": "今天还没有打卡记录。"
+      },
+      "timesheet": {
+        "title": "工时单",
+        "periodStatus": "周期状态",
+        "periodOpen": "未结算",
+        "periodLocked": "已锁定",
+        "periodUnavailable": "无法显示周期状态",
+        "otBreakdown": "加班明细",
+        "ot15x": "1.5 倍加班",
+        "ot2x": "2 倍加班",
+        "ot3x": "3 倍加班",
+        "workedHours": "工作时长",
+        "empty": "此区间没有工时记录。",
+        "ot15xHours": "1.5倍加班 {hours} 小时",
+        "ot2xHours": "2倍加班 {hours} 小时",
+        "ot3xHours": "3倍加班 {hours} 小时"
+      },
+      "leave": {
+        "title": "请假",
+        "balances": "剩余假期",
+        "entitled": "应有额度",
+        "used": "已使用",
+        "remaining": "剩余",
+        "history": "申请记录",
+        "newRequest": "新建请假申请",
+        "halfDay": "半天假",
+        "halfDayAm": "上午半天",
+        "halfDayPm": "下午半天",
+        "selectType": "选择假期类型",
+        "submitSuccess": "请假申请已提交。",
+        "submitError": "请假申请提交失败。",
+        "empty": "暂无请假申请。",
+        "unavailable": "此环境尚未启用请假功能。"
+      },
+      "payslip": {
+        "title": "工资条",
+        "list": "工资条列表",
+        "period": "周期",
+        "payDate": "发薪日",
+        "viewDetail": "查看详情",
+        "pdfNote": "连接 svc-docs 后可查看完整 PDF。",
+        "empty": "暂无工资条。"
+      },
+      "settings": {
+        "title": "设置",
+        "language": "语言",
+        "profile": "个人资料",
+        "signOut": "退出登录",
+        "kioskMode": "考勤机模式",
+        "kioskModeHint": "将此设备切换为入口考勤机。"
+      },
+      "kiosk": {
+        "title": "GaDongHR 考勤机",
+        "employeeCode": "员工代码",
+        "pin": "PIN 码",
+        "punchIn": "上班打卡",
+        "punchOut": "下班打卡",
+        "exit": "退出考勤机模式",
+        "exitAdminCode": "管理员代码",
+        "exitConfirm": "确认退出",
+        "exitCancel": "取消",
+        "enterHint": "点击打卡"
+      },
+      "common": {
+        "retry": "重试",
+        "offline": "无法连接"
+      }
+    }
+  }
+}

@@ -1,0 +1,278 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "submit": "Submit",
+    "back": "Back",
+    "next": "Next",
+    "search": "Search",
+    "loading": "Loading…",
+    "error": "Something went wrong",
+    "success": "Success",
+    "yes": "Yes",
+    "no": "No",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "edit": "Edit",
+    "view": "View",
+    "close": "Close",
+    "required_field": "This field is required"
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in",
+      "username": "Username",
+      "password": "Password",
+      "submit": "Sign in",
+      "statement": "Clock in, request leave and see your payslip — all in one place.",
+      "footer": "This is the sign-in for {host}.",
+      "error": {
+        "invalid_credentials": "Incorrect username or password"
+      }
+    },
+    "logout": "Sign out",
+    "session": {
+      "expired": "Your session has expired. Please sign in again."
+    },
+    "forgot_password": "Forgot your password?"
+  },
+  "leave": {
+    "request": {
+      "title": "Leave request",
+      "submit": "Submit leave request",
+      "reason": "Reason",
+      "start_date": "Start date",
+      "end_date": "End date"
+    },
+    "balance": {
+      "title": "Leave balance"
+    },
+    "type": {
+      "annual": "Annual leave",
+      "sick": "Sick leave",
+      "personal": "Personal leave",
+      "maternity": "Maternity leave",
+      "paternity": "Paternity leave",
+      "infant_care": "Infant-care leave"
+    },
+    "approval": {
+      "approve": "Approve",
+      "reject": "Reject"
+    },
+    "status": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    }
+  },
+  "claims": {
+    "request": {
+      "title": "Expense claim",
+      "submit": "Submit claim"
+    },
+    "type": {
+      "expense": "Expense claim",
+      "per_diem": "Per diem"
+    },
+    "status": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    },
+    "amount": {
+      "label": "Amount"
+    },
+    "receipt": {
+      "upload": "Upload receipt"
+    }
+  },
+  "payroll": {
+    "payslip": {
+      "title": "Payslip",
+      "net": "Net pay",
+      "gross": "Gross pay",
+      "deductions": "Deductions",
+      "salary": "Salary",
+      "overtime": "Overtime pay",
+      "withholding_tax": "Withholding tax",
+      "social_security": "Social security contribution"
+    },
+    "run": {
+      "title": "Payroll run",
+      "status": {
+        "draft": "Draft",
+        "approved": "Approved",
+        "paid": "Paid"
+      }
+    }
+  },
+  "attendance": {
+    "clock_in": "Clock in",
+    "clock_out": "Clock out",
+    "timesheet": {
+      "title": "Timesheet"
+    },
+    "shift": {
+      "title": "Shift"
+    },
+    "roster": {
+      "title": "Roster"
+    },
+    "overtime": {
+      "label": "Overtime"
+    },
+    "status": {
+      "present": "Present",
+      "absent": "Absent",
+      "late": "Late"
+    }
+  },
+  "onboarding": {
+    "title": "Onboarding",
+    "welcome": "Welcome to the team",
+    "checklist": {
+      "title": "Onboarding checklist"
+    },
+    "document": {
+      "upload": "Upload document"
+    },
+    "probation": {
+      "label": "Probation"
+    },
+    "start_date": "Start date"
+  },
+  "glossary": {
+    "employee": "Employee",
+    "employer": "Employer",
+    "probation": "Probation",
+    "onboarding": "Onboarding",
+    "shift": "Shift",
+    "roster": "Roster / schedule",
+    "attendance": "Attendance / clock-in",
+    "timesheet": "Timesheet",
+    "overtime": "Overtime (OT)",
+    "public_holiday": "Public holiday",
+    "weekly_rest_day": "Weekly rest day",
+    "annual_leave": "Annual leave",
+    "sick_leave": "Sick leave",
+    "personal_leave": "Personal/business leave",
+    "maternity_leave": "Maternity leave",
+    "paternity_leave": "Paternity leave",
+    "infant_care_leave": "Infant-care leave",
+    "leave_balance": "Leave balance",
+    "expense_claim": "Expense claim",
+    "per_diem": "Per diem",
+    "payroll": "Payroll",
+    "salary": "Salary / wage",
+    "payslip": "Payslip",
+    "deduction": "Deduction",
+    "withholding_tax": "Withholding tax",
+    "social_security_fund": "Social Security Fund",
+    "employee_welfare_fund": "Employee Welfare Fund",
+    "provident_fund": "Provident fund",
+    "severance_pay": "Severance pay",
+    "pay_in_lieu_of_notice": "Pay in lieu of notice",
+    "consent": "Consent",
+    "personal_data": "Personal data",
+    "facial_recognition": "Facial recognition"
+  },
+  "statutory": {
+    "form": {
+      "sps_1_10": "สปส.1-10",
+      "por_ngor_dor_1": "ภ.ง.ด.1",
+      "fifty_tavi": "50 ทวิ",
+      "kor_11": "กร.11"
+    }
+  },
+  "shell": {
+    "brand": "GaDongHR",
+    "brandMark": {
+      "alt": "GaDongHR shell emblem",
+      "wordmarkGadong": "GaDong",
+      "wordmarkHr": "HR"
+    },
+    "nav": {
+      "statutoryRules": "Statutory Rules",
+      "audit": "Audit",
+      "documents": "Documents",
+      "roles": "Roles",
+      "notifications": "Notifications"
+    },
+    "locale": {
+      "th": "ไทย",
+      "en": "English",
+      "zh": "中文",
+      "chooseLanguage": "Choose your language"
+    },
+    "comingSoon": {
+      "title": "Coming soon",
+      "body": "This feature is not available yet."
+    }
+  },
+  "admin": {
+    "statutoryRules": {
+      "title": "Statutory Rules",
+      "asOfLabel": "As of date",
+      "emptyState": "No statutory rules yet.",
+      "propose": {
+        "cta": "Propose rule",
+        "title": "Propose a statutory rule",
+        "success": "Rule proposed successfully.",
+        "ruleKey": "Rule key",
+        "value": "Value",
+        "unit": "Unit",
+        "citation": "Citation",
+        "governanceClass": "Governance class",
+        "statutoryFloor": "Statutory floor",
+        "effectiveFrom": "Effective from",
+        "reason": "Reason",
+        "submit": "Submit proposal"
+      },
+      "governanceClass": {
+        "STATUTORY_FLOOR": "Statutory floor",
+        "STATUTORY_FIXED": "Statutory fixed",
+        "COMPANY_POLICY": "Company policy"
+      },
+      "status": {
+        "draft": "Draft",
+        "pending_approval": "Pending approval",
+        "active": "Active",
+        "superseded": "Superseded"
+      },
+      "approve": {
+        "cta": "Approve",
+        "selfProposed": "You proposed this rule, so you cannot approve it."
+      },
+      "floorViolation": {
+        "title": "Below statutory floor",
+        "body": "{value} is below the statutory floor of {floor}."
+      },
+      "ceilingViolation": {
+        "title": "Above statutory ceiling",
+        "body": "{value} is above the statutory ceiling of {ceiling}."
+      },
+      "citationSeal": {
+        "withFloor": "§ {citation} · floor {floor}",
+        "withCeiling": "§ {citation} · ceiling {ceiling}",
+        "plain": "§ {citation}"
+      }
+    }
+  },
+  "config": {
+    "error": {
+      "below_statutory_floor": "The proposed value is below the statutory floor.",
+      "above_statutory_ceiling": "The proposed value is above the statutory ceiling.",
+      "pack_signature_invalid": "The configuration pack signature is invalid.",
+      "rule_not_found": "Rule not found.",
+      "rule_version_not_found": "Rule version not found.",
+      "not_a_draft": "This rule is not a draft.",
+      "statutory_fixed_not_editable": "A statutory-fixed rule cannot be edited."
+    }
+  },
+  "authz": {
+    "error": {
+      "denied": "You do not have permission to perform this action.",
+      "sod_violation": "This action requires a different approver due to separation of duties."
+    }
+  }
+}

@@ -15,6 +15,10 @@ module.exports = [
       // lint, exactly like `dist/` above.
       'web/.tsbuild/**',
       'web/public/**',
+      // Expo's local dev-server cache (bundler cache, generated
+      // `expo-env.d.ts`) — not source, and `mobile/.gitignore` already
+      // keeps it out of version control, same treatment as `web/.tsbuild/**`.
+      'mobile/.expo/**',
     ],
   },
   js.configs.recommended,
@@ -29,8 +33,11 @@ module.exports = [
   {
     // Root tooling configs (eslint.config.js, jest.config.js) are CommonJS,
     // evaluated by Node directly rather than bundled — they need the
-    // CommonJS globals that the flat-config defaults don't provide.
-    files: ['*.config.js', 'test/e2e/*.config.js'],
+    // CommonJS globals that the flat-config defaults don't provide. Same
+    // treatment for mobile's own tooling configs (babel.config.js,
+    // jest.config.js, metro.config.js) — Metro/Babel/Jest all load these
+    // with Node's CommonJS `require`, never through Metro's own bundler.
+    files: ['*.config.js', 'test/e2e/*.config.js', 'mobile/*.config.js'],
     languageOptions: {
       sourceType: 'commonjs',
       globals: {
