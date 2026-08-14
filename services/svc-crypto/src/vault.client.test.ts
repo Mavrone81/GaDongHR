@@ -4,13 +4,23 @@ import type { VaultTransport, VaultResponse } from './vault.client'
 /**
  * A realistic Vault Transit `datakey/plaintext` ciphertext, built the same way
  * Vault itself builds one for `aes256-gcm96` (Vault's default transit key
- * type): `base64(version_byte(1) ‖ nonce(12) ‖ ciphertext(32) ‖ tag(16))`,
- * prefixed with the literal `vault:v1:`. 1 + 12 + 32 + 16 = 61 raw bytes.
- * This is what pins `wrappedDek`'s byte length — not a remembered number,
- * but the shape of an actual Vault Transit response.
+ * type): `base64(nonce(12) ‖ ciphertext(32) ‖ tag(16))`, prefixed with the
+ * literal `vault:v1:` — the `v1` in that prefix IS the version marker;
+ * there is no additional version byte inside the base64 payload.
+ * 12 + 32 + 16 = 60 raw bytes → base64 80 → 89 with the prefix.
+ *
+ * History, kept as a warning: an earlier revision of this fixture put a
+ * version byte inside the payload (61 raw → 93 total) and described itself
+ * as "the shape of an actual Vault Transit response" — but it was built
+ * from the same untested assumption the production floor was, so the two
+ * agreed with each other and both were wrong. Nothing checked a REAL Vault
+ * until the e2e suite ran against Vault 1.17 and every wrapped DEK came
+ * back 89 bytes, making `MIN_CIPHERTEXT_BYTES = 125` reject genuine
+ * 121-byte envelopes (empty-plaintext fields, e.g. `sso_number: ''`).
+ * A fixture can only pin what was actually captured from the real system.
  */
 function realisticWrappedDekCiphertext(): string {
-  const raw = Buffer.alloc(1 + 12 + 32 + 16, 0x42) // version + nonce + ct(32) + tag(16)
+  const raw = Buffer.alloc(12 + 32 + 16, 0x42) // nonce + ct(32) + tag(16) — no in-payload version byte
   return `vault:v1:${raw.toString('base64')}`
 }
 
@@ -47,7 +57,9 @@ describe('VaultClient.generateDataKey', () => {
 
     expect(plaintextDek.length).toBe(32)
     // This is the number Task 6 §4 requires: pinned by this test, not by a comment.
-    expect(wrappedDek.length).toBe(93)
+    // 89 = `vault:v1:` (9) + base64(nonce ‖ ct ‖ tag = 60 bytes) (80); measured
+    // against real Vault 1.17 — see this file's header for how 93 got here first.
+    expect(wrappedDek.length).toBe(89)
     expect(wrappedDek.toString('utf8')).toBe(wrappedCiphertext)
   })
 

@@ -20,21 +20,27 @@ export type { CryptoTransport, EncryptRequest, FieldClass } from './types'
  * no deployed data anywhere yet — free today, a migration later.
  *
  * `svc-crypto` (Task 6) wraps each 32-byte DEK with Vault Transit's `datakey/plaintext`
- * operation, whose ciphertext is the string `vault:v1:` + base64(version(1) ‖ nonce(12)
- * ‖ ct(32) ‖ tag(16)) — 9 + base64(61 bytes) = 9 + 84 = 93 ASCII bytes. That 93-byte
- * figure is pinned by `services/svc-crypto/src/vault.client.test.ts`
- * ("pins the wrappedDek byte length from a realistic Vault response"), not by memory,
- * per Task 6 brief §4. So the true floor is:
+ * operation, whose ciphertext is the string `vault:v1:` + base64(nonce(12) ‖ ct(32)
+ * ‖ tag(16)) — the version marker is the `vault:v1:` string prefix itself; there is NO
+ * additional version byte inside the base64 payload. 60 raw bytes → base64 80 (no
+ * padding) → +9 prefix = **89** ASCII bytes. An earlier revision of this comment (and
+ * the 125 floor derived from it) double-counted the version as an extra payload byte
+ * (61 → 84 → "93") — an assumption that was never tested against a real Vault until
+ * the e2e suite ran against Vault 1.17 and every genuinely-wrapped ciphertext for an
+ * EMPTY plaintext field (e.g. an employee hired with `sso_number: ''`) came back
+ * 121 bytes and was rejected as "too short to be real". Measured, not remembered:
+ * `services/svc-crypto/src/vault.client.test.ts` pins the 89-byte figure from a real
+ * Vault 1.17 response capture. So the true floor is:
  *
- *   1 (version) + 1 (fieldClass) + 2 (length prefix) + 93 (wrappedDEK) + 12 (nonce)
- *     + 0 (empty ct) + 16 (tag) = 125
+ *   1 (version) + 1 (fieldClass) + 2 (length prefix) + 89 (wrappedDEK) + 12 (nonce)
+ *     + 0 (empty ct) + 16 (tag) = 121
  *
  * Anything shorter — including an empty string — cannot be genuine ciphertext under
  * this wrap format, so it must never be written to a `bytea` column believing it is.
  * Kernel and `svc-crypto` must move this floor together: a mismatch means one side
  * writes envelopes the other rejects (roadmap "Contracts every phase depends on").
  */
-const MIN_CIPHERTEXT_BYTES = 125
+const MIN_CIPHERTEXT_BYTES = 121
 
 /**
  * A blind index is `HMAC-SHA256(k_class, normalise(plaintext))`, which is invariantly
