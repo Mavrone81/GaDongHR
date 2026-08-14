@@ -5,6 +5,20 @@ on:
     branches: [main, 'phase-*']
   pull_request:
 
+# The one branch `auto-deploy-gadonghr.sh` actually tracks in production
+# right now (its own `GADONG_DEPLOY_BRANCH`, set in the gadonghr-prod
+# crontab — see that script's header comment). Gates `build-images`'
+# mutable `:stable` GHCR alias below: every push still gets its immutable
+# `:<sha>` tag, but `:stable` — the tag a human running `docker compose`
+# by hand without an explicit `GADONG_VERSION` would pull — only ever
+# moves for a push to THIS branch, so a feature/phase branch build can
+# never overwrite the tag production falls back to. Not read from a
+# shared file with the deploy script (GitHub Actions can't read the
+# droplet's crontab) — when the tracked branch changes, update both by
+# hand in the same commit.
+env:
+  GADONG_DEPLOY_BRANCH: phase-1-platform-services
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -160,7 +174,17 @@ jobs:
             --env-file .env.eventbus-test.local down -v
 
   # Task 15: build every service image (all fifteen services/* Dockerfiles)
-  # plus `web`, tag each with the commit sha and `main`, and push to GHCR.
+  # plus `web`, tag each with the commit sha, and push to GHCR. Every leg
+  # also gets the mutable `:stable` alias, but ONLY when the push is to
+  # `env.GADONG_DEPLOY_BRANCH` (the branch production actually tracks) —
+  # this used to be an unconditional `:main` tag on every branch's build,
+  # so a feature-branch push would silently overwrite the tag production
+  # falls back to pulling. `auto-deploy-gadonghr.sh` itself never depends
+  # on `:stable` (it always resolves and exports an exact `GADONG_VERSION`
+  # sha from `refs/ci-pass/<sha>` before pulling); `:stable` exists only as
+  # the safe fallback `docker-compose.prod.yml`'s `${GADONG_VERSION:-stable}`
+  # parses to when a human runs `docker compose` by hand with no
+  # `GADONG_VERSION` set.
   # Only runs on a real push to main/phase-* (the top-level `on:` already
   # restricts push's `branches:`, but `pull_request:` has no branch filter
   # of its own, so this job's `if:` excludes pull_request events
@@ -244,9 +268,17 @@ jobs:
           build-args: |
             GADONG_BUILD_SHA=${{ github.sha }}
             ${{ matrix.buildArgs }}
+          # The `:stable` line evaluates to an empty string (dropped by
+          # build-push-action's multiline-input parsing, same as
+          # `matrix.buildArgs` above) on any push that is NOT to
+          # `env.GADONG_DEPLOY_BRANCH` — e.g. a `phase-*` feature branch —
+          # so that push publishes `:<sha>` only and never touches
+          # `:stable`. `github.ref_name`, not `github.ref`: `ref` is the
+          # full `refs/heads/<branch>` form, `ref_name` is the bare branch
+          # name `GADONG_DEPLOY_BRANCH` is written in.
           tags: |
             ghcr.io/mavrone81/gadonghr-${{ matrix.name }}:${{ github.sha }}
-            ghcr.io/mavrone81/gadonghr-${{ matrix.name }}:main
+            ${{ github.ref_name == env.GADONG_DEPLOY_BRANCH && format('ghcr.io/mavrone81/gadonghr-{0}:stable', matrix.name) || '' }}
           # Scoped per image — sixteen images from one pnpm monorepo share
           # a lot of `pnpm install` layers, but a single unscoped cache key
           # would let the last matrix leg to finish evict every other

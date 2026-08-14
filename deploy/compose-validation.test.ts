@@ -28,6 +28,11 @@ interface ComposeVolume {
   target?: string
 }
 
+interface ComposeLogging {
+  driver?: string
+  options?: Record<string, string>
+}
+
 interface ComposeService {
   container_name?: string
   ports?: unknown[]
@@ -40,6 +45,7 @@ interface ComposeService {
   cap_add?: string[]
   environment?: Record<string, string>
   volumes?: ComposeVolume[]
+  logging?: ComposeLogging
 }
 
 interface ComposeFileSecret {
@@ -238,6 +244,29 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
   test('every service declares a healthcheck', () => {
     for (const [name, svc] of Object.entries(config.services)) {
       expect([name, svc.healthcheck != null]).toEqual([name, true])
+    }
+  })
+
+  /**
+   * ops-hardening: no service had a `logging:` block at all before this
+   * task — docker's default json-file driver is unbounded, and on an
+   * 80 GB fixed disk with no rotation a single noisy or crash-looping
+   * container can fill it. Asserted per-service (not just "the anchor
+   * exists") so a future service that bypasses `x-node-defaults` (or
+   * overrides `logging:` locally without bounds) is still caught — the
+   * anchor is HOW every service gets this today, not what is actually
+   * being guaranteed here.
+   */
+  test('every service declares a bounded json-file logging driver (max-size + max-file), not the unbounded default', () => {
+    for (const [name, svc] of Object.entries(config.services)) {
+      expect([name, svc.logging?.driver]).toEqual([name, 'json-file'])
+      const options = svc.logging?.options ?? {}
+      expect([name, options['max-size']]).toEqual([name, expect.any(String)])
+      expect([name, options['max-file']]).toEqual([name, expect.any(String)])
+      // A present-but-empty/zero bound would defeat the point silently.
+      expect([name, options['max-size']]).not.toEqual([name, ''])
+      expect([name, Number(options['max-file'])]).toEqual([name, expect.any(Number)])
+      expect(Number(options['max-file'])).toBeGreaterThan(0)
     }
   })
 
@@ -662,6 +691,69 @@ describe('vault.hcl and docker-compose.yml agree on mlock / no-new-privileges', 
   })
 })
 
+/**
+ * ops-hardening: the vault healthcheck used to be `vault status ... ||
+ * true` — ALWAYS exit 0, so a SEALED vault (every S2/S3 op 503ing) and a
+ * genuinely crashed/unreachable vault both reported Docker-healthy
+ * identically. The fix keeps the legitimate part of that intent (sealed
+ * must not block `depends_on: condition: service_healthy` forever after
+ * a reboot, and must not look like a crash-loop) while closing the part
+ * that was a real blind spot (an actual crash was hidden too). These
+ * tests assert the SHAPE of that fix directly against the healthcheck
+ * source, not just "it still passes `docker compose config`" — a future
+ * edit that reintroduces a blanket `|| true` (or removes the sealed
+ * branch) would otherwise still show a green suite.
+ */
+describe('vault healthcheck distinguishes sealed from crashed (ops-hardening)', () => {
+  let config: ComposeConfig
+
+  beforeAll(() => {
+    config = runComposeConfig('docker-compose.yml', 'docker-compose.prod.yml')
+  })
+
+  function vaultHealthTest(): string {
+    const test = config.services.vault?.healthcheck?.test ?? []
+    // ["CMD-SHELL", "<script>"] — the script is the second element.
+    return test[1] ?? ''
+  }
+
+  test('does not blanket-swallow every exit code with `|| true`', () => {
+    expect(vaultHealthTest()).not.toMatch(/\|\|\s*true\s*$/)
+  })
+
+  /** Case-arms are `;;`-terminated — split on that so each arm's own body is checked in isolation. */
+  function caseArms(script: string): string[] {
+    return script.split(';;')
+  }
+
+  test('exit 2 (sealed) is treated as healthy but is labeled distinctly from exit 0 (unsealed)', () => {
+    const script = vaultHealthTest()
+    const sealedArm = caseArms(script).find((arm) => /^\s*2\)/.test(arm.trim()) || /2\)/.test(arm))
+    expect(sealedArm).toBeDefined()
+    expect(sealedArm).toMatch(/exit 0/)
+    expect(script).toMatch(/VAULT_SEALED/)
+    expect(script).toMatch(/VAULT_UNSEALED/)
+  })
+
+  test('any other exit code (a real crash) fails the healthcheck for real, not silently', () => {
+    const script = vaultHealthTest()
+    // The catch-all case-arm (`*)`) must end in `exit 1`, i.e. genuinely
+    // unhealthy at the Docker level — the one behavior `|| true` removed.
+    const catchAllArm = caseArms(script).find((arm) => /\*\)/.test(arm))
+    expect(catchAllArm).toBeDefined()
+    expect(catchAllArm).toMatch(/exit 1/)
+  })
+
+  test('sealed is visible in the healthcheck output Docker records, not just swallowed', () => {
+    // `docker inspect`'s `State.Health.Log[].Output` captures whatever
+    // the test command prints to stdout, exit code notwithstanding — this
+    // is the mechanism that makes "sealed" observable without breaking
+    // the depends_on contract (see docker-compose.yml's comment).
+    const script = vaultHealthTest()
+    expect(script).toMatch(/echo\s+["']?VAULT_SEALED/)
+  })
+})
+
 describe('deploy/docker-compose.yml alone (local/dev/CI-build shape)', () => {
   let config: ComposeConfig
 
@@ -706,12 +798,14 @@ describe('deploy scripts are syntactically valid shell', () => {
  * SAME variable, defaulting to a tag CI actually publishes. This exists
  * because Task 15 pinned the seven platform services with
  * `${GADONG_BUILD_SHA:-latest}` while `web` alone used
- * `${GADONG_VERSION:-main}` — `GADONG_BUILD_SHA` is a build-time-only
+ * `${GADONG_VERSION:-main}` (today: `${GADONG_VERSION:-stable}`, renamed
+ * when the unconditional `:main` GHCR tag was fixed to be branch-gated —
+ * see the describe block below) — `GADONG_BUILD_SHA` is a build-time-only
  * `docker build --build-arg` (never set at deploy time, never in `.env`),
  * so all seven fell through to `:latest`, a tag
- * `.github/workflows/ci.yml`'s `build-images` matrix never pushes (it
- * only ever pushes `:<sha>` and `:main`) — and the `docker compose pull`
- * that `auto-deploy-gadonghr.sh` runs 404'd on the production droplet.
+ * `.github/workflows/ci.yml`'s `build-images` matrix never pushes — and
+ * the `docker compose pull` that `auto-deploy-gadonghr.sh` runs 404'd on
+ * the production droplet.
  *
  * `runComposeConfig` (used by the describe blocks above) is the wrong
  * tool here: `docker compose config` substitutes `${VAR:-default}` with a
@@ -729,7 +823,7 @@ describe('deploy/docker-compose.prod.yml image tag variables (raw source, cross-
     fallback: string
   }
 
-  // Matches e.g. `image: ghcr.io/mavrone81/gadonghr-svc-crypto:${GADONG_VERSION:-main}`.
+  // Matches e.g. `image: ghcr.io/mavrone81/gadonghr-svc-crypto:${GADONG_VERSION:-stable}`.
   const imageRefPattern = /image:\s*ghcr\.io\/mavrone81\/gadonghr-([\w-]+):\$\{(\w+):-([\w.-]+)\}/g
 
   function extractImageRefs(source: string): ImageRef[] {
@@ -783,11 +877,19 @@ describe('deploy/docker-compose.prod.yml image tag variables (raw source, cross-
     // The only literal (non-templated) tag CI's `build-images` matrix
     // pushes for `ghcr.io/mavrone81/gadonghr-*` images — `${{ github.sha }}`
     // is excluded because it is a CI-runtime expression, not a static
-    // string a compose fallback could ever equal.
-    const ciTagPattern = /ghcr\.io\/mavrone81\/gadonghr-\$\{\{\s*matrix\.name\s*\}\}:(\S+)/g
-    const ciTags = [...ciSource.matchAll(ciTagPattern)]
-      .map((m) => m[1] ?? '')
-      .filter((tag) => tag.length > 0 && !tag.includes('${{'))
+    // string a compose fallback could ever equal. Two shapes are read, not
+    // one: the `:<sha>` line is still a plain `ghcr.io/.../gadonghr-${{
+    // matrix.name }}:<tag>` literal, but the `:stable` alias (added when
+    // the unconditional `:main` tag was fixed to be branch-gated) is
+    // written as `format('ghcr.io/mavrone81/gadonghr-{0}:stable', ...)`
+    // inside a `${{ ... }}` conditional expression instead — so it needs
+    // its own pattern to be seen as "a tag CI publishes" at all.
+    const literalTagPattern = /ghcr\.io\/mavrone81\/gadonghr-\$\{\{\s*matrix\.name\s*\}\}:(\S+)/g
+    const formatTagPattern = /format\('ghcr\.io\/mavrone81\/gadonghr-\{0\}:([\w.-]+)'/g
+    const ciTags = [
+      ...[...ciSource.matchAll(literalTagPattern)].map((m) => m[1] ?? ''),
+      ...[...ciSource.matchAll(formatTagPattern)].map((m) => m[1] ?? ''),
+    ].filter((tag) => tag.length > 0 && !tag.includes('${{'))
     expect(ciTags.length).toBeGreaterThan(0)
     expect(ciTags).not.toContain('latest')
 
@@ -798,6 +900,23 @@ describe('deploy/docker-compose.prod.yml image tag variables (raw source, cross-
         )
       }
     }
+  })
+
+  test('the mutable alias tag is gated on a push to the branch production tracks, not published unconditionally', () => {
+    // Defect this guards: every branch's `build-images` run used to tag
+    // `:main` (now `:stable`) unconditionally, so a feature/phase branch
+    // build could silently overwrite the tag the compose fallback above —
+    // and any human running `docker compose` by hand with no
+    // `GADONG_VERSION` set — resolves to. The alias line must be
+    // conditioned on `env.GADONG_DEPLOY_BRANCH`, and `env.GADONG_DEPLOY_BRANCH`
+    // must itself be a real, non-empty branch name — an empty/undefined
+    // value would make `github.ref_name == env.GADONG_DEPLOY_BRANCH`
+    // vacuously false forever (silently NEVER publishing `:stable`, a
+    // different but still real failure mode) or, worse, vacuously true if
+    // both sides were ever empty.
+    expect(ciSource).toMatch(/github\.ref_name == env\.GADONG_DEPLOY_BRANCH/)
+    const envMatch = ciSource.match(/^\s*GADONG_DEPLOY_BRANCH:\s*(\S+)\s*$/m)
+    expect(envMatch?.[1]).toBeTruthy()
   })
 })
 

@@ -2,17 +2,35 @@
 #
 # auto-deploy-gadonghr.sh — pull-based continuous deploy for gadonghr-prod.
 #
-# Runs from cron every minute, under `flock`, e.g.:
+# Runs from cron every minute, under `flock`. Real crontab line installed
+# on gadonghr-prod (`crontab -l` as root) — the tracked branch is set here,
+# in the crontab environment, NOT hardcoded in this script, so promoting a
+# different branch to "production" later is a one-line crontab edit, not a
+# code change:
+#   GADONG_DEPLOY_BRANCH=phase-1-platform-services
 #   * * * * * /usr/bin/flock -n /var/lock/gadonghr-deploy.lock \
-#       /opt/gadonghr/deploy/scripts/auto-deploy-gadonghr.sh >>/var/log/gadonghr-deploy.log 2>&1
+#       /root/GaDongHR/deploy/scripts/auto-deploy-gadonghr.sh >>/var/log/gadonghr-deploy.log 2>&1
+#
+# /var/log/gadonghr-deploy.log rotates under /etc/logrotate.d/gadonghr-deploy
+# (installed alongside this script) — plain `>>` appends forever otherwise.
+#
+# GADONG_DEPLOY_BRANCH defaults to `main` (see Configuration below) — that
+# default is deliberately generic, NOT this repo's current reality. Today
+# production tracks `phase-1-platform-services`, so the crontab line above
+# sets it explicitly; when that branch merges to `main`, drop the crontab
+# override and the plain default takes over. `.github/workflows/ci.yml`
+# has its own, independent `GADONG_DEPLOY_BRANCH` (a workflow `env:`, used
+# to decide which pushes get the `:stable` GHCR tag) — the two are not
+# read from one shared file, so both must be updated together by hand.
 #
 # What it does, in order:
 #   1. Refuse if the disk is nearly full (df / >= 90%) — a deploy that
 #      starts and fails partway through a full disk is worse than no
 #      deploy.
-#   2. Fetch and see whether HEAD is CI-green: only a commit with a
-#      matching `refs/ci-pass/<sha>` ref is ever deployed (never an
-#      unverified commit — roadmap "Standing constraints", brief §4).
+#   2. Fetch and see whether the tracked branch's tip is CI-green: only a
+#      commit with a matching `refs/ci-pass/<sha>` ref is ever deployed
+#      (never an unverified commit — roadmap "Standing constraints", brief
+#      §4).
 #   3. Ask TWO independent questions and deploy if EITHER is yes:
 #        (a) is there new verified code since the last deploy?
 #        (b) is the stack actually running right now?
@@ -43,11 +61,20 @@
 set -euo pipefail
 
 # ---------- Configuration ----------
-DEPLOY_DIR="${GADONG_DEPLOY_DIR:-/opt/gadonghr/deploy}"
-REPO_DIR="${GADONG_REPO_DIR:-/opt/gadonghr}"
+# REPO_DIR first — everything else below defaults off it, so a single
+# `GADONG_REPO_DIR` override (e.g. for a second host, or a test checkout)
+# moves the deploy dir and state file with it instead of silently leaving
+# them pointed at the old location.
+REPO_DIR="${GADONG_REPO_DIR:-/root/GaDongHR}"
+DEPLOY_DIR="${GADONG_DEPLOY_DIR:-$REPO_DIR/deploy}"
+# The branch this host tracks. Deliberately configurable, not hardcoded
+# `main` in the logic below — see the header comment for why (this repo's
+# actual production branch today is `phase-1-platform-services`, set via
+# the crontab, not this default).
+GADONG_DEPLOY_BRANCH="${GADONG_DEPLOY_BRANCH:-main}"
 PROJECT="gadonghr"
 COMPOSE_FILES=(-f "$DEPLOY_DIR/docker-compose.yml" -f "$DEPLOY_DIR/docker-compose.prod.yml")
-STATE_FILE="${GADONG_DEPLOY_STATE:-/opt/gadonghr/.last-deployed-sha}"
+STATE_FILE="${GADONG_DEPLOY_STATE:-$REPO_DIR/.last-deployed-sha}"
 # Every platform service (brief §1) that must confirm it is running the
 # sha just deployed. Only these seven are checked — the infra containers
 # (postgres/vault/keycloak/...) carry no GADONG_BUILD_SHA of their own to
@@ -79,9 +106,9 @@ fi
 cd "$REPO_DIR"
 git fetch --quiet origin
 
-remote_sha=$(git rev-parse origin/main)
+remote_sha=$(git rev-parse "origin/${GADONG_DEPLOY_BRANCH}")
 if ! git ls-remote --exit-code origin "refs/ci-pass/${remote_sha}" >/dev/null 2>&1; then
-  log "origin/main (${remote_sha}) has no refs/ci-pass/${remote_sha} yet — not CI-verified, nothing to do."
+  log "origin/${GADONG_DEPLOY_BRANCH} (${remote_sha}) has no refs/ci-pass/${remote_sha} yet — not CI-verified, nothing to do."
   exit 0
 fi
 
@@ -138,8 +165,8 @@ fi
 # `docker build --build-arg` (CI sets it; see ci.yml's `build-images`) and
 # is never read by `compose pull` — exporting it here instead of
 # `GADONG_VERSION` was Task 15's bug: every image tag fell through to its
-# `:-main`/formerly `:-latest` default regardless of which sha was
-# CI-verified above.
+# `:-stable`/formerly `:-main`/`:-latest` default regardless of which sha
+# was CI-verified above.
 export GADONG_VERSION="$remote_sha"
 compose pull
 compose up -d --remove-orphans

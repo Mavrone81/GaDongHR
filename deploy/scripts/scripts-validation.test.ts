@@ -65,6 +65,88 @@ describe.each(SCRIPTS)('deploy/scripts/%s', (scriptName) => {
   })
 })
 
+/**
+ * Two verified defects (deploy-truth task): (1) the script defaulted to
+ * paths that don't exist on gadonghr-prod (`/opt/gadonghr`, real repo is
+ * `/root/GaDongHR`) and hardcoded `origin/main` even though production
+ * tracks `phase-1-platform-services` — so it had never once run for real,
+ * every deploy to date was manual; (2) unrelated to this script directly,
+ * but the `refs/ci-pass/<sha>` gate this script depends on is the entire
+ * safety story for defect (1)'s fix (a configurable branch is worthless
+ * if the gate it feeds into can be bypassed), so both are asserted here
+ * together, straight from the script's own source — not a copy that could
+ * drift from it.
+ */
+describe('deploy/scripts/auto-deploy-gadonghr.sh — branch configurability and the ci-pass gate', () => {
+  const contents = readFileSync(join(SCRIPTS_DIR, 'auto-deploy-gadonghr.sh'), 'utf8')
+
+  test('is syntactically valid bash (`bash -n`)', () => {
+    expect(() =>
+      execFileSync('bash', ['-n', join(SCRIPTS_DIR, 'auto-deploy-gadonghr.sh')], { stdio: 'pipe' }),
+    ).not.toThrow()
+  })
+
+  test('the tracked branch is configurable via GADONG_DEPLOY_BRANCH, not hardcoded', () => {
+    expect(contents).toMatch(/GADONG_DEPLOY_BRANCH="\$\{GADONG_DEPLOY_BRANCH:-\w+\}"/)
+  })
+
+  test('resolves the remote sha from the configured branch, never a hardcoded `origin/main`', () => {
+    expect(contents).toContain('git rev-parse "origin/${GADONG_DEPLOY_BRANCH}"')
+    // Negative check: no literal `origin/main` anywhere outside the
+    // Configuration block's own fallback default (which is a bare `main`
+    // string, not `origin/main`) — the whole point of the fix is that the
+    // branch is never spelled out at the call site.
+    expect(contents).not.toMatch(/git rev-parse origin\/main\b/)
+    expect(contents).not.toMatch(/git rev-parse "origin\/main"/)
+  })
+
+  test('REPO_DIR/DEPLOY_DIR/STATE_FILE default to the real gadonghr-prod paths, all overridable', () => {
+    expect(contents).toMatch(/REPO_DIR="\$\{GADONG_REPO_DIR:-\/root\/GaDongHR\}"/)
+    // DEPLOY_DIR and STATE_FILE derive from REPO_DIR (not a second,
+    // independently-hardcoded path) so a `GADONG_REPO_DIR` override moves
+    // both with it — the same class of drift that caused defect (1).
+    expect(contents).toMatch(/DEPLOY_DIR="\$\{GADONG_DEPLOY_DIR:-\$REPO_DIR\/deploy\}"/)
+    expect(contents).toMatch(/STATE_FILE="\$\{GADONG_DEPLOY_STATE:-\$REPO_DIR\/\.last-deployed-sha\}"/)
+    expect(contents).not.toContain('/opt/gadonghr')
+  })
+
+  test('the refs/ci-pass/<sha> gate is still load-bearing: no-ops (exit 0, no checkout) when the marker is missing', () => {
+    const gateIdx = contents.indexOf('refs/ci-pass/')
+    const checkoutIdx = contents.indexOf('git checkout --quiet')
+    const exitZeroIdx = contents.indexOf('exit 0', gateIdx)
+    expect(gateIdx).toBeGreaterThan(-1)
+    expect(checkoutIdx).toBeGreaterThan(-1)
+    // The no-op `exit 0` for a missing marker must appear, in source
+    // order, before the checkout that would move the working tree onto
+    // an unverified commit.
+    expect(exitZeroIdx).toBeGreaterThan(gateIdx)
+    expect(exitZeroIdx).toBeLessThan(checkoutIdx)
+    expect(contents).toMatch(/ls-remote --exit-code origin "refs\/ci-pass\/\$\{remote_sha\}"/)
+  })
+
+  // Executable lines only — comments legitimately mention the forbidden
+  // shapes (e.g. "NEVER `docker compose build` here") as documentation of
+  // the constraint, which would otherwise false-positive a naive search.
+  const codeLines = contents
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n')
+
+  test('GADONG_VERSION is exported from the CI-verified remote_sha, never GADONG_BUILD_SHA, before pulling', () => {
+    const exportIdx = codeLines.indexOf('export GADONG_VERSION="$remote_sha"')
+    const pullIdx = codeLines.indexOf('compose pull')
+    expect(exportIdx).toBeGreaterThan(-1)
+    expect(pullIdx).toBeGreaterThan(exportIdx)
+    expect(codeLines).not.toMatch(/export GADONG_BUILD_SHA/)
+  })
+
+  test('never runs `docker compose build` or `down -v` or `system prune --volumes` (roadmap standing constraints)', () => {
+    expect(codeLines).not.toMatch(/compose\s+build\b/)
+    expect(codeLines).not.toMatch(/down\s+-v\b/)
+    expect(codeLines).not.toMatch(/system prune[^\n]*--volumes/)
+  })
+})
+
 describe('deploy/scripts/bootstrap-admin.sh idempotency shape', () => {
   const contents = readFileSync(join(SCRIPTS_DIR, 'bootstrap-admin.sh'), 'utf8')
 

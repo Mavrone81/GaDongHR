@@ -24,9 +24,9 @@
 # (auto-deploy-gadonghr.sh sets it from `refs/ci-pass/<sha>` before
 # calling this). It is the ONE deploy-time image tag variable in this
 # file — used by all eight services, `web` included — because CI
-# (`.github/workflows/ci.yml`'s `build-images` matrix) publishes the same
-# two tags, `:<sha>` and `:main`, for every one of the sixteen images, this
-# one's own leg among them. `GADONG_BUILD_SHA` is a DIFFERENT, build-time-only
+# (`.github/workflows/ci.yml`'s `build-images` matrix) publishes an
+# immutable `:<sha>` tag for every one of the sixteen images, this one's
+# own leg among them. `GADONG_BUILD_SHA` is a DIFFERENT, build-time-only
 # variable — CI passes it to `docker build --build-arg` so `/health` can
 # report which commit an image was built from (packages/kernel/src/version.ts)
 # — it is never set at deploy time and must never appear in an `image:` tag
@@ -35,48 +35,55 @@
 # a time to `GADONG_VERSION` and left the other seven on a build-time-only
 # variable that resolved to nothing, so they all fell through to `:latest`
 # — a tag CI never publishes (see `build-images`'s `tags:` list) — and the
-# pull 404'd. The `:-main` fallback exists ONLY so this file parses in
-# CI/local validation with no `.env` present, and it is a tag CI genuinely
-# publishes on every push, unlike the old `:-latest` default; production
-# deploys always pass a real sha via `auto-deploy-gadonghr.sh`'s
-# `export GADONG_VERSION="$remote_sha"`.
+# pull 404'd. The `:-stable` fallback exists ONLY so this file parses in
+# CI/local validation with no `.env` present — `auto-deploy-gadonghr.sh`
+# always exports a real `GADONG_VERSION` sha before pulling, so production
+# never actually falls through to it. Unlike the old unconditional `:main`
+# tag, `:stable` is published ONLY for a push to whichever branch
+# `.github/workflows/ci.yml`'s `env.GADONG_DEPLOY_BRANCH` names (the branch
+# production tracks) — see that workflow's `build-images` job comment — so
+# a feature/phase branch build can never clobber the tag this fallback
+# resolves to. If `:stable` has never been published yet (a brand new
+# repo, or the tracked branch has never had a green CI run), this fallback
+# 404s on pull — a loud, fail-closed default, and still strictly safer
+# than silently deploying `:latest`, which CI never publishes at all.
 
 name: gadonghr
 
 services:
   svc-crypto:
     build: !reset null
-    image: ghcr.io/mavrone81/gadonghr-svc-crypto:${GADONG_VERSION:-main}
+    image: ghcr.io/mavrone81/gadonghr-svc-crypto:${GADONG_VERSION:-stable}
     pull_policy: always
 
   svc-config:
     build: !reset null
-    image: ghcr.io/mavrone81/gadonghr-svc-config:${GADONG_VERSION:-main}
+    image: ghcr.io/mavrone81/gadonghr-svc-config:${GADONG_VERSION:-stable}
     pull_policy: always
 
   svc-authz:
     build: !reset null
-    image: ghcr.io/mavrone81/gadonghr-svc-authz:${GADONG_VERSION:-main}
+    image: ghcr.io/mavrone81/gadonghr-svc-authz:${GADONG_VERSION:-stable}
     pull_policy: always
 
   svc-audit:
     build: !reset null
-    image: ghcr.io/mavrone81/gadonghr-svc-audit:${GADONG_VERSION:-main}
+    image: ghcr.io/mavrone81/gadonghr-svc-audit:${GADONG_VERSION:-stable}
     pull_policy: always
 
   svc-i18n:
     build: !reset null
-    image: ghcr.io/mavrone81/gadonghr-svc-i18n:${GADONG_VERSION:-main}
+    image: ghcr.io/mavrone81/gadonghr-svc-i18n:${GADONG_VERSION:-stable}
     pull_policy: always
 
   svc-notify:
     build: !reset null
-    image: ghcr.io/mavrone81/gadonghr-svc-notify:${GADONG_VERSION:-main}
+    image: ghcr.io/mavrone81/gadonghr-svc-notify:${GADONG_VERSION:-stable}
     pull_policy: always
 
   svc-docs:
     build: !reset null
-    image: ghcr.io/mavrone81/gadonghr-svc-docs:${GADONG_VERSION:-main}
+    image: ghcr.io/mavrone81/gadonghr-svc-docs:${GADONG_VERSION:-stable}
     pull_policy: always
 
   # `web` uses the exact same `GADONG_VERSION` variable as the seven
@@ -86,5 +93,5 @@ services:
   # "gadonghr-web:main returns HTTP 200").
   web:
     build: !reset null
-    image: ghcr.io/mavrone81/gadonghr-web:${GADONG_VERSION:-main}
+    image: ghcr.io/mavrone81/gadonghr-web:${GADONG_VERSION:-stable}
     pull_policy: always
