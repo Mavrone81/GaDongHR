@@ -78,6 +78,25 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      # `*.realbroker.test.ts` imports the workspace package `@gadong/kernel`
+      # by name (e.g. `import { AmqpPublisher } from '@gadong/kernel'`), and
+      # its `package.json` points `main`/`types` at `dist/` — built on every
+      # developer's machine (and by `verify`'s `pnpm typecheck`, which runs
+      # `tsc -b` project-references but only for TYPE CHECKING, not as a
+      # side effect available to a later job) but never in a fresh CI
+      # checkout. ts-jest here transpiles each test file in isolation
+      # against `tsconfig.base.json` (no `paths` mapping), so *module
+      # resolution* for `@gadong/kernel` depends on `dist/index.js` and
+      # `dist/index.d.ts` actually existing on disk — hence TS2307 "Cannot
+      # find module", and the cascade of TS7006 implicit-any errors below it
+      # in the same files (those are the same root cause: with the import
+      # unresolvable, every parameter typed only through it loses its type).
+      # `--filter @gadong/kernel build`, not root `pnpm build`: kernel is
+      # the only workspace package either `svc-payroll` or `svc-timesheet`
+      # (the two services under test here) depends on — see their
+      # `package.json` `dependencies` — so building the whole monorepo would
+      # do strictly more work for the same result.
+      - run: pnpm --filter @gadong/kernel build
       - name: Start postgres + rabbitmq (eventbus-test overlay)
         working-directory: deploy
         run: |
