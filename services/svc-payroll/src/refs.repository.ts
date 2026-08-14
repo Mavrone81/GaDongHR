@@ -49,6 +49,8 @@ function mapEmployeeRef(row: Record<string, unknown>): EmployeeRefRow {
 
 export interface TimesheetLockRow {
   period: string
+  /** svc-timesheet's own period-row uuid — see the migration's column doc for why this, and not `period`, is what a totals lookup against the real service must use. */
+  periodId: string
   lockVersion: number
   locked: boolean
   lockedBy: string | null
@@ -57,6 +59,7 @@ export interface TimesheetLockRow {
 function mapTimesheetLock(row: Record<string, unknown>): TimesheetLockRow {
   return {
     period: String(row['period']),
+    periodId: String(row['period_id']),
     lockVersion: Number(row['lock_version']),
     locked: Boolean(row['locked']),
     lockedBy: row['locked_by'] === null || row['locked_by'] === undefined ? null : String(row['locked_by']),
@@ -143,16 +146,16 @@ export class RefsRepository {
     const existing = await this.findTimesheetLock(row.period, tx)
     if (existing === null) {
       const { rows } = await tx.query(
-        `INSERT INTO payroll.timesheet_lock (period, lock_version, locked, locked_by) VALUES ($1, $2, $3, $4) RETURNING *`,
-        [row.period, row.lockVersion, row.locked, row.lockedBy],
+        `INSERT INTO payroll.timesheet_lock (period, period_id, lock_version, locked, locked_by) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [row.period, row.periodId, row.lockVersion, row.locked, row.lockedBy],
       )
       const first = rows[0]
       if (first === undefined) throw new Error('RefsRepository.upsertTimesheetLock: INSERT ... RETURNING * returned no row')
       return mapTimesheetLock(first as Record<string, unknown>)
     }
     const { rows } = await tx.query(
-      `UPDATE payroll.timesheet_lock SET lock_version = $2, locked = $3, locked_by = $4 WHERE period = $1 RETURNING *`,
-      [row.period, row.lockVersion, row.locked, row.lockedBy],
+      `UPDATE payroll.timesheet_lock SET period_id = $2, lock_version = $3, locked = $4, locked_by = $5 WHERE period = $1 RETURNING *`,
+      [row.period, row.periodId, row.lockVersion, row.locked, row.lockedBy],
     )
     const first = rows[0]
     if (first === undefined) throw new Error('RefsRepository.upsertTimesheetLock: UPDATE ... RETURNING * returned no row')

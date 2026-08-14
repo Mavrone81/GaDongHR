@@ -175,7 +175,19 @@ exports.up = (pgm) => {
   pgm.createTable(
     { schema: 'payroll', name: 'timesheet_lock' },
     {
+      // 'YYYY-MM' — payroll's own period concept (see runs.service.ts's
+      // monthIndex/previousMonth, and payroll_run.period, which this
+      // column exists to join against by value, no FK possible across
+      // schemas).
       period: { type: 'text', primaryKey: true },
+      // svc-timesheet's OWN period-row uuid (its `timesheet.period.id`),
+      // carried on the `timesheet.locked`/`unlocked` event payload
+      // (`periodId`) and stored here verbatim by `EventConsumersService.
+      // handleTimesheetLock` — this is what `HttpTimesheetClient.
+      // getLockedTotals` must send to svc-timesheet's real `GET
+      // /periods/:id/totals` route, which knows nothing of payroll's
+      // 'YYYY-MM' concept and 400s on anything that isn't its own uuid.
+      period_id: { type: 'uuid', notNull: true },
       lock_version: { type: 'integer', notNull: true },
       locked: { type: 'boolean', notNull: true, default: true },
       locked_by: { type: 'uuid' },

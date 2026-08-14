@@ -20,19 +20,24 @@ import type { PayrollRunRow } from '../runs.repository'
  * lock test meaningless.
  */
 export class FakeTimesheetClient implements TimesheetClient {
-  private readonly byPeriod = new Map<string, { lockVersion: number; totals: Map<string, TimesheetTotals> }>()
-  readonly calls: Array<{ period: string; lockVersion: number }> = []
+  // Keyed on whatever identifier the caller passes `getLockedTotals` —
+  // in production that is svc-timesheet's period-row uuid
+  // (`TimesheetLockRow.periodId`), never payroll's own 'YYYY-MM' code; a
+  // test seeds by whichever identifier it will also pass to `RunsService`
+  // via `upsertTimesheetLock`'s `periodId`.
+  private readonly byPeriodId = new Map<string, { lockVersion: number; totals: Map<string, TimesheetTotals> }>()
+  readonly calls: Array<{ periodId: string; lockVersion: number }> = []
 
-  seed(period: string, lockVersion: number, totals: Record<string, TimesheetTotals>): void {
-    this.byPeriod.set(period, { lockVersion, totals: new Map(Object.entries(totals)) })
+  seed(periodId: string, lockVersion: number, totals: Record<string, TimesheetTotals>): void {
+    this.byPeriodId.set(periodId, { lockVersion, totals: new Map(Object.entries(totals)) })
   }
 
-  async getLockedTotals(period: string, lockVersion: number): Promise<Map<string, TimesheetTotals>> {
-    this.calls.push({ period, lockVersion })
-    const entry = this.byPeriod.get(period)
+  async getLockedTotals(periodId: string, lockVersion: number): Promise<Map<string, TimesheetTotals>> {
+    this.calls.push({ periodId, lockVersion })
+    const entry = this.byPeriodId.get(periodId)
     if (entry === undefined) return new Map()
     if (entry.lockVersion !== lockVersion) {
-      throw new Error(`FakeTimesheetClient: asked for ${period} at lock v${lockVersion.toString()}, seeded at v${entry.lockVersion.toString()}`)
+      throw new Error(`FakeTimesheetClient: asked for ${periodId} at lock v${lockVersion.toString()}, seeded at v${entry.lockVersion.toString()}`)
     }
     return entry.totals
   }

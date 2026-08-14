@@ -31,6 +31,8 @@ const APPROVER = '22222222-2222-4222-8222-222222222222'
 const EMPLOYEE_A = '33333333-3333-4333-8333-333333333333'
 const EMPLOYEE_B = '44444444-4444-4444-8444-444444444444'
 const PERIOD = '2026-10'
+// svc-timesheet's own period-row uuid for PERIOD — see `TimesheetLockRow.periodId`'s doc.
+const PERIOD_ID = '66666666-6666-4666-8666-666666666666'
 
 async function harness(options: { bankAccounts?: boolean } = {}) {
   const db = new FakePayrollDb()
@@ -64,8 +66,8 @@ async function harness(options: { bankAccounts?: boolean } = {}) {
     () => '2026-11-01T00:00:00.000Z',
   )
 
-  await refsRepo.upsertTimesheetLock(tx, { period: PERIOD, lockVersion: 7, locked: true, lockedBy: PREPARER })
-  timesheets.seed(PERIOD, 7, {})
+  await refsRepo.upsertTimesheetLock(tx, { period: PERIOD, periodId: PERIOD_ID, lockVersion: 7, locked: true, lockedBy: PREPARER })
+  timesheets.seed(PERIOD_ID, 7, {})
 
   const employees: Array<[string, string, string, string]> = [
     [EMPLOYEE_A, 'E-0001', 'สมชาย ใจดี', '1234567890123'],

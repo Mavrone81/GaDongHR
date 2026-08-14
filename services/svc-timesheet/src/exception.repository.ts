@@ -158,7 +158,7 @@ export class ExceptionRepository {
       `SELECT te.id, te.day_record_id, te.kind, te.resolution, te.resolved_by, te.reason, te.created_at, te.updated_at
        FROM timesheet.time_exception te
        JOIN timesheet.day_record dr ON dr.id = te.day_record_id
-       WHERE ${clause} AND ($1::text[] IS NULL OR dr.employee_id = ANY($1))
+       WHERE ${clause} AND ($1::uuid[] IS NULL OR dr.employee_id = ANY($1::uuid[]))
        ORDER BY te.created_at`,
       [employeeIds],
     )

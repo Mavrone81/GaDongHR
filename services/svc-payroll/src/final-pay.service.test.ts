@@ -19,6 +19,8 @@ import { PROVINCE_BANGKOK, seededConfig } from './testing/statutory-fixture'
 
 const EMPLOYEE = '33333333-3333-4333-8333-333333333333'
 const PERIOD = '2026-10'
+// svc-timesheet's own period-row uuid for PERIOD — see `TimesheetLockRow.periodId`'s doc. Not exercised by this file's assertions (FinalPayService never calls TimesheetClient), only required to satisfy the row shape.
+const PERIOD_ID = '88888888-8888-4888-8888-888888888888'
 
 async function harness(options: { startDate?: string; terminationDate?: string; noticeGiven?: boolean; statutoryCause?: string | null; statutoryCitation?: string | null; basePayThb?: string } = {}) {
   const db = new FakePayrollDb()
@@ -206,7 +208,7 @@ describe('final pay — preconditions', () => {
 
   it('refuses an employee with no start date — the severance tier cannot be determined', async () => {
     const h = await harness({ startDate: '2020-01-01', terminationDate: '2023-01-01' })
-    await h.refs.upsertTimesheetLock(h.tx, { period: PERIOD, lockVersion: 1, locked: true, lockedBy: null })
+    await h.refs.upsertTimesheetLock(h.tx, { period: PERIOD, periodId: PERIOD_ID, lockVersion: 1, locked: true, lockedBy: null })
     await h.tx.query('UPDATE payroll.payroll_employee_ref SET start_date = $2 WHERE employee_id = $1 RETURNING *', [EMPLOYEE, null])
     await expect(h.service.assess(h.tx, EMPLOYEE, PERIOD)).rejects.toMatchObject({ code: 'PAY-061' })
   })

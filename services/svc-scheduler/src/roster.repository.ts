@@ -101,7 +101,7 @@ export class RosterRepository {
   async findByDateRange(from: string, to: string, employeeIds: string[] | null): Promise<RosterEntryRow[]> {
     const { rows } = await this.db.query(
       `SELECT ${SELECT_COLUMNS} FROM scheduler.roster_entry
-       WHERE work_date BETWEEN $1 AND $2 AND ($3::text[] IS NULL OR employee_id = ANY($3))`,
+       WHERE work_date BETWEEN $1 AND $2 AND ($3::uuid[] IS NULL OR employee_id = ANY($3::uuid[]))`,
       [from, to, employeeIds],
     )
     return rows.map(mapRow)
@@ -120,7 +120,7 @@ export class RosterRepository {
     const { rows } = await tx.query(
       `UPDATE scheduler.roster_entry
        SET status = 'published', updated_at = now()
-       WHERE work_date BETWEEN $1 AND $2 AND status = 'planned' AND ($3::text[] IS NULL OR employee_id = ANY($3))
+       WHERE work_date BETWEEN $1 AND $2 AND status = 'planned' AND ($3::uuid[] IS NULL OR employee_id = ANY($3::uuid[]))
        RETURNING ${SELECT_COLUMNS}`,
       [from, to, employeeIds],
     )

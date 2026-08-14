@@ -127,6 +127,11 @@ describe('timesheet_lock — the version a run binds to', () => {
     expect(sql).toMatch(/CREATE TABLE "payroll"\."timesheet_lock"[\s\S]*?"period" text PRIMARY KEY/)
     expect(sql).toMatch(/ADD CONSTRAINT "timesheet_lock_version_check" CHECK \(lock_version >= 0\)/)
   })
+
+  it('also carries svc-timesheet\'s own period-row uuid — the identifier a real GET /periods/:id/totals call must use, distinct from the "period" primary key above', () => {
+    const sql = upSql()
+    expect(sql).toMatch(/CREATE TABLE "payroll"\."timesheet_lock"[\s\S]*?"period_id" uuid NOT NULL/)
+  })
 })
 
 describe('the payslip gains its EMPLOYER-side columns, all encrypted', () => {

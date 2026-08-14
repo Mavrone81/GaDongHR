@@ -14,6 +14,15 @@ import type { PayrollRunRow } from './runs.repository'
 /**
  * Hours and days for a LOCKED timesheet period.
  *
+ * `periodId` is svc-timesheet's OWN period-row uuid (`timesheet.period.id`),
+ * never payroll's own 'YYYY-MM' period code — svc-timesheet's real route
+ * addresses a period by its own primary key and has no concept of payroll's
+ * calendar-month string. Callers get this uuid from `RefsRepository.
+ * findTimesheetLock`'s `TimesheetLockRow.periodId` (populated by
+ * `EventConsumersService.handleTimesheetLock` from the `timesheet.locked`
+ * event, which is the only place this uuid is ever learned) — never from
+ * `PayrollRunRow.period` directly.
+ *
  * `lockVersion` is passed on every call and is not decoration: a payroll
  * run binds to the version it prepared against, and asking for hours "as of
  * version 7" is what makes a later unlock detectable (PAY-030) rather than
@@ -22,7 +31,7 @@ import type { PayrollRunRow } from './runs.repository'
  * return the current hours.
  */
 export interface TimesheetClient {
-  getLockedTotals(period: string, lockVersion: number): Promise<Map<string, TimesheetTotals>>
+  getLockedTotals(periodId: string, lockVersion: number): Promise<Map<string, TimesheetTotals>>
 }
 
 /**
@@ -41,10 +50,10 @@ export class HttpTimesheetClient implements TimesheetClient {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async getLockedTotals(period: string, lockVersion: number): Promise<Map<string, TimesheetTotals>> {
-    const url = `${this.baseUrl}/periods/${encodeURIComponent(period)}/totals?lockVersion=${encodeURIComponent(String(lockVersion))}`
+  async getLockedTotals(periodId: string, lockVersion: number): Promise<Map<string, TimesheetTotals>> {
+    const url = `${this.baseUrl}/periods/${encodeURIComponent(periodId)}/totals?lockVersion=${encodeURIComponent(String(lockVersion))}`
     const res = await this.fetchImpl(url)
-    if (!res.ok) throw new Error(`svc-timesheet returned ${res.status.toString()} for ${period} @ v${lockVersion.toString()}`)
+    if (!res.ok) throw new Error(`svc-timesheet returned ${res.status.toString()} for period ${periodId} @ v${lockVersion.toString()}`)
     const body: unknown = await res.json()
     const out = new Map<string, TimesheetTotals>()
     if (typeof body !== 'object' || body === null || !Array.isArray((body as { totals?: unknown }).totals)) return out

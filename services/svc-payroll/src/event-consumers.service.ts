@@ -101,6 +101,14 @@ const SCHEMA = 'payroll'
  * `RunsService.findTimesheetLock(run.period, tx)`, `run.period` always being
  * this same 'YYYY-MM' shape — storing the UUID here would make that lookup
  * never find a row, however successfully this consumer ran.
+ *
+ * The `periodId` UUID is not thrown away, though: it is stored alongside
+ * `period` (`TimesheetLockRow.periodId`, `payroll.timesheet_lock.period_id`)
+ * because `RunsService.calculate`'s OWN outbound call — `TimesheetClient.
+ * getLockedTotals` against svc-timesheet's real `GET /periods/:id/totals`
+ * — needs svc-timesheet's uuid, not payroll's 'YYYY-MM' code, to address a
+ * period on svc-timesheet's side. Two different lookups, two different
+ * keys, both fed by this one row.
  */
 function derivePeriodCode(dateRange: { from: string; to: string }): string {
   const match = /^(\d{4}-\d{2})-\d{2}$/.exec(dateRange.from)
@@ -123,6 +131,7 @@ export class EventConsumersService {
     const result = await idempotent(tx, SCHEMA, event.eventId, async () => {
       await this.refs.upsertTimesheetLock(tx, {
         period: derivePeriodCode(event.payload.dateRange),
+        periodId: event.payload.periodId,
         lockVersion: event.payload.lockVersion,
         locked: event.topic === 'timesheet.locked',
         lockedBy: event.payload.lockedBy ?? null,

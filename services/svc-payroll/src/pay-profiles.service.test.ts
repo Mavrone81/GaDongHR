@@ -27,6 +27,8 @@ import { PROVINCE_BANGKOK, PROVINCE_LOW_BAND, seededConfig } from './testing/sta
 const EMPLOYEE = '33333333-3333-4333-8333-333333333333'
 const PREPARER = '11111111-1111-4111-8111-111111111111'
 const APPROVER = '22222222-2222-4222-8222-222222222222'
+// svc-timesheet's own period-row uuid for '2026-10' — see `TimesheetLockRow.periodId`'s doc.
+const PERIOD_ID = '77777777-7777-4777-8777-777777777777'
 
 async function harness(province: string = PROVINCE_BANGKOK) {
   const db = new FakePayrollDb()
@@ -207,8 +209,8 @@ describe('the in-app payslip (M7-4 read side)', () => {
       () => '2026-11-01T00:00:00.000Z',
     )
     await h.service.upsert(h.tx, EMPLOYEE, dto(), '2026-10-31')
-    await h.refs.upsertTimesheetLock(h.tx, { period: '2026-10', lockVersion: 7, locked: true, lockedBy: PREPARER })
-    timesheets.seed('2026-10', 7, {})
+    await h.refs.upsertTimesheetLock(h.tx, { period: '2026-10', periodId: PERIOD_ID, lockVersion: 7, locked: true, lockedBy: PREPARER })
+    timesheets.seed(PERIOD_ID, 7, {})
     const run = await runs.createRun(h.tx, {
       period: '2026-10',
       runType: 'regular',

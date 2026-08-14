@@ -41,6 +41,8 @@ import { PROVINCE_BANGKOK, seededConfig } from './testing/statutory-fixture'
 const ROADMAP = join(__dirname, '..', '..', '..', 'docs', 'superpowers', 'plans', '00-PROGRAM-ROADMAP.md')
 
 const PREPARER = '11111111-1111-4111-8111-111111111111'
+// svc-timesheet's own period-row uuid for '2026-10' — see `TimesheetLockRow.periodId`'s doc.
+const PERIOD_ID = '99999999-9999-4999-8999-999999999999'
 const APPROVER = '22222222-2222-4222-8222-222222222222'
 const EMPLOYEE = '33333333-3333-4333-8333-333333333333'
 
@@ -118,8 +120,8 @@ async function controllerHarness(options: { dbDown?: boolean; crypto?: 'up' | 'd
     orgUnitId: null,
     employmentType: 'full_time',
   })
-  await refsRepo.upsertTimesheetLock(tx, { period: '2026-10', lockVersion: 7, locked: true, lockedBy: PREPARER })
-  timesheets.seed('2026-10', 7, {})
+  await refsRepo.upsertTimesheetLock(tx, { period: '2026-10', periodId: PERIOD_ID, lockVersion: 7, locked: true, lockedBy: PREPARER })
+  timesheets.seed(PERIOD_ID, 7, {})
   directory.seed(EMPLOYEE, { fullName: 'สมชาย ใจดี', nationalId: '1234567890123' })
 
   return { controller, db, tx, configClient, crypto, runsService, profilesService }

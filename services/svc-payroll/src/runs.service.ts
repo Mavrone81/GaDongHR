@@ -181,8 +181,21 @@ export class RunsService {
     // mid-run cannot produce two answers inside one payroll.
     const resolver = new StatutoryResolver(this.config, periodEnd)
 
+    // svc-timesheet's real totals route addresses a period by ITS OWN
+    // period-row uuid (`lock.periodId`), never by payroll's 'YYYY-MM'
+    // `run.period` — see `event-consumers.service.ts`'s `derivePeriodCode`
+    // doc for why the two are different keys on the same row. `createRun`
+    // already refuses to create a non-`final_pay` run without a locked
+    // `payroll.timesheet_lock` row, so `lock` being absent here (and
+    // `final_pay` skipping the call entirely) is the only path that
+    // reaches `getLockedTotals` without one — fail with a clear,
+    // retryable error rather than crash on `lock.periodId` or, worse, ask
+    // svc-timesheet for totals under an identifier it has never heard of.
+    if (run.runType !== 'final_pay' && lock === null) throw timesheetNotLocked(run.period)
     const totals =
-      run.runType === 'final_pay' ? new Map<string, TimesheetTotals>() : await this.timesheets.getLockedTotals(run.period, boundVersion)
+      run.runType === 'final_pay' || lock === null
+        ? new Map<string, TimesheetTotals>()
+        : await this.timesheets.getLockedTotals(lock.periodId, boundVersion)
 
     // A recalculation REPLACES this run's payslips. Both halves matter: the
     // old payslips go (the UNIQUE (run_id, employee_id) would refuse a

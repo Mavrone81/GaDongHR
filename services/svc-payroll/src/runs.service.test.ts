@@ -28,6 +28,11 @@ import type { FakeConfigClient } from './testing/fake-config-client'
  */
 
 const PERIOD = '2026-10'
+// svc-timesheet's own period-row uuid for the 'PERIOD' calendar month —
+// distinct from `PERIOD` itself (see `TimesheetLockRow.periodId`'s doc):
+// `RunsService.calculate` looks totals up by THIS, never by `PERIOD`.
+const PERIOD_ID = '44444444-4444-4444-8444-444444444444'
+const SEPTEMBER_PERIOD_ID = '55555555-5555-4555-8555-555555555555'
 const PERIOD_START = '2026-10-01'
 const PERIOD_END = '2026-10-31'
 const PAY_DATE = '2026-10-31'
@@ -94,7 +99,7 @@ async function harness(options: { lockVersion?: number; basePayThb?: string } = 
     orgUnitId: null,
     employmentType: 'full_time',
   })
-  await refsRepo.upsertTimesheetLock(tx, { period: PERIOD, lockVersion, locked: true, lockedBy: PREPARER })
+  await refsRepo.upsertTimesheetLock(tx, { period: PERIOD, periodId: PERIOD_ID, lockVersion, locked: true, lockedBy: PREPARER })
   await profilesService.upsert(
     tx,
     EMPLOYEE,
@@ -111,7 +116,7 @@ async function harness(options: { lockVersion?: number; basePayThb?: string } = 
     },
     PERIOD_END,
   )
-  timesheets.seed(PERIOD, lockVersion, {})
+  timesheets.seed(PERIOD_ID, lockVersion, {})
 
   return { db, tx, config, crypto, service, timesheets, docs, recorder, payslips: payslipsRepo, payInputs: payInputsRepo, runs: runsRepo, refs: refsRepo, profilesService }
 }
@@ -173,7 +178,7 @@ describe('draft — a run binds to a LOCKED timesheet', () => {
 
   it('refuses an unlocked period as firmly as a missing one', async () => {
     const h = await harness()
-    await h.refs.upsertTimesheetLock(h.tx, { period: PERIOD, lockVersion: 8, locked: false, lockedBy: APPROVER })
+    await h.refs.upsertTimesheetLock(h.tx, { period: PERIOD, periodId: PERIOD_ID, lockVersion: 8, locked: false, lockedBy: APPROVER })
     await expect(draftRun(h)).rejects.toMatchObject({ code: 'PAY-031' })
   })
 
@@ -283,7 +288,7 @@ describe('calculate — one payslip per employee, every figure encrypted before 
     const h = await harness({ lockVersion: 7 })
     const run = await draftRun(h)
     await h.service.calculate(h.tx, run.id, [EMPLOYEE])
-    expect(h.timesheets.calls).toEqual([{ period: PERIOD, lockVersion: 7 }])
+    expect(h.timesheets.calls).toEqual([{ periodId: PERIOD_ID, lockVersion: 7 }])
   })
 
   it('refuses to calculate for an employee with no pay profile rather than paying them zero', async () => {
@@ -440,7 +445,7 @@ describe('lifecycle transitions', () => {
     await h.service.review(h.tx, run.id, PREPARER)
 
     // An unlock/re-lock bumped the version.
-    await h.refs.upsertTimesheetLock(h.tx, { period: PERIOD, lockVersion: 8, locked: true, lockedBy: APPROVER })
+    await h.refs.upsertTimesheetLock(h.tx, { period: PERIOD, periodId: PERIOD_ID, lockVersion: 8, locked: true, lockedBy: APPROVER })
 
     await expect(h.service.approve(h.tx, run.id, APPROVER)).rejects.toMatchObject({
       code: 'PAY-030',
@@ -628,8 +633,8 @@ describe('variance review', () => {
     const h = await harness()
 
     // A committed September run to compare against.
-    await h.refs.upsertTimesheetLock(h.tx, { period: '2026-09', lockVersion: 7, locked: true, lockedBy: PREPARER })
-    h.timesheets.seed('2026-09', 7, {})
+    await h.refs.upsertTimesheetLock(h.tx, { period: '2026-09', periodId: SEPTEMBER_PERIOD_ID, lockVersion: 7, locked: true, lockedBy: PREPARER })
+    h.timesheets.seed(SEPTEMBER_PERIOD_ID, 7, {})
     const september = await h.service.createRun(h.tx, {
       period: '2026-09',
       runType: 'regular',
@@ -665,8 +670,8 @@ describe('variance review', () => {
 describe('year-to-date accumulates only from COMMITTED runs', () => {
   it('an uncommitted prior run contributes nothing — it is not yet a payment', async () => {
     const h = await harness()
-    await h.refs.upsertTimesheetLock(h.tx, { period: '2026-09', lockVersion: 7, locked: true, lockedBy: PREPARER })
-    h.timesheets.seed('2026-09', 7, {})
+    await h.refs.upsertTimesheetLock(h.tx, { period: '2026-09', periodId: SEPTEMBER_PERIOD_ID, lockVersion: 7, locked: true, lockedBy: PREPARER })
+    h.timesheets.seed(SEPTEMBER_PERIOD_ID, 7, {})
     const september = await h.service.createRun(h.tx, {
       period: '2026-09',
       runType: 'regular',
@@ -688,8 +693,8 @@ describe('year-to-date accumulates only from COMMITTED runs', () => {
 
   it('...and a committed one does', async () => {
     const h = await harness()
-    await h.refs.upsertTimesheetLock(h.tx, { period: '2026-09', lockVersion: 7, locked: true, lockedBy: PREPARER })
-    h.timesheets.seed('2026-09', 7, {})
+    await h.refs.upsertTimesheetLock(h.tx, { period: '2026-09', periodId: SEPTEMBER_PERIOD_ID, lockVersion: 7, locked: true, lockedBy: PREPARER })
+    h.timesheets.seed(SEPTEMBER_PERIOD_ID, 7, {})
     const september = await h.service.createRun(h.tx, {
       period: '2026-09',
       runType: 'regular',
