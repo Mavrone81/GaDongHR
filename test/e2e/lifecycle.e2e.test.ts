@@ -24,6 +24,7 @@
  */
 import { PORTS, PERSONAS, mintToken } from './harness'
 import { grantRole, grantPermission } from './lib/db'
+import { withSuperuserClient } from './lib/db'
 
 /** A machine identity for `timesheet.totals.read` — granted to NO `ROLE_TEMPLATES` entry, ever (`timesheet.controller.ts`'s own doc on this route). Not one of `harness.ts`'s human `PERSONAS`, on purpose: this proves the permission gate itself, independent of any real caller's (svc-payroll's) missing credential — see the "known gap" test below. */
 const TOTALS_READER_SUB = '00000000-0000-4000-8000-0000e2e00077'
@@ -451,6 +452,38 @@ describe('5. payroll, for the REAL hired employee — seam defect #1 is fixed, s
     expect(commit.status).toBeLessThan(300)
     expect(commit.json?.status).toBe('committed')
   }, 20_000)
+
+  // THE AUDIT ASSERTION (audit-coverage task): svc-audit's own consumer
+  // (svc-audit isn't part of this e2e stack — see docker-compose.yml) is
+  // the thing that would turn these into chained `audit.entry` rows; what
+  // THIS test proves is the layer this task actually owns — that
+  // `RunsService`'s `AuditEmitter.emit()` calls really execute inside the
+  // real transaction against real Postgres for the real HTTP lifecycle
+  // above, not only against the fake-`Queryable` unit tests. Each row is
+  // written synchronously in the same transaction as its state change
+  // (ADR-005/`writeOutbox`'s own contract), so no `waitForEventually` wait
+  // is needed — by the time `commit` returned 200 above, every one of
+  // these rows already committed to `payroll.outbox`.
+  test('AUDIT: every run-lifecycle step above wrote its audit.* entry to payroll.outbox, actor and entityId intact, no raw money in the payload', async () => {
+    const rows = await withSuperuserClient((client) =>
+      client.query<{ topic: string; payload: { actorId: string; entityId: string; action: string; beforeHash: string | null; afterHash: string | null } }>(
+        `SELECT topic, payload FROM payroll.outbox WHERE topic LIKE 'audit.run.%' AND payload->>'entityId' = $1 ORDER BY created_at`,
+        [runId],
+      ),
+    )
+    const topics = rows.rows.map((r) => r.topic)
+    expect(topics).toEqual(
+      expect.arrayContaining(['audit.run.created', 'audit.run.calculated', 'audit.run.reviewed', 'audit.run.approved', 'audit.run.committed']),
+    )
+    for (const row of rows.rows) {
+      expect(row.payload.entityId).toBe(runId)
+      expect(row.payload.actorId).toEqual(expect.stringMatching(/^[0-9a-f-]{36}$/i)) // a real OIDC sub, not 'unknown'
+      // The hash-only contract: never a satang/baht figure sitting in the
+      // clear anywhere in what actually landed in Postgres.
+      const serialised = JSON.stringify(row.payload)
+      expect(serialised).not.toMatch(/"\d+\.\d\d"/)
+    }
+  }, 10_000)
 
   test('THE MONEY ASSERTION: the committed payslip carries the hand-computed gross/SSO/WHT/net figures above, exactly (PayslipSummary — services/svc-payroll/src/payslips.service.ts — returns every figure as a plain THB decimal string, satangToBaht-rendered)', async () => {
     const res = await call('GET', `${BASE.payroll}/runs/${runId}/payslips`, payrollApproverToken)
