@@ -327,6 +327,22 @@ export class FakeAuthzConnection implements Queryable {
       return { rows: grants.map((g) => ({ org_scope_unit_id: g.org_scope_unit_id })) }
     }
 
+    // `listPermissionCodesForUser` — the set form of the join just above.
+    // Distinguished from it by the projection (`DISTINCT rp.permission_code`
+    // vs `ur.org_scope_unit_id`), not by the FROM/JOIN, which are identical
+    // on purpose: the two must never disagree about what a grant carries.
+    if (/^SELECT\s+DISTINCT\s+rp\.permission_code[\s\S]*FROM\s+authz\.user_role\s+ur[\s\S]*JOIN\s+authz\.role_permission\s+rp/i.test(s)) {
+      const [userId] = params as [string]
+      const codes = new Set<string>()
+      for (const grant of this.db._allUserRoles().filter((g) => g.user_id === userId)) {
+        for (const rp of this.db._rolePermissionsForRole(grant.role_id)) codes.add(rp.permission_code)
+      }
+      // A `Set` reproduces SQL's DISTINCT: a user holding two roles that
+      // share a permission, or one role granted twice at different org
+      // scopes, still yields that code exactly once.
+      return { rows: [...codes].map((permission_code) => ({ permission_code })) }
+    }
+
     if (/^INSERT INTO\s+authz\.org_unit\b/i.test(s)) {
       const [id, parentId, nameI18nJson, costCenter] = params as [string, string | null, string, string | null]
       const inserted = this.db._insertOrgUnitIfAbsent({

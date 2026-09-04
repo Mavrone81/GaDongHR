@@ -7,6 +7,7 @@ import { randomString, codeChallengeFromVerifier } from './pkce'
 import { decodeJwtPayload } from './jwt'
 import type { JwtClaims } from './jwt'
 import { createDevSession } from './devBypass'
+import { fetchPermissions } from './permissions'
 import type { AuthTokenSource } from '../api/httpClient'
 
 /**
@@ -25,19 +26,26 @@ export interface CurrentUser {
   id: string
   username: string
   /**
-   * UI-ONLY convenience set, not a security boundary. Populated from a
-   * `permissions` claim on the access token when present (or the
-   * fabricated dev-bypass token — see `devBypass.ts`). Real Keycloak
-   * tokens issued by `deploy/keycloak/realm-gadonghr.json` today carry no
-   * such claim (permission grants live in svc-authz's own DB, read only
-   * via `POST /decide`, which `web/ui-coverage.json` marks
-   * service-to-service-only — never callable from a browser). Until a
-   * `/me`-shaped endpoint or a token claim exists, a real login sees an
-   * empty set here and the nav renders no gated destinations — fail-safe
-   * (nothing shown), not fail-open, matching this system's own
-   * deny-by-default philosophy. Every write this app makes is still
-   * enforced for real by the resource server's own `PermissionGuard`
-   * regardless of what this set says.
+   * UI-ONLY convenience set, not a security boundary. Seeded from a
+   * `permissions` claim on the access token when one is present (the
+   * fabricated dev-bypass token carries one — see `devBypass.ts`), then
+   * replaced by svc-authz's `GET /me/permissions` once that call returns.
+   *
+   * Real Keycloak tokens from `deploy/keycloak/realm-gadonghr.json` carry
+   * no such claim and are not expected to: permission grants live in
+   * svc-authz's own DB, and a claim would freeze them into a token that
+   * outlives a revoked grant. The `/me` endpoint is therefore the real
+   * source here, and the claim is only a dev-bypass affordance.
+   *
+   * Historically that endpoint did not exist, so a real login saw an
+   * empty set, every gated nav destination was hidden, and every
+   * `RequirePermission` route rendered nothing — fail-safe rather than
+   * fail-open, but it made the admin UI unreachable in production for
+   * three weeks before anyone completed a login to notice.
+   *
+   * Still not a security boundary: every read and write this app makes is
+   * enforced independently by the resource server's own
+   * `PermissionGuard`, regardless of what this set says.
    */
   permissions: Set<string>
 }
@@ -71,26 +79,51 @@ function claimsToUser(claims: JwtClaims): CurrentUser {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }): React.JSX.Element {
-  const config = useMemo<OidcConfig>(() => {
-    const cfg = loadConfig()
-    return { issuer: cfg.oidcIssuer, clientId: cfg.oidcClientId, redirectUri: cfg.oidcRedirectUri }
-  }, [])
+  const appConfig = useMemo(() => loadConfig(), [])
+  const config = useMemo<OidcConfig>(
+    () => ({ issuer: appConfig.oidcIssuer, clientId: appConfig.oidcClientId, redirectUri: appConfig.oidcRedirectUri }),
+    [appConfig],
+  )
 
   const [status, setStatus] = useState<AuthStatus>('unauthenticated')
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
   const tokensRef = useRef<TokenSet | null>(null)
 
-  const applyTokens = useCallback((tokens: TokenSet | null) => {
-    tokensRef.current = tokens
-    if (tokens) {
+  const applyTokens = useCallback(
+    (tokens: TokenSet | null) => {
+      tokensRef.current = tokens
+      if (!tokens) {
+        setCurrentUser(null)
+        setStatus('unauthenticated')
+        return
+      }
+
       const claims = decodeJwtPayload(tokens.accessToken)
       setCurrentUser(claims ? claimsToUser(claims) : null)
       setStatus('authenticated')
-    } else {
-      setCurrentUser(null)
-      setStatus('unauthenticated')
-    }
-  }, [])
+      if (!claims) return
+
+      // Authenticate first, then fill in permissions — deliberately not
+      // awaited before `setStatus('authenticated')`. `AuthGate` renders
+      // `LoginPage` for any status other than `authenticated`, so blocking
+      // here would flash the login screen at a user who just logged in.
+      // The cost is that gated content appears one round trip after the
+      // shell does; the alternative costs a visibly wrong screen.
+      void (async () => {
+        const fetched = await fetchPermissions(appConfig.svcAuthzUrl, tokens.accessToken)
+        // `null` means the call failed, not that the user holds nothing —
+        // keep whatever set we already have (see `fetchPermissions`).
+        if (!fetched) return
+        // A refresh, a logout or a second login may have landed while this
+        // was in flight; `tokensRef` is the authority on which session is
+        // current. Without this, a slow response for an abandoned session
+        // would repopulate the menu of a user who just signed out.
+        if (tokensRef.current !== tokens) return
+        setCurrentUser((prev) => (prev ? { ...prev, permissions: fetched } : prev))
+      })()
+    },
+    [appConfig],
+  )
 
   const login = useCallback(() => {
     // See env.ts's `DEV_BYPASS_ENABLED` header for why this must stay a

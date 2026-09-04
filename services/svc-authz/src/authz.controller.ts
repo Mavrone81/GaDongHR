@@ -122,6 +122,38 @@ export class AuthzController {
     }
   }
 
+  /**
+   * The signed-in caller's own permission codes — the `/me`-shaped
+   * endpoint `web/src/auth/AuthContext.tsx` named as the missing piece
+   * that left `CurrentUser.permissions` empty on every real login.
+   *
+   * **Why no `@RequirePermission`.** Same non-circular reason `POST
+   * /decide` carries none: gating "what may I do" behind a permission
+   * means the client must already know one of its permissions to
+   * discover its permissions. Unlike `/decide`, though, this route is
+   * reached from a browser, so it is not left unauthenticated either — it
+   * requires a verified principal and derives the identity from it.
+   *
+   * **Self-only, structurally.** The user id comes from `req.userId`,
+   * which `OidcMiddleware` sets only after a real `jose.jwtVerify`
+   * signature check. There is deliberately no `:id` parameter and no
+   * query filter: with one, this becomes an endpoint any authenticated
+   * user can walk to enumerate every other user's grants, which is a far
+   * worse disclosure than the one it was added to fix. The absence of
+   * that parameter is the access control.
+   *
+   * Returns `{permissions: []}` for a user with no grants — an ordinary
+   * answer, not an error. A brand-new account legitimately holds nothing
+   * until an admin grants it a role.
+   */
+  @Get('me/permissions')
+  async myPermissions(@Req() req: AuthenticatedRequest): Promise<{ permissions: string[] }> {
+    if (!req.userId) {
+      throw new HttpException({ code: 'AUZ-401', message_i18n_key: 'authz.error.unauthenticated', details: [] }, 401)
+    }
+    return { permissions: await this.authzService.listPermissionsForUser(req.userId) }
+  }
+
   @Get('roles')
   @UseGuards(PermissionGuard)
   @RequirePermission('authz.role.read')

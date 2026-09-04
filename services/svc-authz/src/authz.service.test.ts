@@ -259,3 +259,76 @@ describe('AuthzService.grantRole / revokeRole — audit coverage (roadmap: "gran
     expect(audit).toBeDefined()
   })
 })
+
+describe('AuthzService.listPermissionsForUser — backs GET /me/permissions, the PWA nav gate', () => {
+  it('returns nothing for a user holding no grants — the honest answer, not an error', async () => {
+    const { conn, repo, service } = setUp()
+    await repo.upsertPermission(conn, 'employee.read', 'x')
+
+    await expect(service.listPermissionsForUser('user-1')).resolves.toEqual([])
+  })
+
+  it('returns every code the user reaches through their granted roles', async () => {
+    const { conn, repo, service } = setUp()
+    await repo.upsertPermission(conn, 'config.rule.read', 'x')
+    await repo.upsertPermission(conn, 'audit.read', 'x')
+    const role = await repo.upsertRole(conn, 'hr-system-admin', {}, true)
+    await repo.replaceRolePermissions(conn, role.id, ['config.rule.read', 'audit.read'])
+    await repo.insertUserRole(conn, { userId: 'user-1', roleId: role.id, orgScopeUnitId: null, grantedBy: 'admin' })
+
+    const codes = await service.listPermissionsForUser('user-1')
+
+    expect([...codes].sort()).toEqual(['audit.read', 'config.rule.read'])
+  })
+
+  it("never leaks another user's grants", async () => {
+    const { conn, repo, service } = setUp()
+    await repo.upsertPermission(conn, 'payroll.export', 'x')
+    const role = await repo.upsertRole(conn, 'payroll-officer', {}, false)
+    await repo.replaceRolePermissions(conn, role.id, ['payroll.export'])
+    await repo.insertUserRole(conn, { userId: 'someone-else', roleId: role.id, orgScopeUnitId: null, grantedBy: 'admin' })
+
+    await expect(service.listPermissionsForUser('user-1')).resolves.toEqual([])
+  })
+
+  it('de-duplicates a code carried by two different granted roles', async () => {
+    const { conn, repo, service } = setUp()
+    await repo.upsertPermission(conn, 'employee.read', 'x')
+    const roleA = await repo.upsertRole(conn, 'hr-officer', {}, false)
+    const roleB = await repo.upsertRole(conn, 'line-manager', {}, false)
+    await repo.replaceRolePermissions(conn, roleA.id, ['employee.read'])
+    await repo.replaceRolePermissions(conn, roleB.id, ['employee.read'])
+    await repo.insertUserRole(conn, { userId: 'user-1', roleId: roleA.id, orgScopeUnitId: null, grantedBy: 'admin' })
+    await repo.insertUserRole(conn, { userId: 'user-1', roleId: roleB.id, orgScopeUnitId: null, grantedBy: 'admin' })
+
+    await expect(service.listPermissionsForUser('user-1')).resolves.toEqual(['employee.read'])
+  })
+
+  it('de-duplicates one role granted twice at different org scopes — user_role has no unique constraint', async () => {
+    const { conn, repo, service } = setUp()
+    await repo.upsertPermission(conn, 'timesheet.read', 'x')
+    const role = await repo.upsertRole(conn, 'line-manager', {}, false)
+    await repo.replaceRolePermissions(conn, role.id, ['timesheet.read'])
+    await repo.insertUserRole(conn, { userId: 'user-1', roleId: role.id, orgScopeUnitId: 'bangkok-hq', grantedBy: 'admin' })
+    await repo.insertUserRole(conn, { userId: 'user-1', roleId: role.id, orgScopeUnitId: 'chonburi-plant', grantedBy: 'admin' })
+
+    await expect(service.listPermissionsForUser('user-1')).resolves.toEqual(['timesheet.read'])
+  })
+
+  it('is scope-blind on purpose: an org-scoped grant still reports the code, because WHICH rows are returned is PermissionGuard\'s job on each request', async () => {
+    const { conn, repo, service } = setUp()
+    await repo.upsertPermission(conn, 'timesheet.read', 'x')
+    const role = await repo.upsertRole(conn, 'line-manager', {}, false)
+    await repo.replaceRolePermissions(conn, role.id, ['timesheet.read'])
+    await repo.insertUserRole(conn, { userId: 'user-1', roleId: role.id, orgScopeUnitId: 'chonburi-plant', grantedBy: 'admin' })
+
+    await expect(service.listPermissionsForUser('user-1')).resolves.toEqual(['timesheet.read'])
+  })
+
+  it('an unexpected repository failure resolves to an empty list, never propagates — an unreadable grant table must not widen what the UI offers', async () => {
+    const repo = { listPermissionCodesForUser: jest.fn().mockRejectedValue(new Error('DB is on fire')) } as unknown as AuthzRepository
+    const service = new AuthzService(repo)
+
+    await expect(service.listPermissionsForUser('user-1')).resolves.toEqual([])
+  })
+})

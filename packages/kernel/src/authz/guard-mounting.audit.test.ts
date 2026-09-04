@@ -91,13 +91,21 @@ const STANDARD_PATTERN_EXCEPTIONS: ServiceException[] = [
   {
     service: 'svc-authz',
     pattern: 'per-route',
-    unguardedRoutes: ['POST decide', 'GET health'],
+    unguardedRoutes: ['POST decide', 'GET me/permissions', 'GET health'],
     reason:
       'POST /decide is the handler PermissionGuard itself calls, for every permission check in every ' +
       'other service. Guarding it would ask /decide to decide whether the caller may call /decide, which ' +
       'has no non-circular answer. Marking it @Public() under a global APP_GUARD would work mechanically, ' +
       'but would make the most security-critical route in the system depend on a decorator staying ' +
-      'attached, where losing it causes infinite recursion rather than a clean denial. The three admin ' +
+      'attached, where losing it causes infinite recursion rather than a clean denial. ' +
+      'GET /me/permissions is unguardable for the same circularity, one step removed: it answers "what ' +
+      'may I do", so requiring a permission to reach it would mean a client must already know one of its ' +
+      'permissions in order to discover its permissions. It is NOT unauthenticated, though — unlike ' +
+      '/decide it is browser-facing, and it 401s (AUZ-401) unless OidcMiddleware has set a userId from a ' +
+      'jose.jwtVerify-checked token. Its access control is structural rather than decorative: the handler ' +
+      'takes no id parameter at all and reads the caller from the verified token, so there is no way to ' +
+      'phrase a request for somebody else\'s grants. authz.controller.test.ts pins the 401, the ' +
+      'token-derived id, and the handler arity that makes enumeration impossible. The three admin ' +
       'routes (GET /roles, the two grant/revoke routes) are guarded individually instead, and the ' +
       '"new controller ships unguarded" hole is closed by the per-route assertion below rather than by ' +
       'the mounting.',

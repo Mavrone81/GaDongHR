@@ -31,10 +31,11 @@ function fakePool(overrides: Partial<Pool> = {}): Pool {
   } as unknown as Pool
 }
 
-type FakeAuthzService = Pick<AuthzService, 'decide' | 'grantRole' | 'revokeRole'>
+type FakeAuthzService = Pick<AuthzService, 'decide' | 'grantRole' | 'revokeRole' | 'listPermissionsForUser'>
 function fakeAuthzService(overrides: Partial<FakeAuthzService> = {}): AuthzService {
   const base: FakeAuthzService = {
     decide: jest.fn().mockResolvedValue({ allowed: true, scopeOrgUnitIds: 'self' }),
+    listPermissionsForUser: jest.fn().mockResolvedValue([]),
     grantRole: jest.fn().mockResolvedValue({
       id: 'grant-1',
       userId: 'user-1',
@@ -297,5 +298,59 @@ describe('AppModule does NOT mount PermissionGuard as APP_GUARD (third guard-mou
     const providers = (Reflect.getMetadata('providers', AppModule) as unknown[] | undefined) ?? []
     const hasDbPool = providers.some((p) => isRecord(p) && p['provide'] === DB_POOL)
     expect(hasDbPool).toBe(true)
+  })
+})
+
+describe('AuthzController — GET /me/permissions (the /me-shaped endpoint the PWA needs to gate its nav)', () => {
+  function reqWith(userId: string | undefined): Parameters<AuthzController['myPermissions']>[0] {
+    return { userId } as Parameters<AuthzController['myPermissions']>[0]
+  }
+
+  it("returns the caller's own permission codes", async () => {
+    const listPermissionsForUser = jest.fn().mockResolvedValue(['config.rule.read', 'audit.read'])
+    const controller = new AuthzController(fakeAuthzService({ listPermissionsForUser }), fakeAuthzRepo(), fakePool())
+
+    const out = await controller.myPermissions(reqWith('user-1'))
+
+    expect(out).toEqual({ permissions: ['config.rule.read', 'audit.read'] })
+  })
+
+  it('derives the user id from the verified token, never from anything the caller supplies — this is the whole access control', async () => {
+    const listPermissionsForUser = jest.fn().mockResolvedValue([])
+    const controller = new AuthzController(fakeAuthzService({ listPermissionsForUser }), fakeAuthzRepo(), fakePool())
+
+    await controller.myPermissions(reqWith('user-from-token'))
+
+    expect(listPermissionsForUser).toHaveBeenCalledWith('user-from-token')
+    expect(listPermissionsForUser).toHaveBeenCalledTimes(1)
+  })
+
+  it('takes no id parameter at all — a handler arity of 1 (the request) is what makes enumerating another user impossible', () => {
+    expect(AuthzController.prototype.myPermissions.length).toBe(1)
+  })
+
+  it('401s with AUZ-401 when there is no authenticated principal — this route is unguarded by PermissionGuard, so it must check for itself', async () => {
+    const listPermissionsForUser = jest.fn().mockResolvedValue(['config.rule.read'])
+    const controller = new AuthzController(fakeAuthzService({ listPermissionsForUser }), fakeAuthzRepo(), fakePool())
+
+    await expect(controller.myPermissions(reqWith(undefined))).rejects.toBeInstanceOf(HttpException)
+    await expect(controller.myPermissions(reqWith(undefined))).rejects.toMatchObject({
+      response: { code: 'AUZ-401' },
+    })
+    expect(listPermissionsForUser).not.toHaveBeenCalled()
+  })
+
+  it('returns an empty list rather than an error for a user holding no grants — a new account legitimately has none', async () => {
+    const listPermissionsForUser = jest.fn().mockResolvedValue([])
+    const controller = new AuthzController(fakeAuthzService({ listPermissionsForUser }), fakeAuthzRepo(), fakePool())
+
+    await expect(controller.myPermissions(reqWith('ungranted-user'))).resolves.toEqual({ permissions: [] })
+  })
+
+  it('has no @RequirePermission metadata — requiring a permission to discover your permissions is circular, same as /decide', () => {
+    const proto = AuthzController.prototype as unknown as Record<string, () => unknown>
+    const handler = proto['myPermissions']
+    if (!handler) throw new Error('no such handler: myPermissions')
+    expect(Reflect.getMetadata(PERMISSION_METADATA_KEY, handler)).toBeUndefined()
   })
 })

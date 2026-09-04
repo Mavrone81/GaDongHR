@@ -180,6 +180,13 @@
     {
       "service": "svc-authz",
       "method": "GET",
+      "path": "me/permissions",
+      "exempt": "consumed-not-displayed",
+      "reason": "Called by the PWA once per session (AuthContext.applyTokens) to populate CurrentUser.permissions, which drives nav gating and every RequirePermission route. Consumed by every screen and rendered by none of its own, so it has no screen of its own to name. Carries no @RequirePermission for the same non-circular reason POST /decide carries none — a client cannot be required to know a permission in order to discover its permissions — but unlike /decide it IS browser-facing and does require a verified principal, deriving the user id from the token rather than accepting one."
+    },
+    {
+      "service": "svc-authz",
+      "method": "GET",
       "path": "roles",
       "permission": "authz.role.read",
       "screen": "/admin/roles",

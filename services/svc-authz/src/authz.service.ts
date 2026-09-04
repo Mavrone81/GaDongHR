@@ -139,6 +139,36 @@ export class AuthzService {
   }
 
   /**
+   * The caller's own permission codes, backing `GET /me/permissions`.
+   *
+   * Exists because the PWA had no way to ask this question: `web`'s
+   * `CurrentUser.permissions` was populated from a `permissions` claim
+   * that no token this realm issues actually carries (grants live here,
+   * not in Keycloak), so every `RequirePermission` route and every gated
+   * nav link rendered nothing for every real login. That was fail-safe
+   * rather than fail-open, and documented as such in `AuthContext.tsx` —
+   * but it made the whole admin UI unreachable in production.
+   *
+   * **Not an enforcement surface.** Nothing may be granted on the
+   * strength of this list: it tells a UI what to *offer*, and every
+   * request that follows is still decided independently by the resource
+   * server's own `PermissionGuard` → `POST /decide`. A caller who lies to
+   * itself about this response gains exactly nothing.
+   *
+   * Fails closed to `[]` like `decide()`, and for the same reason: an
+   * unreadable grant table must never widen what a UI offers. The
+   * consequence of a wrong answer here is a hidden menu item, never an
+   * allowed action.
+   */
+  async listPermissionsForUser(userId: string): Promise<string[]> {
+    try {
+      return await this.repo.listPermissionCodesForUser(userId)
+    } catch {
+      return []
+    }
+  }
+
+  /**
    * Task 8 brief §6: consumes `employee.created` to maintain `authz.org_unit`
    * as a local read model — this schema owns no foreign keys into any other
    * service's schema (roadmap "Database conventions": "No foreign keys

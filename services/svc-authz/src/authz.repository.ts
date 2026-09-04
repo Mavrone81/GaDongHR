@@ -144,6 +144,36 @@ export class AuthzRepository {
     return rows.map((r) => String(r['permission_code']))
   }
 
+  /**
+   * Every permission code the user reaches through any of their role
+   * grants — the set form of the same `user_role ⋈ role_permission` join
+   * `findGrantsForUserPermission` runs for a single code, so the two can
+   * never disagree about what a grant carries.
+   *
+   * `DISTINCT` because a user holding two roles that share a permission
+   * (or one role granted twice at different org scopes — `user_role` has
+   * no unique constraint, see `seed.sh`'s note on the same table) would
+   * otherwise repeat that code once per grant row.
+   *
+   * Deliberately drops org scope. This backs the UI's "may I be offered
+   * this destination at all" question, which is scope-independent: a
+   * manager scoped to one org unit still sees the Timesheets screen, and
+   * WHICH rows they get back is decided by `PermissionGuard`'s
+   * `authzScope` on each real request. Returning scope here would invite
+   * a caller to filter on it client-side and mistake that for
+   * enforcement.
+   */
+  async listPermissionCodesForUser(userId: string): Promise<string[]> {
+    const { rows } = await this.db.query(
+      `SELECT DISTINCT rp.permission_code
+         FROM authz.user_role ur
+         JOIN authz.role_permission rp ON rp.role_id = ur.role_id
+        WHERE ur.user_id = $1`,
+      [userId],
+    )
+    return rows.map((r) => String(r['permission_code']))
+  }
+
   async insertUserRole(tx: Queryable, input: NewUserRoleGrant): Promise<UserRoleGrantRow> {
     const { rows } = await tx.query(
       `INSERT INTO authz.user_role (user_id, role_id, org_scope_unit_id, granted_by)
