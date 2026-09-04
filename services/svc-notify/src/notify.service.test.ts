@@ -2,7 +2,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Queryable } from '@gadong/kernel'
-import { NotifyService, NotificationNotFound, placeholderEmailAddress } from './notify.service'
+import { NotifyService, NotificationNotFound } from './notify.service'
+import type { EmployeeDirectory } from './employee-directory'
 import type { EmailTransport, EmployeeCreatedPayload, LeaveApprovedPayload, ClaimApprovedForPayrollPayload, PayslipIssuedPayload } from './notify.service'
 import { NotifyRepository } from './notify.repository'
 import { TemplateRenderer } from './templates'
@@ -69,6 +70,23 @@ function payslipIssued(overrides: Partial<PayslipIssuedPayload> = {}): PayslipIs
   }
 }
 
+/**
+ * Every employee has an address unless a test says otherwise. `lookupEmail`
+ * is deliberately id-derived rather than a fixed constant so a test can
+ * still tell two recipients' messages apart (the multi-recipient SMTP test
+ * below does exactly that).
+ */
+class FakeEmployeeDirectory implements EmployeeDirectory {
+  readonly lookups: string[] = []
+  /** Override to return `null` (no address on file) or throw (directory unreachable). */
+  lookupImpl: (employeeId: string) => Promise<string | null> = async (employeeId) => `${employeeId}@example.co.th`
+
+  async lookupEmail(employeeId: string): Promise<string | null> {
+    this.lookups.push(employeeId)
+    return this.lookupImpl(employeeId)
+  }
+}
+
 /** Real shipped templates (`services/svc-notify/templates`) — used for every test that doesn't need a deliberately-broken fixture. */
 function harness(tenantDefaultLang: 'th' | 'en' | 'zh' = 'th') {
   const db = new FakeNotifyDb()
@@ -76,8 +94,9 @@ function harness(tenantDefaultLang: 'th' | 'en' | 'zh' = 'th') {
   const repo = new NotifyRepository(conn)
   const emailTransport = new FakeEmailTransport()
   const templates = new TemplateRenderer()
-  const service = new NotifyService(repo, emailTransport, templates, tenantDefaultLang)
-  return { db, conn, repo, emailTransport, templates, service }
+  const directory = new FakeEmployeeDirectory()
+  const service = new NotifyService(repo, emailTransport, templates, tenantDefaultLang, directory)
+  return { db, conn, repo, emailTransport, templates, service, directory }
 }
 
 async function inTx<T>(conn: Queryable, fn: () => Promise<T>): Promise<T> {
@@ -212,7 +231,7 @@ describe('SMTP failure does not roll back or retry the consumed event', () => {
     await inTx(conn, () => service.handleEmployeeCreated(conn, 'evt-emp-b', employeeCreated({ id: 'emp-b', preferredLang: 'en' })))
 
     emailTransport.sendImpl = async (message) => {
-      if (message.to === placeholderEmailAddress('emp-a')) throw new Error('emp-a mailbox full')
+      if (message.to === 'emp-a@example.co.th') throw new Error('emp-a mailbox full')
     }
 
     await inTx(conn, () => service.handleLeaveApproved(conn, 'evt-leave-a', leaveApproved({ employeeId: 'emp-a' })))
@@ -240,7 +259,7 @@ describe('A template missing for the recipient\'s language falls back to English
     const repo = new NotifyRepository(conn)
     const emailTransport = new FakeEmailTransport()
     const templates = new TemplateRenderer(logger, dir)
-    const service = new NotifyService(repo, emailTransport, templates, 'en')
+    const service = new NotifyService(repo, emailTransport, templates, 'en', new FakeEmployeeDirectory())
 
     await inTx(conn, () => service.handleEmployeeCreated(conn, 'evt-emp-zh', employeeCreated({ id: 'emp-zh', preferredLang: 'zh' })))
     await inTx(conn, () => service.handleLeaveApproved(conn, 'evt-leave-zh', leaveApproved({ employeeId: 'emp-zh' })))
@@ -356,5 +375,98 @@ describe('NotifyService.listNotifications / markRead — self-scoping', () => {
 
     const unread = await service.listNotifications('emp-a', true)
     expect(unread).toHaveLength(0)
+  })
+})
+
+/**
+ * Every notification used to be addressed to
+ * `<recipientUserId>@users.gadonghr.invalid`. `.invalid` is a reserved TLD
+ * that can never resolve, so once SMTP was configured correctly (2026-09-03)
+ * every single notification became a guaranteed bounce against a real,
+ * young, reputation-sensitive mail account. These tests pin the replacement:
+ * a real lookup through svc-onboarding's audited endpoint, and — the part
+ * chosen deliberately over the alternative — a `failed` delivery row rather
+ * than a thrown error when there is no address, so an employee without an
+ * email still gets their in-app notification.
+ */
+describe('Email delivery resolves a real address, and records a failure rather than inventing one', () => {
+  it('sends to the address the directory returns', async () => {
+    const { conn, service, emailTransport, directory } = harness()
+    await inTx(conn, () => service.handleEmployeeCreated(conn, 'evt-1', employeeCreated({ id: 'emp-1', preferredLang: 'en' })))
+
+    await inTx(conn, () => service.handleLeaveApproved(conn, 'evt-2', leaveApproved({ employeeId: 'emp-1' })))
+
+    expect(directory.lookups).toEqual(['emp-1'])
+    expect(emailTransport.calls).toHaveLength(1)
+    expect(emailTransport.calls[0]?.to).toBe('emp-1@example.co.th')
+  })
+
+  it('never addresses anything to the old .invalid placeholder', async () => {
+    const { conn, service, emailTransport } = harness()
+    await inTx(conn, () => service.handleEmployeeCreated(conn, 'evt-1', employeeCreated({ id: 'emp-1', preferredLang: 'en' })))
+
+    await inTx(conn, () => service.handleLeaveApproved(conn, 'evt-2', leaveApproved({ employeeId: 'emp-1' })))
+
+    for (const call of emailTransport.calls) {
+      expect(call.to).not.toContain('.invalid')
+    }
+  })
+
+  it('records a failed email delivery and attempts no send when the recipient has no address on file', async () => {
+    const { db, conn, service, emailTransport, directory } = harness()
+    directory.lookupImpl = async () => null
+    await inTx(conn, () => service.handleEmployeeCreated(conn, 'evt-1', employeeCreated({ id: 'emp-1', preferredLang: 'en' })))
+
+    await inTx(conn, () => service.handleLeaveApproved(conn, 'evt-2', leaveApproved({ employeeId: 'emp-1' })))
+
+    expect(emailTransport.calls).toHaveLength(0)
+    const email = db.debugDeliveries().find((d) => d.channel === 'email')
+    expect(email?.status).toBe('failed')
+    expect(email?.last_error).toContain('no email address on file')
+  })
+
+  it('still writes the in-app notification when there is no email address — the product notification is not conditional on a mailbox', async () => {
+    const { db, conn, service, directory } = harness()
+    directory.lookupImpl = async () => null
+    await inTx(conn, () => service.handleEmployeeCreated(conn, 'evt-1', employeeCreated({ id: 'emp-1', preferredLang: 'en' })))
+
+    await inTx(conn, () => service.handleLeaveApproved(conn, 'evt-2', leaveApproved({ employeeId: 'emp-1' })))
+
+    expect(db.debugNotifications()).toHaveLength(1)
+    expect(db.debugDeliveries().find((d) => d.channel === 'in_app')?.status).toBe('sent')
+  })
+
+  it('distinguishes an unreachable directory from a genuine absence of an address', async () => {
+    const { db, conn, service, emailTransport, directory } = harness()
+    directory.lookupImpl = async () => {
+      throw new Error('svc-onboarding returned 503 resolving a notification recipient\'s email')
+    }
+    await inTx(conn, () => service.handleEmployeeCreated(conn, 'evt-1', employeeCreated({ id: 'emp-1', preferredLang: 'en' })))
+
+    await inTx(conn, () => service.handleLeaveApproved(conn, 'evt-2', leaveApproved({ employeeId: 'emp-1' })))
+
+    expect(emailTransport.calls).toHaveLength(0)
+    const email = db.debugDeliveries().find((d) => d.channel === 'email')
+    expect(email?.status).toBe('failed')
+    expect(email?.last_error).toContain('lookup failed')
+    expect(email?.last_error).not.toContain('no email address on file')
+  })
+
+  it('a directory failure for one recipient does not roll back the transaction or re-notify the batch', async () => {
+    const { db, conn, service, directory } = harness()
+    await inTx(conn, () => service.handleEmployeeCreated(conn, 'evt-a', employeeCreated({ id: 'emp-a', preferredLang: 'en' })))
+    await inTx(conn, () => service.handleEmployeeCreated(conn, 'evt-b', employeeCreated({ id: 'emp-b', preferredLang: 'en' })))
+    directory.lookupImpl = async (id) => (id === 'emp-a' ? null : `${id}@example.co.th`)
+
+    await inTx(conn, () => service.handleLeaveApproved(conn, 'evt-leave-a', leaveApproved({ employeeId: 'emp-a' })))
+    await inTx(conn, () => service.handleLeaveApproved(conn, 'evt-leave-b', leaveApproved({ employeeId: 'emp-b' })))
+
+    expect(db.debugNotifications()).toHaveLength(2)
+    const deliveries = db.debugDeliveries().filter((d) => d.channel === 'email')
+    const notifications = db.debugNotifications()
+    const forA = deliveries.find((d) => notifications.find((n) => n.id === d.notification_id)?.recipient_user_id === 'emp-a')
+    const forB = deliveries.find((d) => notifications.find((n) => n.id === d.notification_id)?.recipient_user_id === 'emp-b')
+    expect(forA?.status).toBe('failed')
+    expect(forB?.status).toBe('sent')
   })
 })

@@ -567,6 +567,10 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: postgresql://notify:${DB_PASSWORD_NOTIFY}@postgres:5432/${POSTGRES_DB}
       AUTHZ_URL: http://svc-authz:3000
+      ONBOARDING_URL: http://svc-onboarding:3000
+      OIDC_TOKEN_URL: http://keycloak:8080/auth/realms/gadonghr/protocol/openid-connect/token
+      S2S_CLIENT_ID: svc-notify
+      S2S_CLIENT_SECRET: ${KEYCLOAK_SVC_NOTIFY_CLIENT_SECRET}
       SMTP_HOST: ${SMTP_HOST}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-false}

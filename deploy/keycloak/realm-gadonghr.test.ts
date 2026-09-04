@@ -101,13 +101,19 @@ describe('deploy/keycloak/realm-gadonghr.json', () => {
     expect(realm.enabled).toBe(true)
   })
 
-  test('declares exactly ten clients: web, seeder, the four S2S auth task machine principals, and the four crypto-auth task machine principals', () => {
+  test('declares exactly eleven clients: web, seeder, the four S2S auth task machine principals, the four crypto-auth task machine principals, and svc-notify', () => {
     expect(realm.clients.map((c) => c.clientId).sort()).toEqual([
       'seeder',
       'svc-attendance',
       'svc-claims',
       'svc-docs',
       'svc-leave',
+      // svc-notify reads a recipient's email from svc-onboarding's audited
+      // /employees/:id/sensitive before every send. Added when the
+      // `<uuid>@users.gadonghr.invalid` placeholder was replaced by a real
+      // lookup — that route is guarded by employee.sensitive.read, so an
+      // unauthenticated fetch is denied by default.
+      'svc-notify',
       'svc-onboarding',
       'svc-payroll',
       'svc-scheduler',

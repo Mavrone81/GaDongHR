@@ -1,6 +1,7 @@
 import { formatDate, formatTHB, idempotent } from '@gadong/kernel'
 import type { Locale, Queryable } from '@gadong/kernel'
 import { NotifyRepository } from './notify.repository'
+import type { EmployeeDirectory } from './employee-directory'
 import type { NotificationRow } from './notify.repository'
 import { TemplateRenderer } from './templates'
 
@@ -70,10 +71,20 @@ export interface PayslipIssuedPayload {
   lang: string
 }
 
-/** `GaDongHR`'s onboarding service does not exist yet in this codebase (Phase 1 builds the platform services only — roadmap "Program roadmap"), and no event in the catalog this service consumes carries an email address at all: `employee.created`'s payload (`{id, empCode, orgUnitId, employmentType, provinceCode, startDate, status, preferredLang}`) has none, and email is S2-class PII the catalog says must be "fetched by ID through the owning service's audited API" — an API that has nothing to call yet. Until it exists, `to` is a synthetic address derived from the recipient's user id, so this service's actual contract (render in the recipient's language, dedupe on event id, exactly one SMTP send per notification, the in-app row survives an SMTP failure) is provably correct today against a real `EmailTransport` shape. Swapping in a real address lookup is a one-line change at this call site, not a redesign — see task-11-report.md, "deviations". */
-export function placeholderEmailAddress(recipientUserId: string): string {
-  return `${recipientUserId}@users.gadonghr.invalid`
-}
+/**
+ * REMOVED (kept as a note, not as code): this used to be
+ * `placeholderEmailAddress(recipientUserId)`, returning
+ * `<uuid>@users.gadonghr.invalid`. It was the Phase 1 stand-in for an
+ * address lookup that had nothing to call — svc-onboarding did not exist
+ * and no event in the catalog carries an email address.
+ *
+ * Every notification was therefore addressed to a reserved TLD that can
+ * never resolve. Invisible while SMTP was misconfigured (every send died
+ * at connect); a guaranteed bounce on every notification the moment SMTP
+ * was fixed. Replaced by `EmployeeDirectory.lookupEmail`, which reads the
+ * address through svc-onboarding's audited endpoint with a mandatory
+ * `purpose`.
+ */
 
 function isLocale(v: unknown): v is Locale {
   return v === 'th' || v === 'en' || v === 'zh'
@@ -107,6 +118,7 @@ export class NotifyService {
     private readonly emailTransport: EmailTransport,
     private readonly templates: TemplateRenderer,
     private readonly tenantDefaultLang: Locale,
+    private readonly directory: EmployeeDirectory,
   ) {}
 
   async handleEmployeeCreated(tx: Queryable, eventId: string, payload: EmployeeCreatedPayload): Promise<void> {
@@ -210,9 +222,53 @@ export class NotifyService {
       sent: true,
     })
 
+    // Resolve the mailbox BEFORE attempting a send. A recipient with no
+    // address on file is recorded as a failed email delivery and nothing
+    // is handed to SMTP — sending to a fabricated address is what produced
+    // a guaranteed bounce per notification once SMTP began working.
+    //
+    // Both outcomes below are `failed` rows rather than exceptions, for
+    // the same reason the SMTP catch is: this must not roll back the
+    // transaction (which would undo the in-app notification and the
+    // processed_events row, redelivering the event and re-notifying
+    // everyone else in the batch). The in-app notification is unaffected
+    // either way — an employee with no email still gets notified in the
+    // product.
+    let to: string | null = null
+    try {
+      to = await this.directory.lookupEmail(recipientUserId)
+    } catch (err) {
+      // The directory being unreachable is distinguished from it
+      // answering "no address": same failed row, different lastError, so
+      // an operator reading notify.delivery can tell an outage from a
+      // data gap.
+      const message = err instanceof Error ? err.message : String(err)
+      await this.repo.insertDelivery(tx, {
+        notificationId: notification.id,
+        channel: 'email',
+        status: 'failed',
+        attempts: 1,
+        lastError: `email address lookup failed: ${message}`,
+        sent: false,
+      })
+      return
+    }
+
+    if (to === null) {
+      await this.repo.insertDelivery(tx, {
+        notificationId: notification.id,
+        channel: 'email',
+        status: 'failed',
+        attempts: 1,
+        lastError: 'no email address on file for recipient',
+        sent: false,
+      })
+      return
+    }
+
     try {
       await this.emailTransport.send({
-        to: placeholderEmailAddress(recipientUserId),
+        to,
         subject: rendered.subject,
         body: rendered.body,
       })

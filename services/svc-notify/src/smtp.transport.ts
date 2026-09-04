@@ -17,7 +17,7 @@ export interface SmtpOptions {
  * constraints: "no real SMTP here"). Kept deliberately thin: `send`/
  * `verify` are the entire surface `NotifyService`/`NotifyController` need,
  * so swapping SMTP providers or adding a real employee-directory lookup
- * (see `notify.service.ts`'s `placeholderEmailAddress`) touches only this
+ * (now `employee-directory.ts`'s `EmployeeDirectory`) touches only this
  * file.
  */
 export class NodemailerEmailTransport implements EmailTransport {

@@ -156,6 +156,7 @@ require_healthy() {
 : "${KEYCLOAK_SVC_CLAIMS_CLIENT_SECRET:?KEYCLOAK_SVC_CLAIMS_CLIENT_SECRET must be set (source .env first)}"
 : "${KEYCLOAK_SVC_LEAVE_CLIENT_SECRET:?KEYCLOAK_SVC_LEAVE_CLIENT_SECRET must be set (source .env first)}"
 : "${KEYCLOAK_SVC_DOCS_CLIENT_SECRET:?KEYCLOAK_SVC_DOCS_CLIENT_SECRET must be set (source .env first)}"
+: "${KEYCLOAK_SVC_NOTIFY_CLIENT_SECRET:?KEYCLOAK_SVC_NOTIFY_CLIENT_SECRET must be set (source .env first)}"
 : "${POSTGRES_SUPERUSER:?POSTGRES_SUPERUSER must be set (source .env first)}"
 : "${POSTGRES_DB:?POSTGRES_DB must be set (source .env first)}"
 
@@ -326,6 +327,7 @@ if ! compose exec -T \
   -e KEYCLOAK_SVC_CLAIMS_CLIENT_SECRET="$KEYCLOAK_SVC_CLAIMS_CLIENT_SECRET" \
   -e KEYCLOAK_SVC_LEAVE_CLIENT_SECRET="$KEYCLOAK_SVC_LEAVE_CLIENT_SECRET" \
   -e KEYCLOAK_SVC_DOCS_CLIENT_SECRET="$KEYCLOAK_SVC_DOCS_CLIENT_SECRET" \
+  -e KEYCLOAK_SVC_NOTIFY_CLIENT_SECRET="$KEYCLOAK_SVC_NOTIFY_CLIENT_SECRET" \
   svc-config node - <<'JS'
 const { readdirSync } = require('node:fs')
 const { join } = require('node:path')
@@ -450,6 +452,11 @@ async function main() {
   await pinClientSecret(adminToken, 'svc-claims', process.env.KEYCLOAK_SVC_CLAIMS_CLIENT_SECRET)
   await pinClientSecret(adminToken, 'svc-leave', process.env.KEYCLOAK_SVC_LEAVE_CLIENT_SECRET)
   await pinClientSecret(adminToken, 'svc-docs', process.env.KEYCLOAK_SVC_DOCS_CLIENT_SECRET)
+  // svc-notify reads a recipient's email from svc-onboarding's audited
+  // /employees/:id/sensitive before every email send — a live compose
+  // service, so this secret is load-bearing rather than
+  // forward-provisioned.
+  await pinClientSecret(adminToken, 'svc-notify', process.env.KEYCLOAK_SVC_NOTIFY_CLIENT_SECRET)
   const seederToken = await getSeederToken()
   console.log('Obtained a seeder client-credentials token from Keycloak.')
 

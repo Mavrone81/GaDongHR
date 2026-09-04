@@ -3,7 +3,6 @@
   "displayName": "GaDongHR",
   "enabled": true,
   "sslRequired": "external",
-
   "loginWithEmailAllowed": true,
   "registrationEmailAsUsername": false,
   "registrationAllowed": false,
@@ -11,7 +10,6 @@
   "editUsernameAllowed": false,
   "duplicateEmailsAllowed": false,
   "verifyEmail": false,
-
   "accessTokenLifespan": 900,
   "accessTokenLifespanForImplicitFlow": 900,
   "ssoSessionIdleTimeout": 1800,
@@ -22,7 +20,6 @@
   "offlineSessionMaxLifespanEnabled": false,
   "revokeRefreshToken": true,
   "refreshTokenMaxReuse": 0,
-
   "bruteForceProtected": true,
   "permanentLockout": false,
   "failureFactor": 5,
@@ -31,7 +28,6 @@
   "minimumQuickLoginWaitSeconds": 60,
   "maxFailureWaitSeconds": 900,
   "maxDeltaTimeSeconds": 43200,
-
   "clients": [
     {
       "clientId": "web",
@@ -46,8 +42,12 @@
       "serviceAccountsEnabled": false,
       "authorizationServicesEnabled": false,
       "frontchannelLogout": true,
-      "redirectUris": ["https://hr.bevorasg.com/*"],
-      "webOrigins": ["https://hr.bevorasg.com"],
+      "redirectUris": [
+        "https://hr.bevorasg.com/*"
+      ],
+      "webOrigins": [
+        "https://hr.bevorasg.com"
+      ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "https://hr.bevorasg.com/*",
@@ -338,9 +338,38 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "svc-notify",
+      "name": "GaDongHR svc-notify machine identity (recipient email lookup)",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "gadonghr-services-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "",
+            "included.custom.audience": "gadonghr-services",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
     }
   ],
-
   "users": [
     {
       "id": "00000000-0000-4000-8000-00005eed0001",

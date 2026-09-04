@@ -2,7 +2,16 @@ import 'reflect-metadata'
 import { Module } from '@nestjs/common'
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common'
 import { APP_FILTER, APP_GUARD } from '@nestjs/core'
-import { AuthzClient, GadongErrorFilter, PermissionGuard, createOidcMiddlewareHandler, createPool } from '@gadong/kernel'
+import {
+  AuthzClient,
+  GadongErrorFilter,
+  MachineTokenClient,
+  PermissionGuard,
+  createAuthenticatedFetch,
+  createHttpTokenTransport,
+  createOidcMiddlewareHandler,
+  createPool,
+} from '@gadong/kernel'
 import type { OidcMiddlewareHandler } from '@gadong/kernel'
 import type { AuthzTransport, Locale, Queryable } from '@gadong/kernel'
 import { DB_POOL, EMAIL_TRANSPORT, NotifyController } from './notify.controller'
@@ -11,6 +20,26 @@ import { NotifyService } from './notify.service'
 import type { EmailTransport } from './notify.service'
 import { TemplateRenderer } from './templates'
 import { NodemailerEmailTransport } from './smtp.transport'
+import { HttpEmployeeDirectory } from './employee-directory'
+import type { EmployeeDirectory } from './employee-directory'
+
+/** DI token for the svc-onboarding lookup — a `Symbol`, matching `EMAIL_TRANSPORT`'s pattern, so a test can inject a fake without a live onboarding service. */
+export const EMPLOYEE_DIRECTORY = Symbol('EMPLOYEE_DIRECTORY')
+
+/**
+ * svc-notify's machine identity, used for exactly one call: reading a
+ * recipient's email from svc-onboarding's audited
+ * `GET /employees/:id/sensitive`. That route is guarded by
+ * `employee.sensitive.read`, so an unauthenticated fetch is denied by
+ * default — the same wall every other cross-service call hit before
+ * machine identities existed.
+ */
+function createMachineTokenClient(): MachineTokenClient {
+  return new MachineTokenClient(createHttpTokenTransport(requiredEnv('OIDC_TOKEN_URL')), {
+    clientId: requiredEnv('S2S_CLIENT_ID'),
+    clientSecret: requiredEnv('S2S_CLIENT_SECRET'),
+  })
+}
 
 /**
  * `svc-authz` HTTP wiring — identical shape and identical justification to
@@ -120,13 +149,44 @@ const DEFAULT_TENANT_LANG: Locale = 'th'
         }),
     },
     {
+      provide: EMPLOYEE_DIRECTORY,
+      useFactory: (): EmployeeDirectory => {
+        /*
+         * The machine-token client is built on FIRST USE, not here.
+         * `createMachineTokenClient` calls `requiredEnv`, and a provider
+         * factory runs at module init — so building it eagerly would turn
+         * a missing S2S_CLIENT_SECRET into svc-notify failing to boot at
+         * all, taking down in-app notifications and `GET /health` along
+         * with the email path.
+         *
+         * Deferred, the same misconfiguration surfaces as a thrown lookup,
+         * which `NotifyService.deliver` already records as a failed email
+         * delivery while the in-app notification still lands. Degrading
+         * one channel beats losing the service, and it matches the
+         * fail-closed-but-stay-up posture the rest of this system takes.
+         */
+        let authed: ReturnType<typeof createAuthenticatedFetch> | null = null
+        const lazyAuthedFetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> => {
+          authed ??= createAuthenticatedFetch(createMachineTokenClient())
+          return authed(input, init)
+        }) as typeof fetch
+
+        return new HttpEmployeeDirectory(process.env['ONBOARDING_URL'] ?? 'http://svc-onboarding:3000', lazyAuthedFetch)
+      },
+    },
+    {
       provide: NotifyService,
-      useFactory: (repo: NotifyRepository, emailTransport: EmailTransport, templates: TemplateRenderer) => {
+      useFactory: (
+        repo: NotifyRepository,
+        emailTransport: EmailTransport,
+        templates: TemplateRenderer,
+        directory: EmployeeDirectory,
+      ) => {
         const envLang = process.env['NOTIFY_TENANT_DEFAULT_LANG']
         const tenantDefaultLang = isLocale(envLang) ? envLang : DEFAULT_TENANT_LANG
-        return new NotifyService(repo, emailTransport, templates, tenantDefaultLang)
+        return new NotifyService(repo, emailTransport, templates, tenantDefaultLang, directory)
       },
-      inject: [NotifyRepository, EMAIL_TRANSPORT, TemplateRenderer],
+      inject: [NotifyRepository, EMAIL_TRANSPORT, TemplateRenderer, EMPLOYEE_DIRECTORY],
     },
   ],
 })
