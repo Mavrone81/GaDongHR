@@ -133,18 +133,94 @@
     }
   },
   "onboarding": {
-    "title": "入职",
-    "welcome": "欢迎加入团队",
+    "employees": {
+      "title": "员工",
+      "filterLabel": "按状态筛选",
+      "filterAll": "全部",
+      "emptyState": "暂无员工。",
+      "status": {
+        "probation": "试用期",
+        "active": "在职",
+        "suspended": "停职",
+        "terminated": "已离职"
+      },
+      "column": {
+        "empCode": "员工编号",
+        "employmentType": "雇佣类型",
+        "orgUnit": "组织单位",
+        "startDate": "入职日期",
+        "status": "状态",
+        "actions": "操作"
+      }
+    },
+    "employmentType": {
+      "monthly": "月薪",
+      "daily": "日薪",
+      "hourly": "时薪",
+      "contract": "合同"
+    },
+    "hire": {
+      "cta": "新增员工",
+      "title": "新员工",
+      "submit": "创建员工",
+      "empCode": "员工编号",
+      "firstNameTh": "名（泰文）",
+      "lastNameTh": "姓（泰文）",
+      "firstNameEn": "名（英文）",
+      "lastNameEn": "姓（英文）",
+      "nameZh": "姓名（中文）",
+      "nationalId": "身份证号",
+      "taxId": "税号",
+      "ssoNumber": "社保号",
+      "bankCode": "银行代码",
+      "bankAccount": "银行账号",
+      "dob": "出生日期",
+      "phone": "电话",
+      "email": "电子邮件",
+      "houseNo": "门牌号",
+      "subDistrict": "分区",
+      "district": "区",
+      "province": "府/省",
+      "postalCode": "邮政编码",
+      "employmentType": "雇佣类型",
+      "orgUnitId": "组织单位",
+      "positionId": "职位",
+      "provinceCode": "府代码",
+      "startDate": "入职日期",
+      "probationEndDate": "试用期结束日期",
+      "preferredLang": "首选语言"
+    },
+    "detail": {
+      "title": "员工",
+      "backToList": "返回员工列表",
+      "nameTh": "姓名（泰文）",
+      "nameZh": "姓名（中文）"
+    },
+    "consent": {
+      "title": "PDPA 同意",
+      "separateNote": "生物识别同意将单独征求，拒绝不会影响雇佣关系。",
+      "grant": "给予同意",
+      "refuse": "拒绝",
+      "recordedGranted": "同意已记录。",
+      "recordedRefused": "拒绝已记录。",
+      "hrProcessing": {
+        "title": "人事数据处理",
+        "body": "同意为人事管理、薪酬发放及法定申报处理个人数据。"
+      },
+      "biometric": {
+        "title": "生物识别数据（人脸识别）",
+        "body": "同意登记人脸模板用于打卡。可以拒绝——将改用其他打卡方式。"
+      }
+    },
     "checklist": {
-      "title": "入职清单"
-    },
-    "document": {
-      "upload": "上传文件"
-    },
-    "probation": {
-      "label": "试用期"
-    },
-    "start_date": "入职日期"
+      "title": "入职清单",
+      "emptyState": "暂无清单任务。",
+      "done": "已完成",
+      "open": "待办",
+      "escalated": "已逾期",
+      "complete": "标记完成",
+      "noDueDate": "无截止日期"
+    }
   },
   "glossary": {
     "employee": "员工",
@@ -201,7 +277,8 @@
       "audit": "审计",
       "documents": "文档",
       "roles": "角色",
-      "notifications": "通知"
+      "notifications": "通知",
+      "employees": "员工"
     },
     "locale": {
       "th": "ไทย",

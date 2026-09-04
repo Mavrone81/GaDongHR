@@ -16,6 +16,10 @@ export interface NavDestination {
 }
 
 export const NAV_DESTINATIONS: NavDestination[] = [
+  // M1 Onboarding, added when svc-onboarding was first served. It leads
+  // the list because it is where a working day starts (and where UAT pack
+  // U2 starts) — the four that follow are admin and compliance surfaces.
+  { path: '/onboarding/employees', labelKey: 'shell.nav.employees', permission: 'employee.read' },
   { path: '/admin/statutory-rules', labelKey: 'shell.nav.statutoryRules', permission: 'config.rule.read' },
   { path: '/compliance/audit', labelKey: 'shell.nav.audit', permission: 'audit.read' },
   { path: '/documents', labelKey: 'shell.nav.documents', permission: 'document.read' },
@@ -24,4 +28,4 @@ export const NAV_DESTINATIONS: NavDestination[] = [
 ]
 
 /** The index route's redirect target — a named constant (not `NAV_DESTINATIONS[0].path`) so `noUncheckedIndexedAccess` doesn't need a non-null assertion at every call site. */
-export const DEFAULT_NAV_PATH: string = NAV_DESTINATIONS[0]?.path ?? '/admin/statutory-rules'
+export const DEFAULT_NAV_PATH: string = NAV_DESTINATIONS[0]?.path ?? '/onboarding/employees'

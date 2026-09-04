@@ -488,24 +488,24 @@
       "method": "POST",
       "path": "employees",
       "permission": "employee.create",
-      "screen": "/hr/employees",
-      "notes": "Creates a new employee master record from the HR employee console."
+      "screen": "/onboarding/employees",
+      "notes": "Creates a new employee master record from the HR employee console. Screen built and served when svc-onboarding was first deployed (UAT pack U2); the previous /hr/* and /ess/* values were forward declarations for screens that did not exist yet."
     },
     {
       "service": "svc-onboarding",
       "method": "GET",
       "path": "employees",
       "permission": "employee.read",
-      "screen": "/hr/employees",
-      "notes": "Employee master list — the HR employee console's default view."
+      "screen": "/onboarding/employees",
+      "notes": "Employee master list — the HR employee console's default view. Screen built and served when svc-onboarding was first deployed (UAT pack U2); the previous /hr/* and /ess/* values were forward declarations for screens that did not exist yet."
     },
     {
       "service": "svc-onboarding",
       "method": "GET",
       "path": "employees/:id",
       "permission": "employee.read",
-      "screen": "/hr/employees",
-      "notes": "Single employee record detail view on the same console."
+      "screen": "/onboarding/employees/:id",
+      "notes": "Single employee record detail view on the same console. Screen built and served when svc-onboarding was first deployed (UAT pack U2); the previous /hr/* and /ess/* values were forward declarations for screens that did not exist yet."
     },
     {
       "service": "svc-onboarding",
@@ -536,24 +536,24 @@
       "method": "GET",
       "path": "employees/:id/checklist",
       "permission": "onboarding.manage",
-      "screen": "/hr/onboarding",
-      "notes": "HR's onboarding checklist/task tracker for one employee (varies by employment type)."
+      "screen": "/onboarding/employees/:id",
+      "notes": "HR's onboarding checklist/task tracker for one employee (varies by employment type). Screen built and served when svc-onboarding was first deployed (UAT pack U2); the previous /hr/* and /ess/* values were forward declarations for screens that did not exist yet."
     },
     {
       "service": "svc-onboarding",
       "method": "POST",
       "path": "checklist/tasks/:taskId/complete",
       "permission": "onboarding.manage",
-      "screen": "/hr/onboarding",
-      "notes": "Marks an onboarding checklist task complete from the same tracker."
+      "screen": "/onboarding/employees/:id",
+      "notes": "Marks an onboarding checklist task complete from the same tracker. Screen built and served when svc-onboarding was first deployed (UAT pack U2); the previous /hr/* and /ess/* values were forward declarations for screens that did not exist yet."
     },
     {
       "service": "svc-onboarding",
       "method": "POST",
       "path": "employees/:id/consents",
       "permission": "consent.self",
-      "screen": "/ess/onboarding",
-      "notes": "Employee records PDPA consent (general HR processing, biometric enrolment) for their own record, as part of completing onboarding."
+      "screen": "/onboarding/employees/:id",
+      "notes": "Employee records PDPA consent (general HR processing, biometric enrolment) for their own record, as part of completing onboarding. Screen built and served when svc-onboarding was first deployed (UAT pack U2); the previous /hr/* and /ess/* values were forward declarations for screens that did not exist yet."
     },
     {
       "service": "svc-onboarding",

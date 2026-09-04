@@ -133,18 +133,94 @@
     }
   },
   "onboarding": {
-    "title": "Onboarding",
-    "welcome": "Welcome to the team",
+    "employees": {
+      "title": "Employees",
+      "filterLabel": "Filter by status",
+      "filterAll": "All",
+      "emptyState": "No employees yet.",
+      "status": {
+        "probation": "Probation",
+        "active": "Active",
+        "suspended": "Suspended",
+        "terminated": "Terminated"
+      },
+      "column": {
+        "empCode": "Employee code",
+        "employmentType": "Employment type",
+        "orgUnit": "Org unit",
+        "startDate": "Start date",
+        "status": "Status",
+        "actions": "Actions"
+      }
+    },
+    "employmentType": {
+      "monthly": "Monthly",
+      "daily": "Daily",
+      "hourly": "Hourly",
+      "contract": "Contract"
+    },
+    "hire": {
+      "cta": "Hire an employee",
+      "title": "New employee",
+      "submit": "Create employee",
+      "empCode": "Employee code",
+      "firstNameTh": "First name (Thai)",
+      "lastNameTh": "Last name (Thai)",
+      "firstNameEn": "First name (English)",
+      "lastNameEn": "Last name (English)",
+      "nameZh": "Name (Chinese)",
+      "nationalId": "National ID",
+      "taxId": "Tax ID",
+      "ssoNumber": "SSO number",
+      "bankCode": "Bank code",
+      "bankAccount": "Bank account",
+      "dob": "Date of birth",
+      "phone": "Phone",
+      "email": "Email",
+      "houseNo": "House number",
+      "subDistrict": "Sub-district",
+      "district": "District",
+      "province": "Province",
+      "postalCode": "Postal code",
+      "employmentType": "Employment type",
+      "orgUnitId": "Org unit",
+      "positionId": "Position",
+      "provinceCode": "Province code",
+      "startDate": "Start date",
+      "probationEndDate": "Probation end date",
+      "preferredLang": "Preferred language"
+    },
+    "detail": {
+      "title": "Employee",
+      "backToList": "Back to employees",
+      "nameTh": "Name (Thai)",
+      "nameZh": "Name (Chinese)"
+    },
+    "consent": {
+      "title": "PDPA consent",
+      "separateNote": "Biometric consent is asked separately and can be refused without affecting employment.",
+      "grant": "Give consent",
+      "refuse": "Refuse",
+      "recordedGranted": "Consent recorded.",
+      "recordedRefused": "Refusal recorded.",
+      "hrProcessing": {
+        "title": "HR data processing",
+        "body": "Consent to process personal data for employment administration, payroll and statutory reporting."
+      },
+      "biometric": {
+        "title": "Biometric data (face recognition)",
+        "body": "Consent to enrol a face template for clock-in. Refusing is allowed — an alternative clock-in method will be used instead."
+      }
+    },
     "checklist": {
-      "title": "Onboarding checklist"
-    },
-    "document": {
-      "upload": "Upload document"
-    },
-    "probation": {
-      "label": "Probation"
-    },
-    "start_date": "Start date"
+      "title": "Onboarding checklist",
+      "emptyState": "No checklist tasks.",
+      "done": "Done",
+      "open": "Open",
+      "escalated": "Overdue",
+      "complete": "Mark complete",
+      "noDueDate": "No due date"
+    }
   },
   "glossary": {
     "employee": "Employee",
@@ -201,7 +277,8 @@
       "audit": "Audit",
       "documents": "Documents",
       "roles": "Roles",
-      "notifications": "Notifications"
+      "notifications": "Notifications",
+      "employees": "Employees"
     },
     "locale": {
       "th": "ไทย",

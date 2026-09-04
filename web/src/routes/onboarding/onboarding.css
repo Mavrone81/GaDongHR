@@ -1,0 +1,165 @@
+/*
+ * M1 Onboarding — employee list, hire form, employee detail with consent
+ * and checklist. Shared primitives and the page frame
+ * (`components/page.css`) cover the generic treatment; what is here is
+ * specific to this module. Every colour is a `var(--token)` — nothing
+ * hard-codes a hex, and nothing but `Seal` may use `--seal`.
+ */
+
+/* This module's screens are tabular/form-dense; 56rem is too narrow for
+   six columns or a two-column form. Same modifier the statutory-rules
+   screen uses, and the same reasoning. */
+.page--wide {
+  max-width: 76rem;
+}
+
+/*
+ * A table that can still exceed its container (six columns, and org-unit
+ * and position ids are opaque strings) scrolls ITSELF rather than putting
+ * the whole document into horizontal overflow. The page body must never
+ * scroll sideways; a data table legitimately may.
+ */
+.table-scroll {
+  overflow-x: auto;
+}
+
+.onboarding-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--rule);
+}
+
+.onboarding-filter .btn[aria-pressed='true'] {
+  color: var(--carapace);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+  text-decoration-thickness: 2px;
+}
+
+/* Same neutral treatment `.floor-violation` uses on the statutory screen:
+   emphasis by rule and weight, never by a second accent colour. */
+.onboarding-error {
+  border-left: 3px solid var(--ink);
+  padding: var(--space-2) var(--space-3);
+  margin: var(--space-3) 0;
+  font-weight: 600;
+}
+
+.onboarding-back {
+  margin: var(--space-2) 0 0;
+}
+
+.onboarding-section-title {
+  margin: var(--space-8) 0 var(--space-3);
+  font-size: 1.1rem;
+  font-weight: 700;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--ink);
+}
+
+.onboarding-profile {
+  margin-top: var(--space-4);
+}
+
+/* ---------- hire form ---------- */
+
+.hire-form__title {
+  margin: 0 0 var(--space-4);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+/*
+ * Two columns on a wide screen, one on a narrow one. `minmax(0, 1fr)`
+ * rather than `1fr` so a long value can never widen a column past its
+ * share — the same grid-track minimum that put the statutory-rules table
+ * into overflow.
+ */
+.hire-form__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
+  column-gap: var(--space-6);
+}
+
+.hire-form input,
+.hire-form select {
+  width: 100%;
+}
+
+/* ---------- consent ---------- */
+
+.onboarding-consent__note {
+  color: var(--muted);
+  margin: 0 0 var(--space-4);
+}
+
+/*
+ * Each purpose is a visually distinct block with its own actions. The
+ * separation is not decoration: PDPA requires biometric consent be given
+ * separately from general HR processing, and a UI that ran the two
+ * together — one shared row of buttons, or a single "accept all" — would
+ * present the illegal shape even though the server rejects it (ONB-020).
+ */
+.consent-section {
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--rule);
+}
+
+.consent-section__title {
+  margin: 0 0 var(--space-2);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.consent-section__body {
+  margin: 0 0 var(--space-3);
+  max-width: 42rem;
+}
+
+.consent-section__actions {
+  margin: 0;
+}
+
+.consent-section__recorded {
+  margin: var(--space-2) 0 0;
+  font-weight: 600;
+}
+
+/* ---------- checklist ---------- */
+
+.onboarding-checklist__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.checklist-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.checklist-row--done .checklist-row__code {
+  color: var(--muted);
+}
+
+.checklist-row__code {
+  overflow-wrap: anywhere;
+}
+
+.checklist-row__due {
+  color: var(--muted);
+}
+
+@media (max-width: 48rem) {
+  .checklist-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -6,6 +6,8 @@ import { Shell } from './routes/Shell'
 import { LoginPage } from './routes/LoginPage'
 import { CallbackPage } from './routes/CallbackPage'
 import { ComingSoon } from './routes/ComingSoon'
+import { EmployeesPage } from './routes/onboarding/EmployeesPage'
+import { EmployeeDetailPage } from './routes/onboarding/EmployeeDetailPage'
 import { RequirePermission } from './routes/RequirePermission'
 import { StatutoryRulesPage } from './routes/admin/StatutoryRulesPage'
 import { AuditPage } from './routes/compliance/AuditPage'
@@ -87,6 +89,22 @@ function ShellRoutes(): React.JSX.Element {
             element={
               <RequirePermission permission="notify.notification.read">
                 <NotificationsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="onboarding/employees"
+            element={
+              <RequirePermission permission="employee.read">
+                <EmployeesPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="onboarding/employees/:id"
+            element={
+              <RequirePermission permission="employee.read">
+                <EmployeeDetailPage />
               </RequirePermission>
             }
           />

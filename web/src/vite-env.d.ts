@@ -32,6 +32,7 @@ interface ImportMetaEnv {
   readonly VITE_SVC_AUTHZ_URL?: string
   /** svc-notify's `/notifications*` — the Notifications inbox (`/notifications`). Optional, same fallback pattern as `VITE_SVC_AUDIT_URL` (`/api/notify`). */
   readonly VITE_SVC_NOTIFY_URL?: string
+  readonly VITE_SVC_ONBOARDING_URL?: string
   /**
    * Opt-in dev-only login bypass (skips the OIDC redirect, signs in as a
    * fixed local principal) so the shell is usable with no Keycloak running.

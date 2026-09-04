@@ -47,6 +47,7 @@ export interface AppConfig {
   svcDocsUrl: string
   svcAuthzUrl: string
   svcNotifyUrl: string
+  svcOnboardingUrl: string
 }
 
 export function loadConfig(): AppConfig {
@@ -61,6 +62,7 @@ export function loadConfig(): AppConfig {
     svcDocsUrl: optionalWithFallback('VITE_SVC_DOCS_URL', '/api/docs'),
     svcAuthzUrl: optionalWithFallback('VITE_SVC_AUTHZ_URL', '/api/authz'),
     svcNotifyUrl: optionalWithFallback('VITE_SVC_NOTIFY_URL', '/api/notify'),
+    svcOnboardingUrl: optionalWithFallback('VITE_SVC_ONBOARDING_URL', '/api/onboarding'),
   }
 }
 

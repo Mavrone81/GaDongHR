@@ -5,6 +5,7 @@ import { renderWithProviders, buildCurrentUser } from '../test/testUtils'
 import { NAV_DESTINATIONS } from './navigation'
 
 const BUNDLE = {
+  'shell.nav.employees': 'Employees',
   'shell.nav.statutoryRules': 'Statutory rules',
   'shell.nav.audit': 'Audit trail',
   'shell.nav.documents': 'Documents',
@@ -35,7 +36,14 @@ describe('Shell navigation is role-driven', () => {
     })
 
     for (const destination of NAV_DESTINATIONS) {
-      expect(screen.queryByText(BUNDLE[destination.labelKey as keyof typeof BUNDLE] ?? '')).not.toBeInTheDocument()
+      const label = BUNDLE[destination.labelKey as keyof typeof BUNDLE]
+      // A destination missing from this fixture used to fall through to
+      // `?? ''`, and `queryByText('')` matches every empty node in the
+      // tree — so adding a nav destination without adding its label here
+      // failed with "found multiple elements" rather than "you forgot a
+      // label". Assert the fixture is complete first.
+      expect(label, `Shell.test.tsx BUNDLE is missing ${destination.labelKey}`).toBeTruthy()
+      expect(screen.queryByText(label)).not.toBeInTheDocument()
     }
   })
 
