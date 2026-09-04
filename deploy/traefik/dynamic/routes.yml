@@ -61,6 +61,29 @@ http:
       tls:
         certResolver: le
 
+    # The PWA's OIDC redirect target sits INSIDE Keycloak's own `/auth`
+    # prefix — `web/src/App.tsx`'s `<Route path="/auth/callback">`, and
+    # `VITE_OIDC_REDIRECT_URI=https://<host>/auth/callback` baked into the
+    # web image by CI. Without this router, `kc` above swallows it and
+    # Keycloak answers its own "We are sorry... Page not found" at the end
+    # of every SUCCESSFUL login: the password is accepted, OTP enrols, and
+    # then the redirect 404s — which reads as a Keycloak fault rather than
+    # a routing one. deploy/README.md's check compared the realm's
+    # redirectUris against VITE_OIDC_REDIRECT_URI (they do match) but
+    # never asked which service Traefik hands that path to.
+    #
+    # Exact `Path`, not `PathPrefix`: this carves out that ONE url and
+    # nothing else, so every real Keycloak endpoint under `/auth/*` still
+    # reaches Keycloak. Priority 200 puts it above `kc` (no explicit
+    # priority, so Traefik defaults it to the rule's length) and above the
+    # `/api/*` routers at 100.
+    web-oidc-callback:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && Path(`/auth/callback`)'
+      priority: 200
+      service: web
+      tls:
+        certResolver: le
+
     svc-config:
       rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/config`)'
       priority: 100
