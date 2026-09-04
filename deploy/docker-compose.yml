@@ -625,6 +625,57 @@ services:
     # `traefik/dynamic/routes.yml`'s `svc-docs` router/service/middleware
     # (same shape as `svc-config` above). No `labels:` here anymore.
 
+  # ==================== M1 Onboarding (first module service) ====================
+  # The first of the seven module services to be wired in. Everything it
+  # needs was forward-provisioned in Phase 1 and has been sitting unused:
+  # the `onboarding` Postgres role (postgres/init/01-roles.sql), the
+  # `svc-onboarding` Keycloak machine client (keycloak/realm-gadonghr.json)
+  # and DB_PASSWORD_ONBOARDING in .env. Adding it here is what finally
+  # makes UAT pack U2 ("Onboard a hire") reachable at all — the service,
+  # its schema and its logic have existed and been tested since Phase 2;
+  # they were simply never served.
+  #
+  # 128m, sized against the budget not against a guess: every gadonghr
+  # Node service measured on gadonghr-prod sits at 40-46MB RSS, so this is
+  # ~2.8x headroom — the same ratio the 96m tier (audit/i18n/crypto) runs
+  # at, one tier up because this service also drives crypto and contract
+  # rendering. 192m would have left 464MB for the OS, under
+  # compose-validation.test.ts's 512MB floor.
+  #
+  # THE BUDGET IS NEARLY SPENT: the limits in this file now total 3568MB of
+  # a 4096MB host. The remaining six module services cannot be added at
+  # this size without either a bigger droplet or reclaiming from svc-docs'
+  # 512m (sized for headless Chromium, measured at 84MB). That decision is
+  # owed before UAT packs U3-U7, which need all of them.
+  svc-onboarding:
+    build: { context: .., dockerfile: services/svc-onboarding/Dockerfile }
+    <<: *node-defaults
+    mem_limit: 128m
+    environment:
+      <<: [*oidc-env, *oidc-token-env, *rabbitmq-env]
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://onboarding:${DB_PASSWORD_ONBOARDING}@postgres:5432/${POSTGRES_DB}
+      AUTHZ_URL: http://svc-authz:3000
+      CRYPTO_URL: http://svc-crypto:3000
+      CONFIG_URL: http://svc-config:3000
+      DOCS_URL: http://svc-docs:3000
+      # Its own machine identity, for the guarded outbound calls it makes:
+      # svc-crypto (/encrypt, /decrypt, /bidx — every S2/S3 employee
+      # field), svc-config (probation and checklist rules) and svc-docs
+      # (contract render). The client was provisioned by the S2S auth task.
+      S2S_CLIENT_ID: svc-onboarding
+      S2S_CLIENT_SECRET: ${KEYCLOAK_SVC_ONBOARDING_CLIENT_SECRET}
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+      svc-crypto: { condition: service_healthy }
+      svc-config: { condition: service_healthy }
+      svc-docs: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    healthcheck: *http-health
+
   # ==================== PWA (Task 15c) ====================
   # Static bundle served by unprivileged nginx on :8080 (web/Dockerfile,
   # web/nginx.conf) — no `/health` endpoint (nothing to poll but the

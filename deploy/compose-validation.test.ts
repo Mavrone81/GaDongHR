@@ -184,14 +184,21 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
     config = runComposeConfig('docker-compose.yml', 'docker-compose.prod.yml')
   })
 
-  test('parses cleanly and defines at least the fifteen expected services', () => {
+  test('parses cleanly and defines exactly the expected services', () => {
     const names = Object.keys(config.services).sort()
-    // The seven platform services that actually exist (brief §1) plus the
-    // seven required infra containers (brief: "Also required: traefik,
-    // postgres:16, rabbitmq:3.13-management, redis:7, minio, vault:1.17,
-    // keycloak:26"), plus `web` (Task 15c: the PWA is now wired in so
-    // `hr.bevorasg.com` actually serves a UI). Module services M1-M7 must
-    // still NOT appear.
+    // The seven platform services, the seven required infra containers
+    // (brief: "Also required: traefik, postgres:16,
+    // rabbitmq:3.13-management, redis:7, minio, vault:1.17, keycloak:26"),
+    // `web` (Task 15c), and — from the UAT-enablement work — svc-onboarding.
+    //
+    // The original of this test asserted "Module services M1-M7 must still
+    // NOT appear", correct for Phase 1 when none of them had been built.
+    // They have all been built and tested since Phases 2-5 and their images
+    // are published by CI on every push; they were simply never served, so
+    // UAT pack U2 ("Onboard a hire") could not begin. svc-onboarding is the
+    // first to be wired in. The list stays EXACT rather than becoming a
+    // subset check: each remaining module service should arrive as a
+    // deliberate, reviewed line here, not by accident.
     const expected = [
       'keycloak',
       'minio',
@@ -205,6 +212,7 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
       'svc-docs',
       'svc-i18n',
       'svc-notify',
+      'svc-onboarding',
       'traefik',
       'vault',
       'web',
@@ -1014,11 +1022,12 @@ describe('deploy/docker-compose.prod.yml image tag variables (raw source, cross-
 
   const refs = extractImageRefs(composeSource)
 
-  test('finds a ${VAR:-fallback} image reference for all eight ghcr.io/mavrone81 services', () => {
-    // Seven platform services + web. If this count is wrong, every test
-    // below is vacuous, so it is asserted on its own first.
+  test('finds a ${VAR:-fallback} image reference for all nine ghcr.io/mavrone81 services', () => {
+    // Seven platform services + web + svc-onboarding, the first module
+    // service to be served (UAT pack U2). If this count is wrong, every
+    // test below is vacuous, so it is asserted on its own first.
     expect(refs.map((r) => r.service).sort()).toEqual(
-      ['svc-audit', 'svc-authz', 'svc-config', 'svc-crypto', 'svc-docs', 'svc-i18n', 'svc-notify', 'web'].sort(),
+      ['svc-audit', 'svc-authz', 'svc-config', 'svc-crypto', 'svc-docs', 'svc-i18n', 'svc-notify', 'svc-onboarding', 'web'].sort(),
     )
   })
 

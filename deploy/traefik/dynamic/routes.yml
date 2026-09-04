@@ -132,6 +132,14 @@ http:
       tls:
         certResolver: le
 
+    svc-onboarding:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/onboarding`)'
+      priority: 100
+      service: svc-onboarding
+      middlewares: [svc-onboarding-strip]
+      tls:
+        certResolver: le
+
   # Every `/api/*` router strips its own prefix before forwarding — each
   # service's own NestJS routes are unprefixed (e.g. svc-config's
   # `rules.controller.ts` exposes `GET /rules`, not `GET /api/config/rules`)
@@ -157,6 +165,9 @@ http:
     svc-docs-strip:
       stripPrefix:
         prefixes: ["/api/docs"]
+    svc-onboarding-strip:
+      stripPrefix:
+        prefixes: ["/api/onboarding"]
 
   services:
     web:
@@ -191,3 +202,8 @@ http:
       loadBalancer:
         servers:
           - url: "http://svc-docs:3000"
+
+    svc-onboarding:
+      loadBalancer:
+        servers:
+          - url: "http://svc-onboarding:3000"

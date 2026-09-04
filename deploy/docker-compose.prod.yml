@@ -86,6 +86,11 @@ services:
     image: ghcr.io/mavrone81/gadonghr-svc-docs:${GADONG_VERSION:-stable}
     pull_policy: always
 
+  svc-onboarding:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-onboarding:${GADONG_VERSION:-stable}
+    pull_policy: always
+
   # `web` uses the exact same `GADONG_VERSION` variable as the seven
   # platform services above — see the file-level comment. Defaults to the
   # floating `:main` tag, which CI's `build-images` matrix publishes on
