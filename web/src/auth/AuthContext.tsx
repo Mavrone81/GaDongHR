@@ -50,9 +50,26 @@ export interface CurrentUser {
   permissions: Set<string>
 }
 
+/**
+ * Why a sign-in did not complete, when the reason is something the user
+ * can act on. `denied` is Keycloak refusing or the user cancelling at the
+ * hosted login page (`?error=access_denied`); `failed` covers everything
+ * else — a rejected code exchange, a malformed token response, or a
+ * `state` that does not match the one this tab stored.
+ *
+ * Before this existed all three outcomes called `applyTokens(null)` and
+ * navigated to `/`, landing the user back on the sign-in screen with no
+ * indication that anything had gone wrong. A user who cancelled saw the
+ * same blank screen as a user hitting a genuine misconfiguration, and
+ * neither had any way to tell which had happened.
+ */
+export type AuthFailure = 'denied' | 'failed'
+
 export interface AuthContextValue {
   status: AuthStatus
   currentUser: CurrentUser | null
+  /** Set by `handleCallback` when a sign-in attempt ends badly; cleared the moment a new one starts. */
+  authError: AuthFailure | null
   /** Redirects the browser to Keycloak's hosted login page (or, in dev-bypass mode, signs in locally with no redirect). */
   login: () => void
   /** Completes the authorization-code exchange for the current `window.location` query string. Call once, from the OIDC redirect-callback route. */
@@ -87,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
 
   const [status, setStatus] = useState<AuthStatus>('unauthenticated')
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
+  const [authError, setAuthError] = useState<AuthFailure | null>(null)
   const tokensRef = useRef<TokenSet | null>(null)
 
   const applyTokens = useCallback(
@@ -129,6 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     // See env.ts's `DEV_BYPASS_ENABLED` header for why this must stay a
     // direct top-level-constant check, not a property read off a config
     // object, to actually tree-shake out of a production build.
+    setAuthError(null)
     if (DEV_BYPASS_ENABLED) {
       applyTokens(createDevSession())
       return
@@ -153,14 +172,33 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     window.sessionStorage.removeItem(PKCE_STATE_KEY)
     window.sessionStorage.removeItem(PKCE_VERIFIER_KEY)
 
+    // Keycloak signals a refused or abandoned login by redirecting HERE
+    // with `?error=...` and no `code` — it is a normal, expected arrival at
+    // this route, not an absent one. Reading only `code` treated it as
+    // "nothing to exchange" and bounced the user to a silent sign-in
+    // screen; `access_denied` in particular is simply someone clicking
+    // Cancel, which deserves a sentence rather than a mystery.
+    const oauthError = params.get('error')
+    if (oauthError) {
+      setAuthError(oauthError === 'access_denied' || oauthError === 'login_required' ? 'denied' : 'failed')
+      applyTokens(null)
+      return
+    }
+
+    // A missing/mismatched `state` is the CSRF check doing its job, and is
+    // also what a stale or re-opened callback URL looks like. Either way
+    // the user needs to start again, and needs to be told so.
     if (!code || !verifier || !returnedState || returnedState !== expectedState) {
+      setAuthError('failed')
       applyTokens(null)
       return
     }
     try {
       const tokens = await exchangeCodeForTokens(config, code, verifier)
+      setAuthError(null)
       applyTokens(tokens)
     } catch {
+      setAuthError('failed')
       applyTokens(null)
     }
   }, [config, applyTokens])
@@ -188,8 +226,8 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   )
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, currentUser, login, handleCallback, logout, tokenSource }),
-    [status, currentUser, login, handleCallback, logout, tokenSource],
+    () => ({ status, currentUser, authError, login, handleCallback, logout, tokenSource }),
+    [status, currentUser, authError, login, handleCallback, logout, tokenSource],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

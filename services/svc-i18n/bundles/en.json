@@ -27,14 +27,19 @@
       "statement": "Clock in, request leave and see your payslip — all in one place.",
       "footer": "This is the sign-in for {host}.",
       "error": {
-        "invalid_credentials": "Incorrect username or password"
+        "invalid_credentials": "Incorrect username or password",
+        "denied": "Sign-in was cancelled. You can try again.",
+        "failed": "Sign-in could not be completed. Please try again."
       }
     },
     "logout": "Sign out",
     "session": {
       "expired": "Your session has expired. Please sign in again."
     },
-    "forgot_password": "Forgot your password?"
+    "forgot_password": "Forgot your password?",
+    "callback": {
+      "signingIn": "Signing you in…"
+    }
   },
   "leave": {
     "request": {

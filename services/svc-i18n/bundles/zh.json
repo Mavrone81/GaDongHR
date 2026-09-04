@@ -27,14 +27,19 @@
       "statement": "打卡、请假、查看工资条——都在这一个系统里完成。",
       "footer": "这是 {host} 的登录页面。",
       "error": {
-        "invalid_credentials": "用户名或密码错误"
+        "invalid_credentials": "用户名或密码错误",
+        "denied": "登录已取消，您可以重试。",
+        "failed": "无法完成登录，请重试。"
       }
     },
     "logout": "退出登录",
     "session": {
       "expired": "您的登录已过期，请重新登录。"
     },
-    "forgot_password": "忘记密码？"
+    "forgot_password": "忘记密码？",
+    "callback": {
+      "signingIn": "正在登录…"
+    }
   },
   "leave": {
     "request": {

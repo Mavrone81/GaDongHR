@@ -1,5 +1,6 @@
 import { useI18n } from '../i18n/I18nContext'
 import { useAuth } from '../auth/AuthContext'
+import type { AuthFailure } from '../auth/AuthContext'
 import { SUPPORTED_LOCALES } from '../i18n/locale'
 import { CarapaceMark } from '../components/CarapaceMark'
 import { Button } from '../components/Button'
@@ -24,7 +25,7 @@ import './loginPage.css'
  * immediately (no reload) and persists via `i18n/locale.ts`'s
  * `storeLocale`, so the choice carries into the authenticated app too.
  */
-export function LoginPage({ reason }: { reason?: 'expired' }): React.JSX.Element {
+export function LoginPage({ reason }: { reason?: 'expired' | AuthFailure }): React.JSX.Element {
   const { t, locale, setLocale } = useI18n()
   const { login, status } = useAuth()
 
@@ -43,7 +44,27 @@ export function LoginPage({ reason }: { reason?: 'expired' }): React.JSX.Element
 
         <p className="login-page__statement">{t('auth.login.statement')}</p>
 
-        <h1 className="login-page__title">{reason === 'expired' ? t('auth.session.expired') : t('auth.login.title')}</h1>
+        <h1 className="login-page__title">{t('auth.login.title')}</h1>
+
+        {reason && (
+          /*
+           * `role="status"` rather than `role="alert"`: none of these are
+           * emergencies, and an assertive live region would interrupt a
+           * screen-reader user mid-sentence on a screen they just landed
+           * on. It is still announced, just politely.
+           *
+           * The notice sits above the button because it explains why the
+           * button is being offered again — below it, a user who has
+           * already clicked Sign in would never see it.
+           */
+          <p className="login-page__notice" role="status">
+            {reason === 'expired'
+              ? t('auth.session.expired')
+              : reason === 'denied'
+                ? t('auth.login.error.denied')
+                : t('auth.login.error.failed')}
+          </p>
+        )}
 
         <div className="login-page__locale" role="group" aria-label={t('shell.locale.chooseLanguage')}>
           {SUPPORTED_LOCALES.map((l) => (

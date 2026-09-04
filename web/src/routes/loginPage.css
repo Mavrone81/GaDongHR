@@ -105,6 +105,22 @@ html[lang='th'] .login-page__title {
  * order, so only the CURRENT locale reads as selected rather than every
  * toggle looking like a dismissive text action.
  */
+/*
+ * Sign-in failures and expiries. Emphasis comes from a rule and ink
+ * weight, not from a colour: `--seal` is reserved for statutory citations
+ * (components/seal.css), and this app has no error-red of its own by
+ * design. The left rule matches `.floor-violation` on the statutory
+ * screen, so "something needs your attention" looks the same in both
+ * places.
+ */
+.login-page__notice {
+  margin: var(--space-4) 0 0;
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  border-left: 3px solid var(--ink);
+  color: var(--ink);
+  font-weight: 600;
+}
+
 .login-page__locale .login-page__locale-btn {
   color: var(--muted);
   font-weight: 600;

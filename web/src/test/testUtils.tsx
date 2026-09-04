@@ -39,6 +39,7 @@ export function buildAuthValue(overrides: Partial<AuthContextValue> = {}): AuthC
   return {
     status: 'authenticated',
     currentUser: buildCurrentUser(),
+    authError: null,
     login: vi.fn(),
     handleCallback: vi.fn(async () => undefined),
     logout: vi.fn(),

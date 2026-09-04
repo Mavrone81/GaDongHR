@@ -26,7 +26,7 @@ import { DEFAULT_NAV_PATH } from './routes/navigation'
  * visit.
  */
 export function AuthGate(): React.JSX.Element {
-  const { status } = useAuth()
+  const { status, authError } = useAuth()
   const everAuthenticated = useRef(false)
 
   useEffect(() => {
@@ -34,7 +34,11 @@ export function AuthGate(): React.JSX.Element {
   }, [status])
 
   if (status !== 'authenticated') {
-    return <LoginPage reason={everAuthenticated.current ? 'expired' : undefined} />
+    // A concrete failure outranks "your session expired": if the callback
+    // told us WHY this attempt died, say that instead of the generic
+    // timeout copy, which would be actively misleading for someone who
+    // just cancelled at the Keycloak page.
+    return <LoginPage reason={authError ?? (everAuthenticated.current ? 'expired' : undefined)} />
   }
   return <Outlet />
 }

@@ -46,12 +46,15 @@ const KEYS_USED_BY_LOGIN_PAGE = [
   'shell.locale.zh',
   'auth.login.submit',
   'auth.login.footer',
+  'auth.login.error.denied',
+  'auth.login.error.failed',
 ]
 
 function buildAuthValue(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
   return {
     status: 'unauthenticated',
     currentUser: null,
+    authError: null,
     login: vi.fn(),
     handleCallback: vi.fn(async () => undefined),
     logout: vi.fn(),
@@ -82,19 +85,59 @@ describe('LoginPage — real bundle coverage (no untranslated key)', () => {
   })
 })
 
-describe('LoginPage — expired vs first-visit', () => {
-  it('renders a different message for reason="expired" than a first visit', () => {
+/**
+ * The reason a user is looking at this screen used to REPLACE the <h1>, so
+ * an expired session retitled the page "Your session has expired." and the
+ * page lost its own name. It is now a separate notice above the action and
+ * the heading always reads "Sign in" — the heading names the page, the
+ * notice explains the arrival.
+ *
+ * The three reasons must stay distinguishable from each other: "you were
+ * signed in and got logged out", "you cancelled", and "something broke"
+ * call for different responses from the user, and collapsing them was the
+ * original defect — every failed callback silently rendered a pristine
+ * first-visit sign-in screen.
+ */
+describe('LoginPage — why the user is here', () => {
+  it('keeps the heading as the page name and shows no notice on a first visit', () => {
     const bundle = REAL_BUNDLES.en
-    const { unmount } = renderWithProviders(<LoginPage />, { i18n: { bundle } })
-    const firstVisitText = screen.getByRole('heading', { level: 1 }).textContent
-    unmount()
 
-    renderWithProviders(<LoginPage reason="expired" />, { i18n: { bundle } })
-    const expiredText = screen.getByRole('heading', { level: 1 }).textContent
+    renderWithProviders(<LoginPage />, { i18n: { bundle } })
 
-    expect(expiredText).toBe(bundle['auth.session.expired'])
-    expect(firstVisitText).toBe(bundle['auth.login.title'])
-    expect(expiredText).not.toBe(firstVisitText)
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(bundle['auth.login.title'])
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['expired', 'auth.session.expired'],
+    ['denied', 'auth.login.error.denied'],
+    ['failed', 'auth.login.error.failed'],
+  ] as const)('renders the %s notice without changing the heading', (reason, key) => {
+    const bundle = REAL_BUNDLES.en
+
+    renderWithProviders(<LoginPage reason={reason} />, { i18n: { bundle } })
+
+    expect(screen.getByRole('status').textContent).toBe(bundle[key])
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(bundle['auth.login.title'])
+  })
+
+  it('gives each reason its own distinct copy — a cancelled sign-in must not read like a broken one', () => {
+    const bundle = REAL_BUNDLES.en
+    const seen = new Set<string>()
+
+    for (const reason of ['expired', 'denied', 'failed'] as const) {
+      const { unmount } = renderWithProviders(<LoginPage reason={reason} />, { i18n: { bundle } })
+      seen.add(screen.getByRole('status').textContent ?? '')
+      unmount()
+    }
+
+    expect(seen.size).toBe(3)
+  })
+
+  it('still offers the sign-in action after a failure, so the screen is a recovery point rather than a dead end', () => {
+    renderWithProviders(<LoginPage reason="failed" />, { i18n: { bundle: REAL_BUNDLES.en } })
+
+    expect(screen.getByRole('button', { name: REAL_BUNDLES.en['auth.login.submit'] })).toBeEnabled()
   })
 })
 
