@@ -11,6 +11,7 @@ import { Eyebrow } from '../../components/Eyebrow'
 import { Field } from '../../components/Field'
 import { Button } from '../../components/Button'
 import { Table, TableCell, TableHeaderCell } from '../../components/Table'
+import { RuleValue } from './RuleValue'
 import { FloorViolationNotice } from './FloorViolationNotice'
 import { ProposeRuleForm } from './ProposeRuleForm'
 import { DateText } from '../../components/DateText'
@@ -70,7 +71,9 @@ function AsOfDetail({ ruleKey }: { ruleKey: string }): React.JSX.Element {
           </thead>
           <tbody>
             <tr>
-              <TableCell numeric>{String(row.value)}</TableCell>
+              <TableCell numeric>
+                <RuleValue value={row.value} />
+              </TableCell>
               <TableCell>
                 <Seal citation={row.citation} floor={row.statutoryFloor} ceiling={row.statutoryCeiling} />
               </TableCell>
@@ -119,10 +122,14 @@ export function RuleRow({
   return (
     <li className="rule-row">
       <div className="rule-row__key">{row.ruleKey}</div>
-      <span className="numeric">{String(row.value)}</span>
-      <Seal citation={row.citation} floor={row.statutoryFloor} ceiling={row.statutoryCeiling} />
+      <div className="rule-row__value">
+        <RuleValue value={row.value} />
+      </div>
+      <div className="rule-row__citation">
+        <Seal citation={row.citation} floor={row.statutoryFloor} ceiling={row.statutoryCeiling} />
+      </div>
       <div className="rule-row__status">
-        <span>{t(`admin.statutoryRules.status.${row.status}`)}</span>
+        <span className="status-badge">{t(`admin.statutoryRules.status.${row.status}`)}</span>
         {row.status === 'draft' &&
           (canApprove && !isProposer ? (
             <Button variant="primary" onClick={handleApprove} disabled={approving}>
@@ -177,7 +184,7 @@ export function StatutoryRulesPage(): React.JSX.Element {
   }, [reload])
 
   return (
-    <section className="page">
+    <section className="page page--wide">
       <header className="page__header">
         <Eyebrow>{t('shell.brand')}</Eyebrow>
         <h1 className="page__title">{t('admin.statutoryRules.title')}</h1>
@@ -203,6 +210,15 @@ export function StatutoryRulesPage(): React.JSX.Element {
       {loading && <p>{t('common.loading')}</p>}
 
       {!loading && rules.length === 0 && <p className="empty-state">{t('admin.statutoryRules.emptyState')}</p>}
+
+      {!loading && rules.length > 0 && (
+        <div className="rules-list__head" aria-hidden="true">
+          <span>{t('admin.statutoryRules.columns.rule')}</span>
+          <span>{t('admin.statutoryRules.columns.value')}</span>
+          <span>{t('admin.statutoryRules.columns.citation')}</span>
+          <span>{t('admin.statutoryRules.columns.status')}</span>
+        </div>
+      )}
 
       <ul className="rules-list">
         {rules.map((row) => (

@@ -13,6 +13,19 @@
   padding: var(--space-8) var(--space-4);
 }
 
+/*
+ * This screen is the one genuinely tabular view in the app: four columns,
+ * one of which carries a full legal citation. At the shared 56rem the
+ * citation column had nowhere to go and the row grid grew past the page
+ * frame instead of wrapping, which is what put the whole table into
+ * horizontal overflow. Wider frame, and a citation column that is allowed
+ * to shrink (see `minmax(0, …)` below) — both are needed; either alone
+ * still overflows.
+ */
+.page--wide {
+  max-width: 76rem;
+}
+
 .page__header {
   margin-bottom: var(--space-6);
 }
@@ -29,11 +42,37 @@
   padding: 0;
 }
 
+/*
+ * THE COLUMN CONTRACT — `.rules-list__head` and `.rule-row` MUST declare
+ * the same template, or the header stops labelling the columns beneath it.
+ *
+ * `minmax(0, 1fr)` on the citation column, never a bare `1fr`: a grid
+ * track's default minimum is `auto` (= min-content), so a bare `1fr`
+ * refuses to shrink below the longest unbreakable run in the cell. One
+ * 200-character citation then widens the whole table past the page and
+ * every row goes with it. `0` lets the track shrink and the citation wrap
+ * instead. The same reasoning is why `.seal` no longer sets
+ * `white-space: nowrap` (see components/seal.css).
+ */
+.rules-list__head,
 .rule-row {
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
-  align-items: baseline;
+  grid-template-columns: minmax(10rem, 20rem) minmax(5rem, 9rem) minmax(0, 1fr) auto;
   column-gap: var(--space-4);
+}
+
+.rules-list__head {
+  padding: 0 0 var(--space-2);
+  border-bottom: 1px solid var(--ink);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.rule-row {
+  align-items: baseline;
   row-gap: var(--space-2);
   padding: var(--space-3) 0;
   border-bottom: 1px solid var(--rule);
@@ -42,6 +81,18 @@
 .rule-row__key {
   font-family: var(--font-mono);
   color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.rule-row__value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* `min-width: 0` for the same reason the track uses `minmax(0, …)`: a grid
+   ITEM also defaults to a min-content minimum, so the track being allowed
+   to shrink is not on its own enough to let this cell's contents wrap. */
+.rule-row__citation {
+  min-width: 0;
 }
 
 .rule-row__detail {
@@ -54,6 +105,91 @@
   align-items: baseline;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+
+/*
+ * Status is a word, not a colour: `--seal` is reserved for citations, and
+ * spending a second accent colour on four lifecycle states would compete
+ * with the stamp that is supposed to be the loudest thing on this page.
+ * Weight and letterspacing carry it instead.
+ */
+.status-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ---------- structured rule values (see RuleValue.tsx) ---------- */
+
+.rule-value--empty {
+  color: var(--muted);
+}
+
+.rule-value__summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.rule-value__summary:hover {
+  color: var(--ink);
+}
+
+.rule-value__list,
+.rule-value__fields {
+  margin: var(--space-2) 0 0;
+  padding: 0 0 0 var(--space-4);
+  border-left: 1px solid var(--rule);
+}
+
+.rule-value__list {
+  padding-left: var(--space-6);
+}
+
+.rule-value__item {
+  padding: var(--space-1) 0;
+}
+
+.rule-value__field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+.rule-value__field-name {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.rule-value__field-value {
+  margin: 0;
+}
+
+/*
+ * Below this width four columns stop being readable, so each row becomes a
+ * short stack. The header row is hidden rather than restyled: once the
+ * cells are stacked it no longer labels anything, and a row of headings
+ * over a stack reads as a fifth row of data. It is already `aria-hidden`,
+ * so nothing is lost to assistive tech that was not already lost.
+ */
+@media (max-width: 48rem) {
+  .rules-list__head {
+    display: none;
+  }
+
+  .rule-row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-1);
+  }
+
+  .rule-row__detail {
+    grid-column: auto;
+  }
 }
 
 /*

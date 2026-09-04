@@ -255,6 +255,17 @@
         "withFloor": "§ {citation} · 下限 {floor}",
         "withCeiling": "§ {citation} · 上限 {ceiling}",
         "plain": "§ {citation}"
+      },
+      "columns": {
+        "rule": "规则",
+        "value": "数值",
+        "citation": "法条引用",
+        "status": "状态"
+      },
+      "value": {
+        "empty": "无",
+        "entries": "{count} 项",
+        "fields": "{count} 个字段"
       }
     },
     "roles": {

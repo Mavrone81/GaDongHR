@@ -255,6 +255,17 @@
         "withFloor": "§ {citation} · floor {floor}",
         "withCeiling": "§ {citation} · ceiling {ceiling}",
         "plain": "§ {citation}"
+      },
+      "columns": {
+        "rule": "Rule",
+        "value": "Value",
+        "citation": "Citation",
+        "status": "Status"
+      },
+      "value": {
+        "empty": "None",
+        "entries": "{count} entries",
+        "fields": "{count} fields"
       }
     },
     "roles": {

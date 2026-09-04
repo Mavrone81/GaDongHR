@@ -12,6 +12,16 @@
   color: var(--seal);
   border: 1px solid var(--seal);
   padding: 0.15rem 0.5rem;
-  white-space: nowrap;
   letter-spacing: 0.01em;
+  /*
+   * Deliberately NOT `white-space: nowrap`. A seal is usually a short
+   * stamp ("§ LPA s.32 · floor 30") that never wraps anyway — but some
+   * citations in the shipped rule packs run to a couple of hundred
+   * characters, and `nowrap` turned those into a single unbreakable line
+   * that widened its grid track, its table and finally the page, putting
+   * the whole statutory-rules screen into horizontal overflow. Wrapping a
+   * long stamp is a much smaller cost than an unusable table.
+   */
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }

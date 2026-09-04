@@ -255,6 +255,17 @@
         "withFloor": "§ {citation} · ขั้นต่ำ {floor}",
         "withCeiling": "§ {citation} · เพดาน {ceiling}",
         "plain": "§ {citation}"
+      },
+      "columns": {
+        "rule": "กฎ",
+        "value": "ค่า",
+        "citation": "การอ้างอิง",
+        "status": "สถานะ"
+      },
+      "value": {
+        "empty": "ไม่มี",
+        "entries": "{count} รายการ",
+        "fields": "{count} ฟิลด์"
       }
     },
     "roles": {
