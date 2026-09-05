@@ -676,6 +676,172 @@ services:
       rabbitmq: { condition: service_healthy }
     healthcheck: *http-health
 
+  # ==================== M2-M7 module services ====================
+  # Wired in for UAT packs U3-U6, on the 8 GB host. Each has existed,
+  # tested, with schema and migrations, since Phases 2-5; each had its
+  # Postgres role, Keycloak machine client and DB password
+  # forward-provisioned in Phase 1. None was ever served, which is why
+  # every UAT pack except U1 and U2 had nothing to exercise.
+  #
+  # retention-job is deliberately NOT here: it runs one cycle and exits
+  # (services/retention-job/src/main.ts opens no listener by design), so
+  # it belongs on a host cron like the deploy and image-prune jobs, not in
+  # a compose file that would restart-loop it.
+
+  # M2 Roster. Publishes roster.published, which M3 and M4 consume.
+  svc-scheduler:
+    build: { context: .., dockerfile: services/svc-scheduler/Dockerfile }
+    <<: *node-defaults
+    mem_limit: 128m
+    environment:
+      <<: [*oidc-env, *oidc-token-env, *rabbitmq-env]
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://scheduler:${DB_PASSWORD_SCHEDULER}@postgres:5432/${POSTGRES_DB}
+      AUTHZ_URL: http://svc-authz:3000
+      CONFIG_URL: http://svc-config:3000
+      S2S_CLIENT_ID: svc-scheduler
+      S2S_CLIENT_SECRET: ${KEYCLOAK_SVC_SCHEDULER_CLIENT_SECRET}
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+      svc-config: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    healthcheck: *http-health
+
+  # M3 Timesheet. Consumes punches, classifies OT, owns period locks.
+  svc-timesheet:
+    build: { context: .., dockerfile: services/svc-timesheet/Dockerfile }
+    <<: *node-defaults
+    mem_limit: 128m
+    environment:
+      <<: [*oidc-env, *oidc-token-env, *rabbitmq-env]
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://timesheet:${DB_PASSWORD_TIMESHEET}@postgres:5432/${POSTGRES_DB}
+      AUTHZ_URL: http://svc-authz:3000
+      CONFIG_URL: http://svc-config:3000
+      S2S_CLIENT_ID: svc-timesheet
+      S2S_CLIENT_SECRET: ${KEYCLOAK_SVC_TIMESHEET_CLIENT_SECRET}
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+      svc-config: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    healthcheck: *http-health
+
+  # M4 Attendance. Face/PIN/device punches; the kiosk half of UAT U3.
+  svc-attendance:
+    build: { context: .., dockerfile: services/svc-attendance/Dockerfile }
+    <<: *node-defaults
+    mem_limit: 160m
+    environment:
+      <<: [*oidc-env, *oidc-token-env, *rabbitmq-env]
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://attendance:${DB_PASSWORD_ATTENDANCE}@postgres:5432/${POSTGRES_DB}
+      AUTHZ_URL: http://svc-authz:3000
+      CONFIG_URL: http://svc-config:3000
+      CRYPTO_URL: http://svc-crypto:3000
+      ATTENDANCE_CREDENTIAL_PEPPER: ${ATTENDANCE_CREDENTIAL_PEPPER}
+      # CompreFace is NOT deployed on this host yet (deploy/README.md,
+      # "Before CompreFace arrives": it needs 2-3 GB of its own). Both
+      # vars below default in app.module.ts, so the service boots and
+      # serves device, PIN and alternative-credential punches; only face
+      # matching is unavailable, and its health check reports the engine
+      # down rather than the service failing. Point these at CompreFace
+      # once it lands, on this host or a second one.
+      FACE_ENGINE_URL: ${FACE_ENGINE_URL:-http://compreface-api:8000}
+      FACE_ENGINE_API_KEY: ${FACE_ENGINE_API_KEY:-}
+      S2S_CLIENT_ID: svc-attendance
+      S2S_CLIENT_SECRET: ${KEYCLOAK_SVC_ATTENDANCE_CLIENT_SECRET}
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+      svc-config: { condition: service_healthy }
+      svc-crypto: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    healthcheck: *http-health
+
+  # M5 Leave. Statutory leave types, accrual, balances, approvals.
+  svc-leave:
+    build: { context: .., dockerfile: services/svc-leave/Dockerfile }
+    <<: *node-defaults
+    mem_limit: 128m
+    environment:
+      <<: [*oidc-env, *oidc-token-env, *rabbitmq-env]
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://leave:${DB_PASSWORD_LEAVE}@postgres:5432/${POSTGRES_DB}
+      AUTHZ_URL: http://svc-authz:3000
+      CONFIG_URL: http://svc-config:3000
+      CRYPTO_URL: http://svc-crypto:3000
+      S2S_CLIENT_ID: svc-leave
+      S2S_CLIENT_SECRET: ${KEYCLOAK_SVC_LEAVE_CLIENT_SECRET}
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+      svc-config: { condition: service_healthy }
+      svc-crypto: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    healthcheck: *http-health
+
+  # M6 Claims. Receipts, banded approval, reimbursement routing.
+  svc-claims:
+    build: { context: .., dockerfile: services/svc-claims/Dockerfile }
+    <<: *node-defaults
+    mem_limit: 128m
+    environment:
+      <<: [*oidc-env, *oidc-token-env, *rabbitmq-env]
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://claims:${DB_PASSWORD_CLAIMS}@postgres:5432/${POSTGRES_DB}
+      AUTHZ_URL: http://svc-authz:3000
+      CRYPTO_URL: http://svc-crypto:3000
+      S2S_CLIENT_ID: svc-claims
+      S2S_CLIENT_SECRET: ${KEYCLOAK_SVC_CLAIMS_CLIENT_SECRET}
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+      svc-crypto: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    healthcheck: *http-health
+
+  # M7 Payroll. Gross-to-net, run lifecycle, payslips, statutory exports. 192m: the heaviest module, it holds a whole run in memory while calculating.
+  svc-payroll:
+    build: { context: .., dockerfile: services/svc-payroll/Dockerfile }
+    <<: *node-defaults
+    mem_limit: 192m
+    environment:
+      <<: [*oidc-env, *oidc-token-env, *rabbitmq-env]
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://payroll:${DB_PASSWORD_PAYROLL}@postgres:5432/${POSTGRES_DB}
+      AUTHZ_URL: http://svc-authz:3000
+      CONFIG_URL: http://svc-config:3000
+      CRYPTO_URL: http://svc-crypto:3000
+      DOCS_URL: http://svc-docs:3000
+      ONBOARDING_URL: http://svc-onboarding:3000
+      TIMESHEET_URL: http://svc-timesheet:3000
+      S2S_CLIENT_ID: svc-payroll
+      S2S_CLIENT_SECRET: ${KEYCLOAK_SVC_PAYROLL_CLIENT_SECRET}
+    depends_on:
+      postgres: { condition: service_healthy }
+      svc-authz: { condition: service_healthy }
+      svc-config: { condition: service_healthy }
+      svc-crypto: { condition: service_healthy }
+      svc-docs: { condition: service_healthy }
+      svc-onboarding: { condition: service_healthy }
+      svc-timesheet: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    healthcheck: *http-health
+
   # ==================== PWA (Task 15c) ====================
   # Static bundle served by unprivileged nginx on :8080 (web/Dockerfile,
   # web/nginx.conf) — no `/health` endpoint (nothing to poll but the

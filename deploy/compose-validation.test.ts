@@ -160,7 +160,7 @@ function browserReachableServices(uiCoverage: UiCoverage): Set<string> {
 }
 
 /** Total physical RAM of `gadonghr-prod` (Task 13 brief: "2 vCPU / 4 GB / 80 GB"). */
-const TOTAL_HOST_MB = 4096
+const TOTAL_HOST_MB = 8192
 
 /**
  * Brief §1: "the total must fit 4 GB with room for the OS." The
@@ -205,14 +205,20 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
       'postgres',
       'rabbitmq',
       'redis',
+      'svc-attendance',
       'svc-audit',
       'svc-authz',
+      'svc-claims',
       'svc-config',
       'svc-crypto',
       'svc-docs',
       'svc-i18n',
+      'svc-leave',
       'svc-notify',
       'svc-onboarding',
+      'svc-payroll',
+      'svc-scheduler',
+      'svc-timesheet',
       'traefik',
       'vault',
       'web',
@@ -1022,12 +1028,28 @@ describe('deploy/docker-compose.prod.yml image tag variables (raw source, cross-
 
   const refs = extractImageRefs(composeSource)
 
-  test('finds a ${VAR:-fallback} image reference for all nine ghcr.io/mavrone81 services', () => {
+  test('finds a ${VAR:-fallback} image reference for all fifteen ghcr.io/mavrone81 services', () => {
     // Seven platform services + web + svc-onboarding, the first module
     // service to be served (UAT pack U2). If this count is wrong, every
     // test below is vacuous, so it is asserted on its own first.
     expect(refs.map((r) => r.service).sort()).toEqual(
-      ['svc-audit', 'svc-authz', 'svc-config', 'svc-crypto', 'svc-docs', 'svc-i18n', 'svc-notify', 'svc-onboarding', 'web'].sort(),
+      [
+        'svc-attendance',
+        'svc-audit',
+        'svc-authz',
+        'svc-claims',
+        'svc-config',
+        'svc-crypto',
+        'svc-docs',
+        'svc-i18n',
+        'svc-leave',
+        'svc-notify',
+        'svc-onboarding',
+        'svc-payroll',
+        'svc-scheduler',
+        'svc-timesheet',
+        'web',
+      ].sort(),
     )
   })
 

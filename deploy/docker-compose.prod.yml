@@ -91,6 +91,36 @@ services:
     image: ghcr.io/mavrone81/gadonghr-svc-onboarding:${GADONG_VERSION:-stable}
     pull_policy: always
 
+  svc-scheduler:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-scheduler:${GADONG_VERSION:-stable}
+    pull_policy: always
+
+  svc-timesheet:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-timesheet:${GADONG_VERSION:-stable}
+    pull_policy: always
+
+  svc-attendance:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-attendance:${GADONG_VERSION:-stable}
+    pull_policy: always
+
+  svc-leave:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-leave:${GADONG_VERSION:-stable}
+    pull_policy: always
+
+  svc-claims:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-claims:${GADONG_VERSION:-stable}
+    pull_policy: always
+
+  svc-payroll:
+    build: !reset null
+    image: ghcr.io/mavrone81/gadonghr-svc-payroll:${GADONG_VERSION:-stable}
+    pull_policy: always
+
   # `web` uses the exact same `GADONG_VERSION` variable as the seven
   # platform services above — see the file-level comment. Defaults to the
   # floating `:main` tag, which CI's `build-images` matrix publishes on

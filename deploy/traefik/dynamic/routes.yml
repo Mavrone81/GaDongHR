@@ -140,6 +140,54 @@ http:
       tls:
         certResolver: le
 
+    svc-scheduler:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/scheduler`)'
+      priority: 100
+      service: svc-scheduler
+      middlewares: [svc-scheduler-strip]
+      tls:
+        certResolver: le
+
+    svc-timesheet:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/timesheet`)'
+      priority: 100
+      service: svc-timesheet
+      middlewares: [svc-timesheet-strip]
+      tls:
+        certResolver: le
+
+    svc-attendance:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/attendance`)'
+      priority: 100
+      service: svc-attendance
+      middlewares: [svc-attendance-strip]
+      tls:
+        certResolver: le
+
+    svc-leave:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/leave`)'
+      priority: 100
+      service: svc-leave
+      middlewares: [svc-leave-strip]
+      tls:
+        certResolver: le
+
+    svc-claims:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/claims`)'
+      priority: 100
+      service: svc-claims
+      middlewares: [svc-claims-strip]
+      tls:
+        certResolver: le
+
+    svc-payroll:
+      rule: 'Host(`{{ env "PUBLIC_HOST" }}`) && PathPrefix(`/api/payroll`)'
+      priority: 100
+      service: svc-payroll
+      middlewares: [svc-payroll-strip]
+      tls:
+        certResolver: le
+
   # Every `/api/*` router strips its own prefix before forwarding — each
   # service's own NestJS routes are unprefixed (e.g. svc-config's
   # `rules.controller.ts` exposes `GET /rules`, not `GET /api/config/rules`)
@@ -168,6 +216,24 @@ http:
     svc-onboarding-strip:
       stripPrefix:
         prefixes: ["/api/onboarding"]
+    svc-scheduler-strip:
+      stripPrefix:
+        prefixes: ["/api/scheduler"]
+    svc-timesheet-strip:
+      stripPrefix:
+        prefixes: ["/api/timesheet"]
+    svc-attendance-strip:
+      stripPrefix:
+        prefixes: ["/api/attendance"]
+    svc-leave-strip:
+      stripPrefix:
+        prefixes: ["/api/leave"]
+    svc-claims-strip:
+      stripPrefix:
+        prefixes: ["/api/claims"]
+    svc-payroll-strip:
+      stripPrefix:
+        prefixes: ["/api/payroll"]
 
   services:
     web:
@@ -207,3 +273,33 @@ http:
       loadBalancer:
         servers:
           - url: "http://svc-onboarding:3000"
+
+    svc-scheduler:
+      loadBalancer:
+        servers:
+          - url: "http://svc-scheduler:3000"
+
+    svc-timesheet:
+      loadBalancer:
+        servers:
+          - url: "http://svc-timesheet:3000"
+
+    svc-attendance:
+      loadBalancer:
+        servers:
+          - url: "http://svc-attendance:3000"
+
+    svc-leave:
+      loadBalancer:
+        servers:
+          - url: "http://svc-leave:3000"
+
+    svc-claims:
+      loadBalancer:
+        servers:
+          - url: "http://svc-claims:3000"
+
+    svc-payroll:
+      loadBalancer:
+        servers:
+          - url: "http://svc-payroll:3000"
