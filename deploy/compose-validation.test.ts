@@ -441,6 +441,34 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
  * These assertions are what keep that from recurring. The comment in
  * docker-compose.yml explains it; this makes deleting it fail the build.
  */
+/**
+ * auto-deploy-gadonghr.sh runs an unconditional `compose pull` under
+ * `set -e` before `up -d`. That makes every upstream image reference in
+ * this file load-bearing for EVERY deploy: one dead reference and no
+ * service can ship, while the running containers look perfectly healthy.
+ * Exactly that happened on 2026-09-14 when Docker Hub stopped serving
+ * `minio/minio` — CI's e2e stack died at bring-up and the prod pull step
+ * would have too. These assertions keep the pin registry-qualified and
+ * release-pinned, and keep the e2e stack on the same binary as prod.
+ */
+describe('minio image survives the Docker Hub withdrawal (deploy blocker, 2026-09-14)', () => {
+  const prod = readFileSync(join(DEPLOY_DIR, 'docker-compose.yml'), 'utf8')
+  const e2e = readFileSync(join(DEPLOY_DIR, '..', 'test', 'e2e', 'docker-compose.yml'), 'utf8')
+  const pin = (src: string): string | undefined => /^\s*image:\s*(\S*minio\S*)\s*$/m.exec(src)?.[1]
+
+  test('prod pulls minio from quay.io, never the withdrawn Docker Hub repository', () => {
+    expect(pin(prod)).toMatch(/^quay\.io\/minio\/minio:/)
+  })
+
+  test('prod pins a dated RELEASE tag, not `latest` — the tag is what makes a rollback possible', () => {
+    expect(pin(prod)).toMatch(/:RELEASE\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z/)
+  })
+
+  test('the e2e stack runs the SAME minio pin as production', () => {
+    expect(pin(e2e)).toBe(pin(prod))
+  })
+})
+
 describe('Traefik stays on the shared gdr-edge network (SG/MY outage, 2026-09-04)', () => {
   let config: ComposeConfig
 

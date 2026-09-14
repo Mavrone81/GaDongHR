@@ -418,7 +418,21 @@ services:
       start_period: 10s
 
   minio:
-    image: minio/minio:latest
+    # quay.io, not Docker Hub, and a pinned release rather than `latest`.
+    # MinIO stopped publishing to Docker Hub; by 2026-09-14 `minio/minio`
+    # there answered "pull access denied / repository does not exist".
+    # This file used to point at it, and auto-deploy-gadonghr.sh runs an
+    # unconditional `compose pull` under `set -e` before `up -d` — so one
+    # dead upstream image reference blocked EVERY deploy of this stack,
+    # of any service, while the already-running containers looked fine.
+    # CI's e2e stack died the same way at bring-up.
+    #
+    # The tag is exactly the version production was running when this
+    # was fixed (`minio --version` in gadonghr-minio-1), so the switch
+    # changes where the image comes from and nothing about the binary or
+    # the on-disk data format in the minio_data volume. Bump it on
+    # purpose, with a release note read, never via `latest`.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     <<: *node-defaults
     mem_limit: 192m
     command: ["server", "/data"]
