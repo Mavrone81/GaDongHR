@@ -46,6 +46,8 @@ interface ComposeService {
   environment?: Record<string, string>
   volumes?: ComposeVolume[]
   logging?: ComposeLogging
+  /** `docker compose config --format json` renders a service's networks as a map keyed by network, not a list. */
+  networks?: Record<string, unknown>
 }
 
 interface ComposeFileSecret {
@@ -56,6 +58,7 @@ interface ComposeFileSecret {
 interface ComposeConfig {
   services: Record<string, ComposeService>
   secrets?: Record<string, ComposeFileSecret>
+  networks?: Record<string, { name?: string; external?: boolean }>
 }
 
 /**
@@ -425,6 +428,60 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
  * names, so a future service added to one side without the other still
  * fails loudly.
  */
+/**
+ * This Traefik is ALSO the edge proxy for a second, unrelated product on the
+ * same droplet: the GaDongHR Singapore/Malaysia fork (gdr.bevorasg.com),
+ * whose hrms-frontend and hrms-gateway sit on the external `gdr-edge`
+ * network. It was originally joined by hand (`docker network connect`,
+ * 2026-08-28). A hand attachment does not survive a container recreate, and
+ * the 222f53b deploy recreated Traefik on 2026-09-04: every gdr path
+ * returned 502 for ten days while hr.bevorasg.com stayed 200, and nothing in
+ * this repository mentioned the dependency at all.
+ *
+ * These assertions are what keep that from recurring. The comment in
+ * docker-compose.yml explains it; this makes deleting it fail the build.
+ */
+describe('Traefik stays on the shared gdr-edge network (SG/MY outage, 2026-09-04)', () => {
+  let config: ComposeConfig
+
+  beforeAll(() => {
+    config = runComposeConfig('docker-compose.yml', 'docker-compose.prod.yml')
+  })
+
+  test('traefik is on gdr-edge, so gdr.bevorasg.com can reach its backends', () => {
+    expect(Object.keys(config.services['traefik']?.networks ?? {})).toContain('gdr-edge')
+  })
+
+  // The service-level `networks` key REPLACES the one `*node-defaults`
+  // merges in rather than adding to it. Declaring only gdr-edge would drop
+  // Traefik off the internal network and take down every Thailand route at
+  // once — a worse outage than the one this block exists to prevent.
+  test('traefik is STILL on internal — adding gdr-edge must not replace it', () => {
+    expect(Object.keys(config.services['traefik']?.networks ?? {})).toContain('internal')
+  })
+
+  // External in both directions: this project never creates it (so the two
+  // stacks cannot race to own it) and never removes it on `down` (which
+  // would cut gdr.bevorasg.com off at the edge).
+  test('gdr-edge is external, under the exact name the SG/MY stack attaches to', () => {
+    expect(config.networks?.['gdr-edge']).toMatchObject({ name: 'gdr-edge', external: true })
+  })
+
+  test('internal is still owned by this project, not external', () => {
+    expect(config.networks?.['internal']?.external ?? false).toBe(false)
+  })
+
+  // gdr-edge is shared with another product. Only the edge proxy should
+  // straddle it; putting postgres, vault or svc-crypto there would expose
+  // them to a stack this repo does not control.
+  test('traefik is the ONLY service on gdr-edge', () => {
+    const onGdrEdge = Object.entries(config.services)
+      .filter(([, svc]) => Object.keys(svc.networks ?? {}).includes('gdr-edge'))
+      .map(([name]) => name)
+    expect(onGdrEdge).toEqual(['traefik'])
+  })
+})
+
 describe('Traefik file-provider dynamic routing (Task 16f)', () => {
   let composeConfig: ComposeConfig
   let dynamicConfig: TraefikDynamicConfig

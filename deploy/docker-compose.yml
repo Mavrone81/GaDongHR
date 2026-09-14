@@ -115,6 +115,25 @@ services:
     image: traefik:v3.1
     <<: *node-defaults
     mem_limit: 96m
+    # gdr-edge: this Traefik is ALSO the edge proxy for a second, unrelated
+    # product on the same droplet — the GaDongHR Singapore/Malaysia fork
+    # (`/root/gdr`, gdr.bevorasg.com, routed by the untracked
+    # `traefik/dynamic/gdr.yml`). That stack's hrms-frontend and
+    # hrms-gateway sit on the external `gdr-edge` network; Traefik must be
+    # on it too to reach them.
+    #
+    # Declared here rather than attached by hand because a hand attachment
+    # (`docker network connect`, the original setup on 2026-08-28) does not
+    # survive a container recreate. The 222f53b deploy recreated this
+    # container on 2026-09-04 and silently dropped it: every gdr path
+    # returned 502 for ten days while hr.bevorasg.com stayed 200, and
+    # nothing in this repo so much as mentioned the dependency.
+    #
+    # `internal` MUST stay listed. This key REPLACES the `networks` that
+    # `*node-defaults` merges in rather than adding to it, so listing only
+    # gdr-edge would drop Traefik off the internal network and break every
+    # Thailand route at once.
+    networks: [internal, gdr-edge]
     # Task 16f: the Docker provider (`--providers.docker=true` etc., what
     # used to be here) can never work on this host — Traefik's bundled
     # Docker client pins API version 1.24, the host daemon (Docker 29.6)
@@ -881,6 +900,21 @@ services:
 networks:
   internal:
     name: gadong-internal
+  # Owned and created by the Singapore/Malaysia stack, NOT by this file —
+  # see the comment on the `traefik` service. `external: true` is
+  # load-bearing in both directions:
+  #   - this project never creates it, so the two stacks cannot race to
+  #     own it, and
+  #   - `docker compose down` here never tries to remove it, which would
+  #     otherwise cut gdr.bevorasg.com off at the edge.
+  # The cost: `up` of the traefik service hard-fails on a host where the
+  # network does not exist yet. On a fresh box, create it first with
+  # `docker network create gdr-edge` (or bring up the gdr stack first).
+  # Stacks that never start traefik — e.g. CI's real-broker suite, which
+  # brings up only postgres + rabbitmq — are unaffected.
+  gdr-edge:
+    external: true
+    name: gdr-edge
 
 secrets:
   vault_approle_secret:
