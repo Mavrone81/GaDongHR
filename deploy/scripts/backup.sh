@@ -131,14 +131,33 @@ if [ -z "${VAULT_TOKEN:-}" ]; then
   log "WARNING: VAULT_TOKEN is not set — SKIPPING the Vault raft snapshot. This backup is INCOMPLETE: it cannot restore any encrypted field without a Vault snapshot from the same window."
   ok=false
 else
+  # The backup token is a periodic token (32-day period, renewable
+  # forever) so it never has to be a standing root credential; renew it
+  # on every run so a nightly cadence keeps it alive indefinitely. A
+  # failed renew is logged, not fatal — the snapshot attempt below is the
+  # real test, and it fails loudly on its own.
+  if ! compose exec -T -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN="$VAULT_TOKEN" vault \
+    vault token renew -increment=768h >/dev/null 2>&1; then
+    log "WARNING: could not renew VAULT_TOKEN (not periodic, or already expired?) — the snapshot below will show whether it still works."
+  fi
   log "Saving Vault raft snapshot..."
-  if compose exec -T -e VAULT_TOKEN="$VAULT_TOKEN" vault \
-    vault operator raft snapshot save - >"$WORKDIR/vault.snap"; then
+  # NOT `snapshot save -`: through `docker compose exec -T` that form
+  # returns exit 0 with ZERO bytes on stdout (verified on gadonghr-prod,
+  # Vault 1.17.6, 2026-09-20) — a silent empty vault.snap is worse than
+  # an error. Save to a file inside the container, copy it out, then
+  # assert the copy is non-empty before calling it OK.
+  SNAP_IN_CONTAINER="/tmp/gadonghr-vault-$$.snap"
+  if compose exec -T -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN="$VAULT_TOKEN" vault \
+      vault operator raft snapshot save "$SNAP_IN_CONTAINER" \
+     && compose cp "vault:${SNAP_IN_CONTAINER}" "$WORKDIR/vault.snap" \
+     && [ -s "$WORKDIR/vault.snap" ]; then
     log "Vault snapshot OK ($(du -h "$WORKDIR/vault.snap" | cut -f1))"
   else
-    log "ERROR: vault operator raft snapshot save failed."
+    log "ERROR: vault operator raft snapshot save failed or produced an empty file — this backup cannot restore any encrypted field."
+    rm -f "$WORKDIR/vault.snap"
     ok=false
   fi
+  compose exec -T vault rm -f "$SNAP_IN_CONTAINER" >/dev/null 2>&1 || true
 fi
 
 # ---------- 3. MinIO ----------

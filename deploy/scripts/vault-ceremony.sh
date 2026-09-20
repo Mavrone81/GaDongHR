@@ -79,6 +79,12 @@ die() { log "ERROR: $*"; exit 1; }
 compose() {
   docker compose -p "$PROJECT" "${COMPOSE_FILES[@]}" "$@"
 }
+# The vault image ships no VAULT_ADDR, so the CLI inside the container
+# defaults to https://127.0.0.1:8200 — but vault.hcl listens on plain
+# HTTP (tls_disable = true; TLS is terminated at the edge, not here).
+# Every `vault` CLI call below therefore passes the HTTP address
+# explicitly; without it the CLI fails with "server gave HTTP response
+# to HTTPS client" (seen on gadonghr-prod, 2026-09-20).
 
 # ---------- Arg parsing (confirmation gate — checked FIRST, no network
 # calls before this, so a bare/wrong invocation fails instantly and
@@ -152,7 +158,7 @@ log "IMPORTANT: VAULT_ROOT_TOKEN is about to be removed from deploy/.env and thi
 
 # ---------- Precondition: Vault reachable and unsealed ----------
 set +e
-STATUS_JSON="$(compose exec -T vault vault status -format=json 2>&1)"
+STATUS_JSON="$(compose exec -T -e VAULT_ADDR=http://127.0.0.1:8200 vault vault status -format=json 2>&1)"
 STATUS_RC=$?
 set -e
 case "$STATUS_RC" in
@@ -178,10 +184,10 @@ fi
 # Safe: cancelling a not-yet-complete rekey discards only the pending
 # init state (new key-shares/threshold/pgp-keys parameters), never any
 # existing unseal key or KEK. It does NOT touch encrypted data.
-REKEY_STATUS_JSON="$(compose exec -T vault vault operator rekey -status -format=json 2>&1)" || true
+REKEY_STATUS_JSON="$(compose exec -T -e VAULT_ADDR=http://127.0.0.1:8200 vault vault operator rekey -status -format=json 2>&1)" || true
 if [ -n "$REKEY_STATUS_JSON" ] && [ "$(jq -r '.started // false' <<<"$REKEY_STATUS_JSON" 2>/dev/null || echo false)" = true ]; then
   log "Found an incomplete previous rekey attempt (nonce $(jq -r '.nonce // "unknown"' <<<"$REKEY_STATUS_JSON")) — cancelling it before starting a fresh one."
-  compose exec -T vault vault operator rekey -cancel >/dev/null
+  compose exec -T -e VAULT_ADDR=http://127.0.0.1:8200 vault vault operator rekey -cancel >/dev/null
 fi
 
 # ---------- Stage the 5 officer public keys inside the vault container ----------
@@ -198,7 +204,7 @@ for i in "${!KEY_FILES[@]}"; do
   CONTAINER_PATHS+=("$cpath")
 done
 cleanup_staged_keys() {
-  compose exec -T vault rm -f /tmp/gadonghr-ceremony-pgp-*.asc >/dev/null 2>&1 || true
+  compose exec -T -e VAULT_ADDR=http://127.0.0.1:8200 vault rm -f /tmp/gadonghr-ceremony-pgp-*.asc >/dev/null 2>&1 || true
 }
 trap cleanup_staged_keys EXIT
 
@@ -206,7 +212,7 @@ PGP_KEYS_ARG="$(IFS=,; echo "${CONTAINER_PATHS[*]}")"
 
 # ---------- Step 1: vault operator rekey -init ----------
 log "Starting rekey: ${NEW_SHARES} shares, threshold ${NEW_THRESHOLD}, PGP-encrypted to ${#OFFICERS[@]} officers, -backup enabled (ceremony-window-only recovery)."
-INIT_JSON="$(compose exec -T vault vault operator rekey \
+INIT_JSON="$(compose exec -T -e VAULT_ADDR=http://127.0.0.1:8200 vault vault operator rekey \
   -init -format=json \
   -key-shares="$NEW_SHARES" \
   -key-threshold="$NEW_THRESHOLD" \
@@ -227,7 +233,7 @@ log "Rekey initialised (nonce ${NONCE}). ${REQUIRED} of the CURRENT ${CURRENT_T}
 
 # ---------- Step 2: submit the current unseal key over stdin (never as a
 # CLI argument, so it never appears in this container's process list) ----------
-UPDATE_JSON="$(printf '%s\n' "$VAULT_UNSEAL_KEY" | compose exec -T vault vault operator rekey -nonce="$NONCE" -format=json)"
+UPDATE_JSON="$(printf '%s\n' "$VAULT_UNSEAL_KEY" | compose exec -T -e VAULT_ADDR=http://127.0.0.1:8200 vault vault operator rekey -nonce="$NONCE" -format=json)"
 
 if [ "$(jq -r '.complete // false' <<<"$UPDATE_JSON")" != true ]; then
   PROGRESS="$(jq -r '.progress // "?"' <<<"$UPDATE_JSON")"
@@ -339,7 +345,7 @@ $(for o in "${OFFICERS[@]}"; do echo "  - ${SHARES_DIR}/${o}.share.b64"; done)
    the -backup copy (it exists solely to recover a lost share during
    this ceremony window; leaving it after every officer has their own
    share defeats the purpose of the split):
-     docker compose exec -e VAULT_TOKEN="\$VAULT_ROOT_TOKEN" vault vault operator rekey -backup-delete
+     docker compose exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN="\$VAULT_ROOT_TOKEN" vault vault operator rekey -backup-delete
 
 6. Then revoke the initial root token — there is no further standing use
    for it. Any future admin operation that genuinely needs Vault-level
@@ -348,7 +354,7 @@ $(for o in "${OFFICERS[@]}"; do echo "  - ${SHARES_DIR}/${o}.share.b64"; done)
    of 3 of the 5 officers' shares — the same trust model as unsealing,
    deliberately, rather than a long-lived credential sitting in .env
    again:
-     docker compose exec -e VAULT_TOKEN="\$VAULT_ROOT_TOKEN" vault vault token revoke -self
+     docker compose exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN="\$VAULT_ROOT_TOKEN" vault vault token revoke -self
 
    \$VAULT_ROOT_TOKEN is no longer in deploy/.env (removed above). If you
    did not already save it before running this script, it still exists

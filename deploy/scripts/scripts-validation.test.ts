@@ -382,3 +382,36 @@ describe('docs/07-operations/OPERATIONS-RUNBOOK.md §2 — reflects the real cer
     expect(contents).toMatch(/generate-root/)
   })
 })
+
+describe('Vault CLI calls reach the HTTP listener (gadonghr-prod, 2026-09-20)', () => {
+  // The hashicorp/vault image sets no VAULT_ADDR, so `vault` inside the
+  // container defaults to https://127.0.0.1:8200 while vault.hcl listens
+  // on plain HTTP. Every ceremony / verify / backup call failed on prod
+  // with "server gave HTTP response to HTTPS client" until the scripts
+  // passed the address explicitly. Pin that, and pin the snapshot fix.
+  const files = ['vault-ceremony.sh', 'vault-verify-ceremony.sh', 'backup.sh']
+  for (const f of files) {
+    test(`${f}: every docker-exec'd vault CLI call passes VAULT_ADDR=http://127.0.0.1:8200`, () => {
+      const contents = readFileSync(join(SCRIPTS_DIR, f), 'utf8')
+      const calls = contents
+        .split('\n')
+        .filter((l) => /exec\b/.test(l) && !/^\s*#/.test(l) && !/\b(log|die)\s+"/.test(l) && /\bvault\s+\\?$|\bvault\s+vault\s+(status|operator|token)/.test(l))
+      expect(calls.length).toBeGreaterThan(0)
+      for (const l of calls) expect(l).toContain('VAULT_ADDR=http://127.0.0.1:8200')
+    })
+  }
+
+  test('backup.sh never streams the raft snapshot to stdout (`snapshot save -` silently yields 0 bytes through compose exec) and asserts the copied file is non-empty', () => {
+    const contents = readFileSync(join(SCRIPTS_DIR, 'backup.sh'), 'utf8')
+    expect(contents).not.toMatch(/snapshot save -\s/)
+    expect(contents).toMatch(/snapshot save "\$SNAP_IN_CONTAINER"/)
+    expect(contents).toContain('compose cp "vault:${SNAP_IN_CONTAINER}" "$WORKDIR/vault.snap"')
+    expect(contents).toContain('[ -s "$WORKDIR/vault.snap" ]')
+  })
+
+  test('backup.sh renews the periodic backup token on every run, non-fatally', () => {
+    const contents = readFileSync(join(SCRIPTS_DIR, 'backup.sh'), 'utf8')
+    expect(contents).toContain('vault token renew -increment=768h')
+    expect(contents).toMatch(/if ! compose exec[^\n]*\n\s*vault token renew/)
+  })
+})

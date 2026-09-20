@@ -42,7 +42,7 @@ FAIL=false
 
 # ---------- 1. Total Shares / Threshold ----------
 set +e
-STATUS_JSON="$(compose exec -T vault vault status -format=json 2>&1)"
+STATUS_JSON="$(compose exec -T -e VAULT_ADDR=http://127.0.0.1:8200 vault vault status -format=json 2>&1)"
 STATUS_RC=$?
 set -e
 if [ "$STATUS_RC" != 0 ] && [ "$STATUS_RC" != 2 ]; then
@@ -86,7 +86,7 @@ fi
 # this script does not do that on your behalf. It reports what it can see
 # and says plainly what it cannot.
 set +e
-BACKUP_JSON="$(compose exec -T vault vault operator rekey -backup-retrieve -format=json 2>&1)"
+BACKUP_JSON="$(compose exec -T -e VAULT_ADDR=http://127.0.0.1:8200 vault vault operator rekey -backup-retrieve -format=json 2>&1)"
 BACKUP_RC=$?
 set -e
 if [ "$BACKUP_RC" -eq 0 ] && jq -e '.keys // .nonce' >/dev/null 2>&1 <<<"$BACKUP_JSON"; then
