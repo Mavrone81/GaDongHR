@@ -450,18 +450,36 @@ describe('deploy/docker-compose.yml + docker-compose.prod.yml (merged, canonical
  * `minio/minio` — CI's e2e stack died at bring-up and the prod pull step
  * would have too. These assertions keep the pin registry-qualified and
  * release-pinned, and keep the e2e stack on the same binary as prod.
+ *
+ * UPDATED: the second registry restricted the image too, so the reference now
+ * points at our own copy and is pinned BY DIGEST. The two assertions below
+ * changed because the DECISION changed, not because they were wrong — their
+ * intent is kept exactly: never depend on a registry that can stop serving us,
+ * and pin to something immutable so a rollback is possible. A digest is
+ * strictly stronger than a dated tag for the second of those, since a tag can
+ * be re-pointed and a digest cannot. The history above is left in place
+ * because it is why these tests exist at all.
+ *
+ * Note the split: this suite asserts the SHAPE of the decision (our registry,
+ * pinned by digest). Whether that digest is a REAL 64-hex value is
+ * `deploy/image-pin-validation.test.ts`'s job — so an unresolved placeholder
+ * fails there, loudly and at merge time, without making this suite's
+ * decision-level assertions red for a different reason.
  */
-describe('minio image survives the Docker Hub withdrawal (deploy blocker, 2026-09-14)', () => {
+describe('minio image is sourced from our own registry and pinned by digest (deploy blocker, 2026-09-14; upstream auth 2026-10-02)', () => {
   const prod = readFileSync(join(DEPLOY_DIR, 'docker-compose.yml'), 'utf8')
   const e2e = readFileSync(join(DEPLOY_DIR, '..', 'test', 'e2e', 'docker-compose.yml'), 'utf8')
   const pin = (src: string): string | undefined => /^\s*image:\s*(\S*minio\S*)\s*$/m.exec(src)?.[1]
 
-  test('prod pulls minio from quay.io, never the withdrawn Docker Hub repository', () => {
-    expect(pin(prod)).toMatch(/^quay\.io\/minio\/minio:/)
+  test('prod pulls minio from our own registry, never an upstream that can stop serving us', () => {
+    expect(pin(prod)).toMatch(/^ghcr\.io\/mavrone81\//)
+    expect(pin(prod)).not.toMatch(/^quay\.io\//)
+    expect(pin(prod)).not.toMatch(/^(docker\.io\/)?minio\/minio/)
   })
 
-  test('prod pins a dated RELEASE tag, not `latest` — the tag is what makes a rollback possible', () => {
-    expect(pin(prod)).toMatch(/:RELEASE\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z/)
+  test('prod pins by digest, not by a tag — a tag can be re-pointed, a digest cannot', () => {
+    expect(pin(prod)).toMatch(/@sha256:/)
+    expect(pin(prod)).not.toMatch(/:latest\b/)
   })
 
   test('the e2e stack runs the SAME minio pin as production', () => {
