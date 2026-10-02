@@ -74,11 +74,24 @@ function collectPins(): { pins: Pin[]; filesRead: number; bytesRead: number } {
 
 describe('compose image pins are real digests (hermetic — no registry, no docker)', () => {
   const { pins, filesRead, bytesRead } = collectPins()
+  // NOTE: a third test here once asserted `valid + invalid === total`. That is a
+  // tautology — a partition always sums to the whole, including over zero pins —
+  // so it was a green tick implying verification and supplying none, sitting
+  // directly below a guard that does real work. Removed rather than reworded.
+  // The test to apply: what input would make this line fail? If the answer is
+  // "none", strengthen it or delete it.
 
-  // A zero needs a non-empty haystack. Without this, a wrong path would make
-  // every assertion below pass over nothing at all.
-  test('the compose files were actually read', () => {
-    expect(filesRead).toBeGreaterThanOrEqual(3)
+  // A zero needs a non-empty haystack: without this, a wrong path would make the
+  // assertion below pass over nothing at all.
+  //
+  // EXACT coverage, not a floor. `>= 3` of four would have TOLERATED ONE MISSING
+  // FILE — so a compose file renamed or moved would be silently skipped and this
+  // suite would still go green, which is precisely the failure it exists to catch.
+  // Every intended path must be present, and the missing ones are NAMED.
+  test('every compose file this suite intends to check is present and was read', () => {
+    const missing = COMPOSE_FILES.filter((f) => !existsSync(f)).map((f) => f.replace(`${REPO_ROOT}/`, ''))
+    expect(missing).toEqual([])
+    expect(filesRead).toBe(COMPOSE_FILES.length)
     expect(bytesRead).toBeGreaterThan(1000)
   })
 
@@ -89,11 +102,4 @@ describe('compose image pins are real digests (hermetic — no registry, no dock
     ).toEqual([])
   })
 
-  // Reported, not asserted: the count is legitimately 0 before any image is
-  // pinned by digest and legitimately grows later, so asserting a number here
-  // would be a brittle expectation rather than a property.
-  test('pin inventory is reportable (diagnostic, not a threshold)', () => {
-    const valid = pins.filter((p) => VALID_DIGEST.test(p.value)).length
-    expect(valid + pins.filter((p) => !VALID_DIGEST.test(p.value)).length).toBe(pins.length)
-  })
 })
