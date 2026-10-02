@@ -168,7 +168,28 @@ fi
 # `:-stable`/formerly `:-main`/`:-latest` default regardless of which sha
 # was CI-verified above.
 export GADONG_VERSION="$remote_sha"
-compose pull
+
+# Pull only images this project publishes. The header above has always said
+# "Pull from GHCR only"; a bare `compose pull` never did that — it fetched
+# every image in the merge, including third-party upstreams, so one upstream
+# requiring authentication killed the deploy here under `set -e` before
+# `up -d` ever ran (2026-09-14 and again 2026-10-02). This brings the code
+# up to its own documentation.
+#
+# Scoped rather than made non-fatal, deliberately: "ignore pull failures for
+# images already present" also tolerates a NEW image that genuinely cannot be
+# fetched, and tolerates it invisibly. The third-party images are tag-pinned
+# and already cached, and `up -d` fetches anything missing on a fresh host,
+# so nothing needs them pulled here. Scope the FETCH; keep the VERIFICATION
+# total — the assertion below covers every image in the merge, ours and
+# third-party, and fails by name if any cannot be obtained.
+mapfile -t own_images < <(compose config --images | grep '^ghcr\.io/mavrone81/' | sort -u)
+[ "${#own_images[@]}" -gt 0 ] || die "no own-registry images resolved from the compose merge — refusing to deploy blind"
+log "Pulling ${#own_images[@]} own-registry image(s)"
+compose pull "${own_images[@]}"
+
+"$DEPLOY_DIR/scripts/assert-images-available.sh" || die "required images are not all obtainable — see IMAGE UNAVAILABLE lines above"
+
 compose up -d --remove-orphans
 
 # ---------- 6. Verify the NEW sha is actually live, per service ----------
