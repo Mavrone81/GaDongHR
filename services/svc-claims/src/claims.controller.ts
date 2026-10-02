@@ -1,6 +1,6 @@
-import { Body, Controller, Get, HttpException, Inject, Param, Patch, Post, Put, Query } from '@nestjs/common'
-import { GadongError, Public, RequirePermission, buildHealth, outboxDepth, withTransaction } from '@gadong/kernel'
-import type { HealthPayload } from '@gadong/kernel'
+import { Body, Controller, Get, HttpException, Inject, Param, Patch, Post, Put, Query, Req } from '@nestjs/common'
+import { GadongError, Public, RequirePermission, buildHealth, outboxDepth, scopeAllowsEmployee, withTransaction } from '@gadong/kernel'
+import type { AuthenticatedRequest, HealthPayload } from '@gadong/kernel'
 import type { Pool } from 'pg'
 import { ClaimTypesService } from './claim-types.service'
 import type { ClaimTypeInput } from './claim-types.service'
@@ -10,6 +10,7 @@ import type { ApprovalBandRow, NewApprovalBandRow } from './approval-bands.repos
 import { ClaimsService } from './claims.service'
 import type { ReceiptInput, ResubmitClaimInput, SubmitClaimInput, SubmitClaimResult } from './claims.service'
 import type { ApprovalDecision, ClaimRow, ReimbursementRoute } from './claims.repository'
+import { employeeOutOfScope } from './errors'
 
 /** DI token for the `claims` schema's connection pool — the same `Symbol` token pattern `svc-config`'s/`svc-leave`'s `DB_POOL` established. `app.module.ts` binds it to a real `pg.Pool` via kernel's `createPool`. */
 export const DB_POOL = Symbol('DB_POOL')
@@ -19,6 +20,9 @@ export const CRYPTO_HEALTH = Symbol('CRYPTO_HEALTH')
 export interface HealthCheckPort {
   check(): Promise<'up' | 'down'>
 }
+
+/** Minimal shape every OIDC-authenticated request carries once `OidcMiddleware`/`PermissionGuard` run — matches `services/svc-onboarding`'s `employee.controller.ts`'s use of the same kernel type. */
+type Req = AuthenticatedRequest
 
 interface ClaimTypeBody {
   code: string
@@ -40,7 +44,11 @@ interface ApprovalBandsBody {
 }
 
 interface SubmitClaimBody {
-  employeeId: string
+  /** Optional: the claim's employee is taken from the signed-in session
+   * (`resolveEmployeeId`). A caller whose `claim.submit` grant carries a
+   * scope wider than `'self'` may supply a different value here; an
+   * ordinary employee's request simply omits it. */
+  employeeId?: string
   claimTypeCode: string
   claimDate: string
   vendor: string
@@ -51,7 +59,8 @@ interface SubmitClaimBody {
 }
 
 interface ResubmitClaimBody {
-  employeeId: string
+  /** Same optional-override semantics as `SubmitClaimBody.employeeId` — see there. */
+  employeeId?: string
   claimDate?: string
   vendor?: string
   amountThb?: string
@@ -61,7 +70,6 @@ interface ResubmitClaimBody {
 }
 
 interface DecisionBody {
-  approverId: string
   decision: ApprovalDecision
   comment?: string
 }
@@ -83,12 +91,19 @@ interface RouteBody {
  * opening the transaction each write spans, via kernel's `withTransaction`,
  * so a state change and its outbox row commit or roll back together.
  *
- * Actor identity (`employeeId`/`approverId`) is carried explicitly in each
- * request body/query rather than derived from the authenticated principal —
- * the same precedent `services/svc-config`'s `RulesController` sets with
- * `approvedBy` in `POST /rules/:id/approve`'s body: no employee-identity
- * resolution service is wired into the kernel yet for any service to derive
- * "the calling employee" from `request.userId`.
+ * Actor identity (`employeeId` for submit/myClaims/resubmit, `approverId`
+ * for the decision routes) is derived from the authenticated session
+ * (`requireUserId`, `resolveEmployeeId` below), the same pattern
+ * `services/svc-leave`'s `leave.controller.ts` and
+ * `services/svc-onboarding`'s `employee.controller.ts` use. `employeeId`
+ * additionally accepts an explicit value in the request, gated on the
+ * caller's OWN `claim.submit` authz scope (not just permission presence)
+ * via kernel's `scopeAllowsEmployee` — the same mechanism
+ * `employee.read` uses for onboarding's profile scoping — so a role
+ * whose grant is wider than `'self'` may specify a different employee;
+ * an ordinary `'self'`-scoped grant's request is always resolved to the
+ * caller's own id regardless of what it supplies. The decision routes
+ * take no such override: `approverId` is always the signed-in caller.
  */
 @Controller()
 export class ClaimsController {
@@ -150,47 +165,58 @@ export class ClaimsController {
 
   @Post('claims')
   @RequirePermission('claim.submit')
-  async submit(@Body() body: SubmitClaimBody): Promise<SubmitClaimResult> {
-    const input: SubmitClaimInput = { ...body, receipts: body.receipts ?? [] }
-    return this.runFailClosed(() => withTransaction(this.pool, (tx) => this.claimsService.submit(tx, input)))
+  async submit(@Body() body: SubmitClaimBody, @Req() req: Req): Promise<SubmitClaimResult> {
+    return this.runFailClosed(async () => {
+      const employeeId = this.resolveEmployeeId(req, body.employeeId)
+      const input: SubmitClaimInput = { ...body, employeeId, receipts: body.receipts ?? [] }
+      return withTransaction(this.pool, (tx) => this.claimsService.submit(tx, input))
+    })
   }
 
   @Get('my/claims')
   @RequirePermission('claim.submit')
-  async myClaims(@Query('employeeId') employeeId: string, @Query('status') status?: string): Promise<{ claims: ClaimRow[] }> {
+  async myClaims(@Req() req: Req, @Query('employeeId') employeeId?: string, @Query('status') status?: string): Promise<{ claims: ClaimRow[] }> {
     // Read-only — goes through a repository method reachable off the
     // service's injected pool, matching every other read route in this
     // controller (no transaction needed for a read).
-    const claims = await this.runFailClosed(() => this.claimsService.listForEmployee(employeeId, status))
-    return { claims }
+    return this.runFailClosed(async () => {
+      const resolvedEmployeeId = this.resolveEmployeeId(req, employeeId)
+      const claims = await this.claimsService.listForEmployee(resolvedEmployeeId, status)
+      return { claims }
+    })
   }
 
   @Post('claims/:id/resubmit')
   @RequirePermission('claim.submit')
-  async resubmit(@Param('id') id: string, @Body() body: ResubmitClaimBody): Promise<SubmitClaimResult> {
-    const { employeeId, ...rest } = body
-    const input: ResubmitClaimInput = rest
-    return this.runFailClosed(() => withTransaction(this.pool, (tx) => this.claimsService.resubmit(tx, id, employeeId, input)))
+  async resubmit(@Param('id') id: string, @Body() body: ResubmitClaimBody, @Req() req: Req): Promise<SubmitClaimResult> {
+    return this.runFailClosed(async () => {
+      const { employeeId: requestedEmployeeId, ...rest } = body
+      const employeeId = this.resolveEmployeeId(req, requestedEmployeeId)
+      const input: ResubmitClaimInput = rest
+      return withTransaction(this.pool, (tx) => this.claimsService.resubmit(tx, id, employeeId, input))
+    })
   }
 
   @Post('claims/:id/decisions/manager')
   @RequirePermission('claim.approve')
-  async decideManager(@Param('id') id: string, @Body() body: DecisionBody): Promise<ClaimRow> {
-    return this.runFailClosed(() =>
-      withTransaction(this.pool, (tx) =>
-        this.claimsService.decide(tx, id, 'manager', body.approverId, body.decision, body.comment ?? null),
-      ),
-    )
+  async decideManager(@Param('id') id: string, @Body() body: DecisionBody, @Req() req: Req): Promise<ClaimRow> {
+    return this.runFailClosed(async () => {
+      const approverId = this.requireUserId(req)
+      return withTransaction(this.pool, (tx) =>
+        this.claimsService.decide(tx, id, 'manager', approverId, body.decision, body.comment ?? null),
+      )
+    })
   }
 
   @Post('claims/:id/decisions/finance')
   @RequirePermission('claim.approve.finance')
-  async decideFinance(@Param('id') id: string, @Body() body: DecisionBody): Promise<ClaimRow> {
-    return this.runFailClosed(() =>
-      withTransaction(this.pool, (tx) =>
-        this.claimsService.decide(tx, id, 'finance', body.approverId, body.decision, body.comment ?? null),
-      ),
-    )
+  async decideFinance(@Param('id') id: string, @Body() body: DecisionBody, @Req() req: Req): Promise<ClaimRow> {
+    return this.runFailClosed(async () => {
+      const approverId = this.requireUserId(req)
+      return withTransaction(this.pool, (tx) =>
+        this.claimsService.decide(tx, id, 'finance', approverId, body.decision, body.comment ?? null),
+      )
+    })
   }
 
   @Post('claims/:id/route')
@@ -231,6 +257,50 @@ export class ClaimsController {
     } catch {
       return 'down'
     }
+  }
+
+  /** `PermissionGuard` already denied any request with no authenticated principal before any handler on this controller runs (no route here is `@Public()` except `/health`) — this narrows the type, it does not add a new check. Same shape as `services/svc-leave`'s `leave.controller.ts` and `services/svc-onboarding`'s `employee.controller.ts`. */
+  private requireUserId(req: Req): string {
+    if (!req.userId) throw new HttpException({ code: 'CLM-401', message_i18n_key: 'claims.error.unauthenticated', details: [] }, 401)
+    return req.userId
+  }
+
+  /**
+   * `PermissionGuard` sets `request.authzScope` on every ALLOWED decision
+   * (kernel `guard.ts`) — reaching a handler that calls this at all means
+   * the guard already granted the route's permission, so this is only
+   * absent if a future refactor removed that assignment; fails closed
+   * rather than silently treating a missing scope as `'*'`. Same shape as
+   * `employee.controller.ts`'s own `requireScope`.
+   */
+  private requireScope(req: Req): NonNullable<Req['authzScope']> {
+    if (req.authzScope === undefined) {
+      throw new HttpException({ code: 'CLM-500', message_i18n_key: 'claims.error.scope_missing', details: [] }, 500)
+    }
+    return req.authzScope
+  }
+
+  /**
+   * Shared by `submit`/`myClaims`/`resubmit`. An ordinary employee's
+   * `claim.submit` grant resolves to `authzScope: 'self'` (kernel
+   * `authz.service.ts`'s "no org_scope_unit_id → 'self'" default — the
+   * same mechanism `employee.read` relies on for onboarding's profile
+   * scoping), so `requested` resolves to the caller's own id unless it
+   * already equals it. A caller whose grant is wider (an org-unit list or
+   * `'*'`) may supply a different `requested` within that scope —
+   * `scopeAllowsEmployee`'s third argument (`targetOrgUnitId`) is always
+   * `null` here because this service's local employee read-model
+   * (`employee-ref.repository.ts`) tracks only `employeeId`/`status`, no
+   * org unit; per that function's own doc, `null` resolves closed for an
+   * org-unit-scoped grant and correctly for `'self'`/`'*'`, the two
+   * scopes `claim.submit` grants use today.
+   */
+  private resolveEmployeeId(req: Req, requested: string | undefined): string {
+    const callerId = this.requireUserId(req)
+    if (!requested || requested === callerId) return callerId
+    const scope = this.requireScope(req)
+    if (!scopeAllowsEmployee(scope, callerId, requested, null)) throw employeeOutOfScope(requested)
+    return requested
   }
 
   /** The same translation `crypto.controller.ts`/`rules.controller.ts` perform: a thrown `GadongError` becomes the `{code, message_i18n_key, details}` envelope at its declared HTTP status; anything else is a genuine bug and is left to propagate. */

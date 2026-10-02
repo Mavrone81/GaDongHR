@@ -67,3 +67,8 @@ export function notClaimOwner(claimId: string): GadongError {
 export function invalidApprovalBandConfig(reason: string): GadongError {
   return new GadongError('CLM-016', 'claims.error.invalid_approval_band_config', 400, [{ reason }])
 }
+
+/** `requestedEmployeeId` falls outside the caller's `claim.submit` authz scope. Same shape as `services/svc-onboarding`'s `employeeOutOfScope`. */
+export function employeeOutOfScope(requestedEmployeeId: string): GadongError {
+  return new GadongError('CLM-021', 'claims.error.employee_out_of_scope', 403, [{ employeeId: requestedEmployeeId }])
+}

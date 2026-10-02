@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 import type { Pool } from 'pg'
+import { HttpException } from '@nestjs/common'
 import { CryptoClient, PERMISSION_METADATA_KEY, PUBLIC_METADATA_KEY } from '@gadong/kernel'
 import { ClaimsController } from './claims.controller'
 import type { HealthCheckPort } from './claims.controller'
@@ -8,6 +9,7 @@ import { ClaimTypesService } from './claim-types.service'
 import { ApprovalBandsRepository } from './approval-bands.repository'
 import { ApprovalBandsService } from './approval-bands.service'
 import { ClaimsRepository } from './claims.repository'
+import type { ClaimRow } from './claims.repository'
 import { ClaimsService } from './claims.service'
 import { FakeClaimsDb } from './testing/fake-db'
 import { fakeCryptoTransport } from './testing/fake-crypto-transport'
@@ -21,6 +23,13 @@ function fakePool(overrides: Partial<Pool> = {}): Pool {
 
 function fakeHealthCheck(result: 'up' | 'down' = 'up'): HealthCheckPort {
   return { check: jest.fn().mockResolvedValue(result) }
+}
+
+/** Same shape as `services/svc-onboarding`'s `employee.controller.test.ts`'s `reqWith` — the minimal `AuthenticatedRequest` fake every derive-from-token test needs. `authzScope` defaults to `'self'`, the real default an ordinary `claim.submit` grant resolves to (kernel `authz.service.ts`'s "no org_scope_unit_id → 'self'"), not `'*'` — a test that defaults to `'*'` would never exercise the scope check it's supposed to prove. */
+function reqWith(userId?: string, authzScope: string[] | '*' | 'self' = 'self'): { userId?: string; authzScope?: string[] | '*' | 'self' } {
+  const r: { userId?: string; authzScope?: string[] | '*' | 'self' } = { authzScope }
+  if (userId !== undefined) r.userId = userId
+  return r
 }
 
 function makeController(pool: Pool = fakePool(), health: HealthCheckPort = fakeHealthCheck()): ClaimsController {
@@ -181,19 +190,126 @@ describe('ClaimsController — end-to-end wiring smoke test', () => {
       receiptRequired: true,
     })
 
-    const result = await controller.submit({
-      employeeId: 'emp-1',
-      claimTypeCode: 'travel',
-      claimDate: '2026-08-01',
-      vendor: 'BTS',
-      amountThb: '500.00',
-      receipts: [{ fileRef: 'storage-key-1' }],
-    })
+    const result = await controller.submit(
+      {
+        claimTypeCode: 'travel',
+        claimDate: '2026-08-01',
+        vendor: 'BTS',
+        amountThb: '500.00',
+        receipts: [{ fileRef: 'storage-key-1' }],
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- fake request shape, same pattern employee.controller.test.ts uses.
+      reqWith('emp-1') as any,
+    )
 
     expect(result.claim.status).toBe('pending')
 
-    const { claims } = await controller.myClaims('emp-1')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see above.
+    const { claims } = await controller.myClaims(reqWith('emp-1') as any, undefined)
     expect(claims).toHaveLength(1)
     expect(claims[0]?.id).toBe(result.claim.id)
+  })
+})
+
+/**
+ * Every route that accepts an `employeeId` resolves it through
+ * `resolveEmployeeId`. PARAMETERIZED (`it.each`, not one test per route)
+ * so a route added later is exercised the same way as the three here
+ * once it's added to `CASES` below — a per-route test would silently
+ * stop covering a route nobody's looked at since. Precisely what the
+ * `it.each`/denominator pair buys, stated plainly: it catches someone
+ * editing `CASES` incorrectly (removing an entry, or a count that
+ * doesn't match the list); it does not, by itself, notice a new route
+ * added to the controller that was never added to `CASES`. `resolveEmployeeId`
+ * runs before any DB call in every one of these handlers, so a bare
+ * `makeController()` (no transactional pool) is enough.
+ */
+describe('ClaimsController — employeeId is always derived from the session, never trusted from the request', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- fake request shape, same pattern employee.controller.test.ts uses throughout this file.
+  type FakeReq = any
+  type Case = { name: string; call: (controller: ClaimsController, req: FakeReq) => Promise<unknown> }
+
+  const CASES: Case[] = [
+    {
+      name: 'submit',
+      call: (controller, req) => controller.submit({ employeeId: 'emp-2', claimTypeCode: 'travel', claimDate: '2026-08-01', vendor: 'BTS' }, req),
+    },
+    { name: 'myClaims', call: (controller, req) => controller.myClaims(req, 'emp-2') },
+    { name: 'resubmit', call: (controller, req) => controller.resubmit('claim-id-does-not-matter', { employeeId: 'emp-2' }, req) },
+  ]
+
+  it.each(CASES)(
+    '$name: rejects an employeeId outside the caller\'s claim.submit scope with 403',
+    async ({ call }) => {
+      const controller = makeController()
+      const req = reqWith('emp-1') // authzScope defaults to 'self' — the real default an ordinary claim.submit grant resolves to.
+
+      let caught: unknown
+      try {
+        await call(controller, req)
+      } catch (err) {
+        caught = err
+      }
+
+      expect(caught).toBeInstanceOf(HttpException)
+      expect((caught as HttpException).getStatus()).toBe(403)
+      expect((caught as HttpException).getResponse()).toMatchObject({ code: 'CLM-021' })
+    },
+  )
+
+  it(`denominator check — every route that accepts an employeeId is covered above: ${CASES.length} of 3 (submit, myClaims, resubmit)`, () => {
+    expect(CASES.map((c) => c.name).sort()).toEqual(['myClaims', 'resubmit', 'submit'])
+  })
+
+  it('does NOT reject when employeeId matches the caller\'s own id, or is omitted entirely — self-service keeps working', async () => {
+    const controller = makeController()
+    const req = reqWith('emp-1')
+
+    await expect(controller.myClaims(req, 'emp-1')).resolves.toMatchObject({ claims: [] })
+    await expect(controller.myClaims(req, undefined)).resolves.toMatchObject({ claims: [] })
+  })
+})
+
+/**
+ * `DecisionBody` has no `approverId` field — TypeScript types are
+ * compile-time only, so this suite verifies the runtime behaviour
+ * directly rather than relying on the type alone: `claimsService.decide`
+ * is spied on (no real DB logic runs), and the fourth argument it's
+ * called with is always `req.userId`, independent of any extra field a
+ * caller's JSON body happens to carry.
+ */
+describe('ClaimsController — approverId is always derived from the session, never trusted from the request', () => {
+  function makeControllerWithTransactionalPool(): ClaimsController {
+    return makeController(fakeTransactionalPool(new FakeClaimsDb()))
+  }
+
+  it('decideManager always passes the authenticated caller\'s id as approverId to ClaimsService.decide', async () => {
+    const controller = makeControllerWithTransactionalPool()
+    const decideSpy = jest.spyOn(ClaimsService.prototype, 'decide').mockResolvedValue({} as unknown as ClaimRow)
+    const req = reqWith('manager-1')
+    // `as unknown as ...`, not a real `DecisionBody` literal — the type no
+    // longer declares `approverId`; this constructs a plain object with an
+    // extra field to verify the runtime behaviour independent of the type.
+    const bodyWithExtraField = { decision: 'approved', approverId: 'other-id' } as unknown as { decision: 'approved'; comment?: string }
+
+    await controller.decideManager('claim-1', bodyWithExtraField, req)
+
+    expect(decideSpy).toHaveBeenCalledWith(expect.anything(), 'claim-1', 'manager', 'manager-1', 'approved', null)
+    decideSpy.mockRestore()
+  })
+
+  it('decideFinance always passes the authenticated caller\'s id as approverId to ClaimsService.decide', async () => {
+    const controller = makeControllerWithTransactionalPool()
+    const decideSpy = jest.spyOn(ClaimsService.prototype, 'decide').mockResolvedValue({} as unknown as ClaimRow)
+    const req = reqWith('finance-1')
+    const bodyWithExtraField = { decision: 'rejected', comment: 'bad vendor', approverId: 'other-id' } as unknown as {
+      decision: 'rejected'
+      comment?: string
+    }
+
+    await controller.decideFinance('claim-1', bodyWithExtraField, req)
+
+    expect(decideSpy).toHaveBeenCalledWith(expect.anything(), 'claim-1', 'finance', 'finance-1', 'rejected', 'bad vendor')
+    decideSpy.mockRestore()
   })
 })
