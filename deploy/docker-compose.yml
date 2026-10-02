@@ -432,7 +432,7 @@ services:
     # changes where the image comes from and nothing about the binary or
     # the on-disk data format in the minio_data volume. Bump it on
     # purpose, with a release note read, never via `latest`.
-    image: ghcr.io/mavrone81/gadonghr-minio@sha256:UNRESOLVED-PENDING-MIRROR-PUBLISH
+    image: ghcr.io/mavrone81/gadonghr-minio@sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2
     <<: *node-defaults
     mem_limit: 192m
     command: ["server", "/data"]

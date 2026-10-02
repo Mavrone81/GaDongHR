@@ -130,7 +130,7 @@ services:
     # Hub's `minio/minio` was withdrawn, and this stack failed at bring-up
     # ("pull access denied") on every CI run from 2026-09-14 until fixed.
     # Keep the two pins identical so e2e exercises the production binary.
-    image: ghcr.io/mavrone81/gadonghr-minio@sha256:UNRESOLVED-PENDING-MIRROR-PUBLISH
+    image: ghcr.io/mavrone81/gadonghr-minio@sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2
     <<: *node-defaults
     command: ["server", "/data"]
     environment:
