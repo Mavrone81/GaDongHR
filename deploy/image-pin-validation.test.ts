@@ -126,22 +126,33 @@ describe('compose image pins are real digests (hermetic — no registry, no dock
   // A zero needs a non-empty haystack: without this, a wrong path would make the
   // assertion below pass over nothing at all.
   //
-  // EXACT coverage, not a floor. `>= 3` of four would have TOLERATED ONE MISSING
-  // FILE — so a compose file renamed or moved would be silently skipped and this
-  // suite would still go green, which is precisely the failure it exists to catch.
-  // Every intended path must be present, and the missing ones are NAMED.
+  // THREE SEPARATE PROPERTIES, asserted separately rather than collapsed: the
+  // derived set is non-empty, every known file is PRESENT, and none of them is
+  // MISSED BY THE DERIVATION. Collapsing presence into the superset condition is
+  // how the presence property was lost once already — see the note on `absent`.
   test('the derived compose-file set is non-empty, covers every known file, and was read', () => {
     // Non-empty: a derivation that matched nothing would make the pin assertion
     // below pass over zero pins.
     expect(COMPOSE_FILES.length).toBeGreaterThan(0)
 
-    // SUPERSET of what is known to exist: catches a derivation that silently
-    // stopped finding files (a renamed directory, a changed name pattern, a
-    // skip-list entry added too broadly) rather than trusting the scan.
+    // PRESENT: every known compose file still exists. This is a separate property
+    // from the superset check below and must not be folded into it — an earlier
+    // version wrote `existsSync(f) && !derived.has(f)`, and that `existsSync(f) &&`
+    // filtered out precisely the file that had gone, so deleting or renaming a
+    // watched compose file left the suite green while one of four files was no
+    // longer scanned at all.
+    //
+    // The cost is deliberate and correct: deleting a watched file now fails until
+    // KNOWN_COMPOSE_FILES is updated. Removing a file from the set being guarded
+    // should require editing the list that names it.
+    const absent = KNOWN_COMPOSE_FILES.filter((f) => !existsSync(f)).map((f) => relative(REPO_ROOT, f))
+    expect(absent).toEqual([])
+
+    // SUPERSET: of the known files, none is missed by the derivation. Catches a
+    // scan that silently stopped finding files (a renamed directory, a changed
+    // name pattern, a skip-list entry added too broadly) rather than trusting it.
     const derived = new Set(COMPOSE_FILES)
-    const missingKnown = KNOWN_COMPOSE_FILES.filter((f) => existsSync(f) && !derived.has(f)).map((f) =>
-      relative(REPO_ROOT, f),
-    )
+    const missingKnown = KNOWN_COMPOSE_FILES.filter((f) => !derived.has(f)).map((f) => relative(REPO_ROOT, f))
     expect(missingKnown).toEqual([])
 
     // And every derived file was actually opened and had content.
