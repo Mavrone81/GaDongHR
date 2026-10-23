@@ -100,7 +100,7 @@ function createHttpHealthCheck(url: string): HealthCheckPort {
   return {
     async check() {
       try {
-        const res = await fetch(url)
+        const res = await fetch(url, { signal: AbortSignal.timeout(1_000) }
         return res.ok ? 'up' : 'down'
       } catch {
         return 'down'

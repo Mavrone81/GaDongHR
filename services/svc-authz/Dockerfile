@@ -4,7 +4,7 @@
 # other service asks this service's POST /decide whether the caller may
 # proceed and within which org-unit scope. Mirrors services/svc-config's
 # Dockerfile (Task 7), itself copied from services/svc-crypto (Task 6): the
-# template every services/* image follows — multi-stage, node:22-alpine,
+# template every services/* image follows — multi-stage, node:22.23.4-alpine,
 # non-root, ARG GADONG_BUILD_SHA.
 #
 # Build context is the repository ROOT (a pnpm workspace: svc-authz depends
@@ -13,7 +13,7 @@
 #
 #   docker build -f services/svc-authz/Dockerfile -t gadonghr/svc-authz:local .
 
-FROM node:22-alpine AS base
+FROM node:22.23.4-alpine AS base
 WORKDIR /app
 RUN corepack enable
 
@@ -35,7 +35,7 @@ RUN npx tsc -b services/svc-authz
 RUN pnpm install --frozen-lockfile --prod
 
 # ---------- runtime ----------
-FROM node:22-alpine AS runtime
+FROM node:22.23.4-alpine AS runtime
 ARG GADONG_BUILD_SHA
 ENV GADONG_BUILD_SHA=${GADONG_BUILD_SHA} \
     NODE_ENV=production

@@ -6,7 +6,7 @@
 # image exists so the service deploys and has a correct, encryption-shaped
 # database before any of that lands. Mirrors services/svc-config/Dockerfile
 # (Task 7) and services/svc-attendance/Dockerfile (Task 14), the template
-# every services/* image copies: multi-stage, node:22-alpine, non-root,
+# every services/* image copies: multi-stage, node:22.23.4-alpine, non-root,
 # ARG GADONG_BUILD_SHA. The root `.dockerignore`'s `**/*.tsbuildinfo` rule
 # is what makes `tsc -b` actually emit `dist` into this image instead of
 # silently treating it as already-built.
@@ -17,7 +17,7 @@
 #
 #   docker build -f services/svc-payroll/Dockerfile -t gadonghr/svc-payroll:local .
 
-FROM node:22-alpine AS base
+FROM node:22.23.4-alpine AS base
 WORKDIR /app
 RUN corepack enable
 
@@ -39,7 +39,7 @@ RUN npx tsc -b services/svc-payroll
 RUN pnpm install --frozen-lockfile --prod
 
 # ---------- runtime ----------
-FROM node:22-alpine AS runtime
+FROM node:22.23.4-alpine AS runtime
 ARG GADONG_BUILD_SHA
 ENV GADONG_BUILD_SHA=${GADONG_BUILD_SHA} \
     NODE_ENV=production

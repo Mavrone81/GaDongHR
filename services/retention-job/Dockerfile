@@ -2,7 +2,7 @@
 #
 # retention-job — nightly PDPA retention & crypto-erasure worker (Task 14).
 # Mirrors services/svc-config/Dockerfile, the template every services/*
-# image copies: multi-stage, node:22-alpine, non-root, ARG GADONG_BUILD_SHA.
+# image copies: multi-stage, node:22.23.4-alpine, non-root, ARG GADONG_BUILD_SHA.
 #
 # ONE deliberate difference from every other service's Dockerfile: no
 # `EXPOSE 3000`. This container opens no port — `src/main.ts` runs
@@ -18,7 +18,7 @@
 #
 #   docker build -f services/retention-job/Dockerfile -t gadonghr/retention-job:local .
 
-FROM node:22-alpine AS base
+FROM node:22.23.4-alpine AS base
 WORKDIR /app
 RUN corepack enable
 
@@ -40,7 +40,7 @@ RUN npx tsc -b services/retention-job
 RUN pnpm install --frozen-lockfile --prod
 
 # ---------- runtime ----------
-FROM node:22-alpine AS runtime
+FROM node:22.23.4-alpine AS runtime
 ARG GADONG_BUILD_SHA
 ENV GADONG_BUILD_SHA=${GADONG_BUILD_SHA} \
     NODE_ENV=production

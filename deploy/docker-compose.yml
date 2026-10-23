@@ -58,7 +58,7 @@ x-node-defaults: &node-defaults
 x-http-health: &http-health
   test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
   interval: 15s
-  timeout: 5s
+  timeout: 15s
   retries: 10
   start_period: 20s
 
@@ -189,7 +189,7 @@ services:
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 15s
-      timeout: 5s
+      timeout: 15s
       retries: 5
       start_period: 10s
 
