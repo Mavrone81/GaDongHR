@@ -6,7 +6,7 @@
 # database shape before any of that lands. Mirrors
 # services/svc-attendance/Dockerfile (Task 14), which itself mirrors
 # services/svc-config/Dockerfile (Task 7), the template every services/*
-# image copies: multi-stage, node:22-alpine, non-root, ARG
+# image copies: multi-stage, node:22.23.4-alpine, non-root, ARG
 # GADONG_BUILD_SHA. The root `.dockerignore`'s `**/*.tsbuildinfo` rule is
 # what makes `tsc -b` actually emit `dist` into this image instead of
 # silently treating it as already-built.
@@ -17,7 +17,7 @@
 #
 #   docker build -f services/svc-leave/Dockerfile -t gadonghr/svc-leave:local .
 
-FROM node:22-alpine AS base
+FROM node:22.23.4-alpine AS base
 WORKDIR /app
 RUN corepack enable
 
@@ -39,7 +39,7 @@ RUN npx tsc -b services/svc-leave
 RUN pnpm install --frozen-lockfile --prod
 
 # ---------- runtime ----------
-FROM node:22-alpine AS runtime
+FROM node:22.23.4-alpine AS runtime
 ARG GADONG_BUILD_SHA
 ENV GADONG_BUILD_SHA=${GADONG_BUILD_SHA} \
     NODE_ENV=production

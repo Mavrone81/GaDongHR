@@ -3,7 +3,7 @@
 # svc-docs — PDF rendering (employment contracts, payslips) with embedded
 # Thai (Sarabun) and Simplified Chinese (Noto Sans SC) fonts, per ADR-008
 # and I18N-GUIDE.md §1 rule 6. Mirrors services/svc-config/Dockerfile, the
-# template every services/* image copies: multi-stage, node:22-alpine,
+# template every services/* image copies: multi-stage, node:22.23.4-alpine,
 # non-root, ARG GADONG_BUILD_SHA.
 #
 # Build context is the repository ROOT (a pnpm workspace: svc-docs depends
@@ -12,7 +12,7 @@
 #
 #   docker build -f services/svc-docs/Dockerfile -t gadonghr/svc-docs:local .
 
-FROM node:22-alpine AS base
+FROM node:22.23.4-alpine AS base
 WORKDIR /app
 RUN corepack enable
 
@@ -34,7 +34,7 @@ RUN npx tsc -b services/svc-docs
 RUN pnpm install --frozen-lockfile --prod
 
 # ---------- runtime ----------
-FROM node:22-alpine AS runtime
+FROM node:22.23.4-alpine AS runtime
 ARG GADONG_BUILD_SHA
 ENV GADONG_BUILD_SHA=${GADONG_BUILD_SHA} \
     NODE_ENV=production \

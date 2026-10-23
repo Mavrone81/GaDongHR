@@ -39,7 +39,7 @@
 #
 # CI (Task 15) builds this way, same as every services/*/Dockerfile.
 
-FROM node:22-alpine AS base
+FROM node:22.23.4-alpine AS base
 WORKDIR /app
 RUN corepack enable
 

@@ -43,9 +43,11 @@ export class AttendanceController {
   @Get('health')
   @Public()
   async health(): Promise<HealthPayload> {
-    const db = await this.checkDb()
-    const crypto = await this.cryptoHealth.check()
-    const face_engine = await this.faceEngineHealth.check()
+    const [db, crypto, face_engine] = await Promise.all([
+      this.checkDb(),
+      this.cryptoHealth.check(),
+      this.faceEngineHealth.check(),
+    ])
     // "A stuck outbox must be observable" (event-bus task) — a
     // `attendance.punch`/`attendance.liveness_failed` row the relay has
     // fallen behind on must surface here, the one place an operator already
